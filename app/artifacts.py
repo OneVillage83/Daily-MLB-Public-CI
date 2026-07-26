@@ -99,6 +99,12 @@ def _validate_relative_path(relative_path: str | os.PathLike[str]) -> Path:
     return Path(text)
 
 
+def validate_artifact_relpath(relative_path: str | os.PathLike[str]) -> str:
+    """Return a canonical contained-relative artifact reference."""
+
+    return _validate_relative_path(relative_path).as_posix()
+
+
 def resolve_contained_path(
     root: str | os.PathLike[str],
     relative_path: str | os.PathLike[str],

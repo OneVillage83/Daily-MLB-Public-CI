@@ -14,13 +14,14 @@ from app.redaction import redact_text
 from app.fielding_grain_migration import FORMAL_SCHEMA_V6_STATEMENTS
 
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 MIGRATION_V1_NAME = "formal_phase1_schema"
 MIGRATION_V2_NAME = "phase1_odds_history_and_freshness"
 MIGRATION_V3_NAME = "release_candidate_evidence_ledger"
 MIGRATION_V4_NAME = "release_candidate_policy_enforcement"
 MIGRATION_V5_NAME = "mlb_stats_persistence_foundation"
 MIGRATION_V6_NAME = "retrosheet_fielding_source_row_grain"
+MIGRATION_V7_NAME = "manual_pipeline_run_controller"
 
 DSE_MLB_ML_CANDIDATE_V1_GATE_CODES = (
     "prediction_valid",
@@ -61,6 +62,59 @@ FAILURE_STAGES = (
 
 _RUN_STATUS_SQL = ", ".join(f"'{value}'" for value in RUN_STATUSES)
 _FAILURE_STAGE_SQL = ", ".join(f"'{value}'" for value in FAILURE_STAGES)
+PIPELINE_RUN_STATUSES = (
+    "pending",
+    "running",
+    "succeeded",
+    "succeeded_with_warnings",
+    "degraded",
+    "failed",
+)
+PIPELINE_PHASE_STATUSES = (
+    "pending",
+    "running",
+    "succeeded",
+    "succeeded_with_warnings",
+    "degraded",
+    "failed",
+    "skipped",
+    "reused",
+)
+PIPELINE_PHASE_KEYS = (
+    "daily_slate",
+    "game_state",
+    "baseball_intelligence_assembly",
+    "odds_weather",
+    "data_quality",
+    "matchup_packet",
+    "model_feature_set",
+    "predictions",
+    "value_engine",
+    "recommendation_gate",
+    "rankings",
+    "pdf_report",
+    "infographic",
+    "final_qc",
+    "human_review",
+)
+PIPELINE_TRANSITION_TYPES = (
+    "created",
+    "state_transition",
+    "resume",
+    "retry",
+    "reuse",
+    "forced_refresh",
+)
+_PIPELINE_RUN_STATUS_SQL = ", ".join(
+    f"'{value}'" for value in PIPELINE_RUN_STATUSES
+)
+_PIPELINE_PHASE_STATUS_SQL = ", ".join(
+    f"'{value}'" for value in PIPELINE_PHASE_STATUSES
+)
+_PIPELINE_PHASE_KEY_SQL = ", ".join(f"'{value}'" for value in PIPELINE_PHASE_KEYS)
+_PIPELINE_TRANSITION_TYPE_SQL = ", ".join(
+    f"'{value}'" for value in PIPELINE_TRANSITION_TYPES
+)
 ODDS_FRESHNESS_STATUSES = ("fresh", "aging", "stale", "unknown")
 _ODDS_FRESHNESS_SQL = ", ".join(
     f"'{value}'" for value in ODDS_FRESHNESS_STATUSES
@@ -2535,6 +2589,249 @@ FORMAL_SCHEMA_V5_STATEMENTS = (
 )
 
 
+FORMAL_SCHEMA_V7_STATEMENTS = (
+    "DROP TRIGGER publication_batches_validate_draft",
+    f"""
+    CREATE TABLE _collector_runs_v7 (
+        run_id TEXT PRIMARY KEY,
+        requested_date TEXT NOT NULL CHECK (
+            requested_date GLOB
+            '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+        ),
+        status TEXT NOT NULL CHECK (status IN ({_RUN_STATUS_SQL})),
+        created_at TEXT NOT NULL,
+        queued_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        updated_at TEXT NOT NULL,
+        failure_stage TEXT CHECK (failure_stage IN ({_FAILURE_STAGE_SQL})),
+        error_message TEXT,
+        artifact_relpath TEXT,
+        app_version TEXT NOT NULL,
+        schema_version INTEGER NOT NULL CHECK (
+            schema_version IN (1, 2, 3, 4, 5, 6, 7)
+        ),
+        CHECK (
+            (status = 'failed' AND failure_stage IS NOT NULL)
+            OR (status <> 'failed' AND failure_stage IS NULL)
+        ),
+        CHECK (
+            (status = 'queued' AND started_at IS NULL AND completed_at IS NULL)
+            OR (status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL)
+            OR (status IN ('completed', 'completed_with_warnings')
+                AND started_at IS NOT NULL AND completed_at IS NOT NULL)
+            OR (status = 'failed' AND completed_at IS NOT NULL)
+        )
+    )
+    """,
+    """
+    INSERT INTO _collector_runs_v7(
+        run_id, requested_date, status, created_at, queued_at, started_at,
+        completed_at, updated_at, failure_stage, error_message,
+        artifact_relpath, app_version, schema_version
+    )
+    SELECT
+        run_id, requested_date, status, created_at, queued_at, started_at,
+        completed_at, updated_at, failure_stage, error_message,
+        artifact_relpath, app_version, schema_version
+    FROM collector_runs
+    """,
+    "DROP TABLE collector_runs",
+    "ALTER TABLE _collector_runs_v7 RENAME TO collector_runs",
+    """
+    CREATE TRIGGER publication_batches_validate_draft
+    BEFORE INSERT ON publication_batches
+    BEGIN
+        SELECT CASE WHEN NOT EXISTS (
+            SELECT 1 FROM card_drafts AS draft
+            JOIN collector_runs AS run ON run.run_id = draft.run_id
+            WHERE draft.draft_id = NEW.draft_id
+              AND draft.run_id = NEW.run_id
+              AND draft.requested_date = NEW.requested_date
+              AND draft.policy_version = NEW.policy_version
+              AND draft.draft_checksum = NEW.draft_checksum
+              AND draft.source_checksum = NEW.source_checksum
+              AND run.requested_date = NEW.requested_date
+        ) THEN RAISE(ABORT, 'publication batch draft evidence mismatch') END;
+    END
+    """,
+    f"""
+    CREATE TABLE pipeline_runs (
+        run_id TEXT PRIMARY KEY,
+        sport TEXT NOT NULL CHECK (sport = 'MLB'),
+        run_type TEXT NOT NULL CHECK (run_type = 'manual_daily'),
+        requested_date TEXT NOT NULL CHECK (
+            requested_date GLOB
+            '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+        ),
+        as_of_time TEXT NOT NULL CHECK (length(trim(as_of_time)) > 0),
+        timezone TEXT NOT NULL CHECK (length(trim(timezone)) > 0),
+        pipeline_version TEXT NOT NULL CHECK (length(trim(pipeline_version)) > 0),
+        configuration_version TEXT NOT NULL
+            CHECK (length(trim(configuration_version)) > 0),
+        configuration_fingerprint TEXT NOT NULL
+            CHECK (
+                length(configuration_fingerprint) = 64
+                AND configuration_fingerprint NOT GLOB '*[^0-9a-f]*'
+            ),
+        configuration_metadata_json TEXT NOT NULL
+            CHECK (json_valid(configuration_metadata_json)),
+        code_revision TEXT NOT NULL CHECK (length(trim(code_revision)) > 0),
+        database_schema_version INTEGER NOT NULL CHECK (database_schema_version = 7),
+        force_refresh INTEGER NOT NULL CHECK (force_refresh IN (0, 1)),
+        status TEXT NOT NULL CHECK (status IN ({_PIPELINE_RUN_STATUS_SQL})),
+        failure_phase TEXT CHECK (
+            failure_phase IS NULL OR failure_phase IN ({_PIPELINE_PHASE_KEY_SQL})
+        ),
+        error_message TEXT,
+        final_summary_json TEXT CHECK (
+            final_summary_json IS NULL OR json_valid(final_summary_json)
+        ),
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        updated_at TEXT NOT NULL,
+        CHECK (
+            (status = 'pending' AND started_at IS NULL AND completed_at IS NULL)
+            OR (status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL)
+            OR (
+                status IN (
+                    'succeeded',
+                    'succeeded_with_warnings',
+                    'degraded',
+                    'failed'
+                )
+                AND started_at IS NOT NULL
+                AND completed_at IS NOT NULL
+            )
+        ),
+        CHECK (
+            (status = 'failed' AND failure_phase IS NOT NULL AND error_message IS NOT NULL)
+            OR (status != 'failed' AND failure_phase IS NULL AND error_message IS NULL)
+        )
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX uq_pipeline_manual_run_guard
+    ON pipeline_runs(sport, run_type, requested_date)
+    WHERE force_refresh = 0 AND status != 'failed'
+    """,
+    """
+    CREATE INDEX idx_pipeline_runs_requested_date
+    ON pipeline_runs(requested_date, created_at, run_id)
+    """,
+    f"""
+    CREATE TABLE pipeline_run_phases (
+        run_id TEXT NOT NULL,
+        phase_key TEXT NOT NULL CHECK (phase_key IN ({_PIPELINE_PHASE_KEY_SQL})),
+        ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 1 AND 15),
+        status TEXT NOT NULL CHECK (status IN ({_PIPELINE_PHASE_STATUS_SQL})),
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        started_at TEXT,
+        completed_at TEXT,
+        updated_at TEXT NOT NULL,
+        input_checksum TEXT CHECK (
+            input_checksum IS NULL OR (
+                length(input_checksum) = 64
+                AND input_checksum NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+        output_checksum TEXT CHECK (
+            output_checksum IS NULL OR (
+                length(output_checksum) = 64
+                AND output_checksum NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+        artifact_relpath TEXT,
+        warnings_json TEXT CHECK (warnings_json IS NULL OR json_valid(warnings_json)),
+        error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
+        reused_from_run_id TEXT,
+        PRIMARY KEY(run_id, phase_key),
+        UNIQUE(run_id, ordinal),
+        FOREIGN KEY(run_id) REFERENCES pipeline_runs(run_id) ON DELETE CASCADE,
+        FOREIGN KEY(reused_from_run_id) REFERENCES pipeline_runs(run_id) ON DELETE RESTRICT,
+        CHECK (
+            (status = 'pending' AND attempt_count = 0
+                AND started_at IS NULL AND completed_at IS NULL)
+            OR (status = 'running' AND attempt_count >= 1
+                AND started_at IS NOT NULL AND completed_at IS NULL)
+            OR (status IN (
+                    'succeeded',
+                    'succeeded_with_warnings',
+                    'degraded',
+                    'failed'
+                )
+                AND attempt_count >= 1
+                AND started_at IS NOT NULL
+                AND completed_at IS NOT NULL)
+            OR (status IN ('skipped', 'reused') AND completed_at IS NOT NULL)
+        ),
+        CHECK (
+            (status = 'reused' AND reused_from_run_id IS NOT NULL)
+            OR (status != 'reused' AND reused_from_run_id IS NULL)
+        ),
+        CHECK (
+            (status = 'failed' AND error_json IS NOT NULL)
+            OR (status != 'failed' AND error_json IS NULL)
+        )
+    )
+    """,
+    """
+    CREATE INDEX idx_pipeline_run_phases_status
+    ON pipeline_run_phases(run_id, status, ordinal)
+    """,
+    """
+    CREATE INDEX idx_pipeline_run_phases_reused_from
+    ON pipeline_run_phases(reused_from_run_id, phase_key)
+    WHERE reused_from_run_id IS NOT NULL
+    """,
+    f"""
+    CREATE TABLE pipeline_run_transitions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        phase_key TEXT,
+        from_status TEXT,
+        to_status TEXT NOT NULL,
+        transition_type TEXT NOT NULL
+            CHECK (transition_type IN ({_PIPELINE_TRANSITION_TYPE_SQL})),
+        reason TEXT,
+        audit_metadata_json TEXT NOT NULL CHECK (json_valid(audit_metadata_json)),
+        transitioned_at TEXT NOT NULL,
+        FOREIGN KEY(run_id) REFERENCES pipeline_runs(run_id) ON DELETE CASCADE,
+        FOREIGN KEY(run_id, phase_key)
+            REFERENCES pipeline_run_phases(run_id, phase_key) ON DELETE CASCADE,
+        CHECK (
+            (phase_key IS NULL
+                AND (from_status IS NULL OR from_status IN ({_PIPELINE_RUN_STATUS_SQL}))
+                AND to_status IN ({_PIPELINE_RUN_STATUS_SQL}))
+            OR
+            (phase_key IN ({_PIPELINE_PHASE_KEY_SQL})
+                AND (from_status IS NULL OR from_status IN ({_PIPELINE_PHASE_STATUS_SQL}))
+                AND to_status IN ({_PIPELINE_PHASE_STATUS_SQL}))
+        )
+    )
+    """,
+    """
+    CREATE INDEX idx_pipeline_run_transitions_audit
+    ON pipeline_run_transitions(run_id, transitioned_at, id)
+    """,
+    """
+    CREATE TRIGGER pipeline_run_transitions_reject_update
+    BEFORE UPDATE ON pipeline_run_transitions
+    BEGIN
+        SELECT RAISE(ABORT, 'pipeline run transitions are append-only');
+    END
+    """,
+    """
+    CREATE TRIGGER pipeline_run_transitions_reject_delete
+    BEFORE DELETE ON pipeline_run_transitions
+    BEGIN
+        SELECT RAISE(ABORT, 'pipeline run transitions are append-only');
+    END
+    """,
+)
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -2676,6 +2973,22 @@ MIGRATION_V6_CHECKSUM = hashlib.sha256(
         + "\n".join(_canonical_sql(statement) for statement in FORMAL_SCHEMA_V6_STATEMENTS)
     ).encode("utf-8")
 ).hexdigest()
+FORMAL_SCHEMA_V7_FINGERPRINT = _fingerprint_for_migration_chain(
+    FORMAL_SCHEMA_V1_STATEMENTS,
+    FORMAL_SCHEMA_V2_STATEMENTS,
+    FORMAL_SCHEMA_V3_STATEMENTS,
+    FORMAL_SCHEMA_V4_STATEMENTS,
+    FORMAL_SCHEMA_V5_STATEMENTS,
+    FORMAL_SCHEMA_V6_STATEMENTS,
+    FORMAL_SCHEMA_V7_STATEMENTS,
+)
+MIGRATION_V7_CHECKSUM = hashlib.sha256(
+    (
+        MIGRATION_V7_NAME
+        + "\nformal-v6-to-v7\n"
+        + "\n".join(_canonical_sql(statement) for statement in FORMAL_SCHEMA_V7_STATEMENTS)
+    ).encode("utf-8")
+).hexdigest()
 
 MIGRATION_HISTORY = (
     (1, MIGRATION_V1_NAME, MIGRATION_V1_CHECKSUM),
@@ -2684,6 +2997,7 @@ MIGRATION_HISTORY = (
     (4, MIGRATION_V4_NAME, MIGRATION_V4_CHECKSUM),
     (5, MIGRATION_V5_NAME, MIGRATION_V5_CHECKSUM),
     (6, MIGRATION_V6_NAME, MIGRATION_V6_CHECKSUM),
+    (7, MIGRATION_V7_NAME, MIGRATION_V7_CHECKSUM),
 )
 
 
@@ -2784,6 +3098,7 @@ def _assert_target_schema(connection: sqlite3.Connection, version: int) -> None:
         4: FORMAL_SCHEMA_V4_FINGERPRINT,
         5: FORMAL_SCHEMA_V5_FINGERPRINT,
         6: FORMAL_SCHEMA_V6_FINGERPRINT,
+        7: FORMAL_SCHEMA_V7_FINGERPRINT,
     }.get(version)
     if expected_fingerprint is None:
         raise SchemaVerificationError(f"Unsupported target schema version {version}")
@@ -3441,6 +3756,55 @@ def _upgrade_formal_v5_schema(
     )
 
 
+def _upgrade_formal_v6_schema(
+    connection: sqlite3.Connection,
+    prior_result: MigrationResult | None = None,
+) -> MigrationResult:
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) != 6:
+        raise SchemaVerificationError("Formal v6 upgrade requires PRAGMA user_version=6")
+    _assert_target_schema(connection, 6)
+
+    connection.execute("PRAGMA foreign_keys=OFF")
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 0:
+        raise SchemaVerificationError("Unable to prepare transactional schema v7 upgrade")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if schema_fingerprint(connection) != FORMAL_SCHEMA_V6_FINGERPRINT:
+            raise SchemaVerificationError("Formal v6 schema changed before migration lock")
+        _execute_statements(connection, FORMAL_SCHEMA_V7_STATEMENTS)
+        applied_at = _utc_now()
+        connection.execute(
+            """
+            INSERT INTO schema_migrations(version, name, checksum, applied_at)
+            VALUES (7, ?, ?, ?)
+            """,
+            (MIGRATION_V7_NAME, MIGRATION_V7_CHECKSUM, applied_at),
+        )
+        connection.execute("PRAGMA user_version=7")
+        _assert_target_schema(connection, 7)
+        connection.commit()
+    except Exception:
+        if connection.in_transaction:
+            connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+        raise SchemaVerificationError(
+            "Foreign-key enforcement could not be restored after schema v7 upgrade"
+        )
+    _assert_target_schema(connection, 7)
+    return MigrationResult(
+        version=7,
+        schema_fingerprint=FORMAL_SCHEMA_V7_FINGERPRINT,
+        migrated=True,
+        source_kind=prior_result.source_kind if prior_result else "formal_v6",
+        backup_path=prior_result.backup_path if prior_result else None,
+        diagnostic_path=prior_result.diagnostic_path if prior_result else None,
+    )
+
+
 def _validate_versioned_schema(connection: sqlite3.Connection) -> MigrationResult:
     rows = connection.execute(
         "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
@@ -3473,6 +3837,7 @@ def _validate_versioned_schema(connection: sqlite3.Connection) -> MigrationResul
         4: FORMAL_SCHEMA_V4_FINGERPRINT,
         5: FORMAL_SCHEMA_V5_FINGERPRINT,
         6: FORMAL_SCHEMA_V6_FINGERPRINT,
+        7: FORMAL_SCHEMA_V7_FINGERPRINT,
     }
     return MigrationResult(
         version=newest,
@@ -3526,6 +3891,8 @@ def ensure_schema(database_path: Path) -> MigrationResult:
             result = _upgrade_formal_v4_schema(connection, result)
         if result.version == 5:
             result = _upgrade_formal_v5_schema(connection, result)
+        if result.version == 6:
+            result = _upgrade_formal_v6_schema(connection, result)
 
         journal_mode = str(connection.execute("PRAGMA journal_mode=WAL").fetchone()[0])
         if journal_mode.lower() != "wal":

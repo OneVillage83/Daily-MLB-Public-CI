@@ -12,7 +12,7 @@ from app.migrations import (
     FORMAL_SCHEMA_V3_STATEMENTS,
     FORMAL_SCHEMA_V4_FINGERPRINT,
     FORMAL_SCHEMA_V4_STATEMENTS,
-    FORMAL_SCHEMA_V6_FINGERPRINT,
+    FORMAL_SCHEMA_V7_FINGERPRINT,
     MIGRATION_HISTORY,
     MIGRATION_V1_CHECKSUM,
     MIGRATION_V1_NAME,
@@ -55,19 +55,21 @@ def _create_formal_v4_database(path: Path) -> None:
         connection.close()
 
 
-def test_fresh_schema_installs_v5_with_deterministic_fingerprint(tmp_path: Path) -> None:
+def test_fresh_schema_installs_current_with_deterministic_fingerprint(
+    tmp_path: Path,
+) -> None:
     first = tmp_path / "first.db"
     second = tmp_path / "second.db"
 
     first_result = ensure_schema(first)
     second_result = ensure_schema(second)
 
-    assert first_result.version == second_result.version == 6
-    assert first_result.schema_fingerprint == FORMAL_SCHEMA_V6_FINGERPRINT
-    assert second_result.schema_fingerprint == FORMAL_SCHEMA_V6_FINGERPRINT
+    assert first_result.version == second_result.version == 7
+    assert first_result.schema_fingerprint == FORMAL_SCHEMA_V7_FINGERPRINT
+    assert second_result.schema_fingerprint == FORMAL_SCHEMA_V7_FINGERPRINT
     connection = sqlite3.connect(first)
     try:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute(
@@ -100,8 +102,8 @@ def test_exact_v4_database_upgrades_transactionally_and_preserves_rows(
 
     result = ensure_schema(path)
 
-    assert result.version == 6
-    assert result.schema_fingerprint == FORMAL_SCHEMA_V6_FINGERPRINT
+    assert result.version == 7
+    assert result.schema_fingerprint == FORMAL_SCHEMA_V7_FINGERPRINT
     connection = sqlite3.connect(path)
     try:
         assert connection.execute("SELECT run_id,schema_version FROM collector_runs").fetchone() == (RUN_ID, 4)
@@ -135,14 +137,14 @@ def test_v4_to_v5_failure_rolls_back_schema_and_history(tmp_path: Path, monkeypa
         connection.close()
 
 
-def test_ensure_schema_is_idempotent_at_v5(tmp_path: Path) -> None:
+def test_ensure_schema_is_idempotent_at_current(tmp_path: Path) -> None:
     path = tmp_path / "idempotent.db"
     first = ensure_schema(path)
     second = ensure_schema(path)
 
-    assert first.version == second.version == 6
+    assert first.version == second.version == 7
     assert second.migrated is False
-    assert second.schema_fingerprint == FORMAL_SCHEMA_V6_FINGERPRINT
+    assert second.schema_fingerprint == FORMAL_SCHEMA_V7_FINGERPRINT
 
 
 def test_v1_through_v4_checksums_remain_pinned() -> None:
