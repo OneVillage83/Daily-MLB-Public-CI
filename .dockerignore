@@ -1,0 +1,19 @@
+.env
+.git
+.github
+.agents
+.codex
+.validation
+.venv
+.venv-stats
+__pycache__
+*.db
+*.sqlite
+*.sqlite3
+artifacts
+local-data
+tests
+apps_script
+requirements-stats.in
+requirements-stats.txt
+Daily MLB Stats & Predictions.xlsx

@@ -1,0 +1,16 @@
+services:
+  mlb-phase1:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/mlb_phase1.db
+      ARTIFACT_DIR: /data/artifacts
+    volumes:
+      - daily_mlb_data:/data
+    restart: unless-stopped
+
+volumes:
+  daily_mlb_data:

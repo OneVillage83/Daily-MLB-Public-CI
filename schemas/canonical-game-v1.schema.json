@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daily-sports-edge.local/schemas/canonical-game-v1.schema.json",
+  "title": "canonical-game-v1",
+  "type": "object",
+  "required": [
+    "contract_version", "run_id", "event_id", "requested_date", "commence_time",
+    "raw_home_team", "raw_away_team", "home_team_key", "away_team_key",
+    "venue_context", "roof_context", "odds_consensus", "weather_context",
+    "weather_gate_clear", "quality_state", "quality_issues", "source_checksums",
+    "assembled_at", "checksum"
+  ],
+  "properties": {
+    "contract_version": {"const": "canonical-game-v1"},
+    "run_id": {"type": "string", "minLength": 1},
+    "event_id": {"type": "string", "minLength": 1},
+    "requested_date": {"type": "string", "format": "date"},
+    "commence_time": {"type": "string", "format": "date-time"},
+    "raw_home_team": {"type": "string"},
+    "raw_away_team": {"type": "string"},
+    "home_team_key": {"type": "string", "minLength": 1},
+    "away_team_key": {"type": "string", "minLength": 1},
+    "venue_context": {"type": "object"},
+    "roof_context": {"type": "string"},
+    "odds_consensus": {"type": "object"},
+    "weather_context": {"type": "object"},
+    "weather_gate_clear": {"type": "boolean"},
+    "quality_state": {"enum": ["ready", "degraded", "blocked"]},
+    "quality_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message", "blocking"],
+        "properties": {
+          "code": {"type": "string"},
+          "message": {"type": "string"},
+          "blocking": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "source_checksums": {"type": "object", "additionalProperties": {"type": "string"}},
+    "assembled_at": {"type": "string", "format": "date-time"},
+    "checksum": {"$ref": "#/$defs/checksum"}
+  },
+  "$defs": {"checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+  "additionalProperties": false
+}

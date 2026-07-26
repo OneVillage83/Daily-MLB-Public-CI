@@ -1,0 +1,6 @@
+-c requirements-dev.txt
+-r requirements-dev.in
+
+# Optional baseball-statistics ingestion profile. Keep this out of the normal
+# collection-service image until the stats provider is an approved runtime path.
+pybaseball==2.2.7

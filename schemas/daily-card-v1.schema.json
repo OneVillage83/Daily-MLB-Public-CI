@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daily-sports-edge.local/schemas/daily-card-v1.schema.json",
+  "title": "daily-card-v1 review draft",
+  "type": "object",
+  "required": [
+    "contract_version", "draft_id", "run_id", "requested_date", "policy_version",
+    "generated_at", "review_status", "automatic_publication", "candidate_count",
+    "zero_candidate_day", "policy_evaluation_ids", "source_checksum", "items", "draft_checksum"
+  ],
+  "properties": {
+    "contract_version": {"const": "daily-card-v1"},
+    "draft_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "requested_date": {"type": "string", "format": "date"},
+    "policy_version": {"const": "DSE_MLB_ML_CANDIDATE_V1"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "review_status": {"const": "REVIEW_REQUIRED"},
+    "automatic_publication": {"const": false},
+    "candidate_count": {"type": "integer", "minimum": 0},
+    "zero_candidate_day": {"type": "boolean"},
+    "policy_evaluation_ids": {"type": "array", "items": {"type": "string"}},
+    "source_checksum": {"$ref": "#/$defs/checksum"},
+    "items": {"type": "array", "items": {"$ref": "#/$defs/cardItem"}},
+    "draft_checksum": {"$ref": "#/$defs/checksum"}
+  },
+  "$defs": {
+    "checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullableNumber": {"type": ["number", "null"]},
+    "assessment": {
+      "type": "object",
+      "required": ["state", "assessment", "source_ids"],
+      "properties": {
+        "state": {"enum": ["available", "unknown"]},
+        "assessment": {"type": ["string", "null"]},
+        "source_ids": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["source_id", "source_name", "reference", "observed_at"],
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1},
+        "source_name": {"type": "string", "minLength": 1},
+        "reference": {"type": "string", "minLength": 1},
+        "observed_at": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    },
+    "analystEvidence": {
+      "type": "object",
+      "required": [
+        "analyst_identity", "method_version", "starting_pitching", "bullpen",
+        "offensive_matchup", "lineup_information_state", "lineup_notes",
+        "lineup_source_ids", "venue_context", "weather_context", "schedule_rest_context",
+        "material_unknowns", "source_provenance"
+      ],
+      "properties": {
+        "analyst_identity": {"type": "string", "minLength": 1},
+        "method_version": {"const": "DSE_REVIEWED_ANALYST_V1"},
+        "starting_pitching": {"$ref": "#/$defs/assessment"},
+        "bullpen": {"$ref": "#/$defs/assessment"},
+        "offensive_matchup": {"$ref": "#/$defs/assessment"},
+        "lineup_information_state": {"enum": ["confirmed", "projected", "unavailable", "unknown"]},
+        "lineup_notes": {"type": ["string", "null"]},
+        "lineup_source_ids": {"type": "array", "items": {"type": "string"}},
+        "venue_context": {"$ref": "#/$defs/assessment"},
+        "weather_context": {"$ref": "#/$defs/assessment"},
+        "schedule_rest_context": {"$ref": "#/$defs/assessment"},
+        "material_unknowns": {"type": "array", "items": {"type": "string"}},
+        "source_provenance": {"type": "array", "items": {"$ref": "#/$defs/source"}}
+      },
+      "additionalProperties": false
+    },
+    "gate": {
+      "type": "object",
+      "required": ["code", "passed", "threshold", "observed_value", "reason"],
+      "properties": {
+        "code": {"enum": [
+          "prediction_valid", "market_independent", "identity_valid", "market_supported",
+          "minimum_book_count", "odds_fresh", "best_price_eligible", "data_quality_clear",
+          "minimum_edge", "minimum_ev", "uncertainty_clears_market", "minimum_confidence",
+          "weather_gate_clear", "phase2_live_weather_accepted", "event_pregame"
+        ]},
+        "passed": {"type": "boolean"},
+        "threshold": {"type": ["boolean", "integer", "number", "string", "null"]},
+        "observed_value": {"type": ["boolean", "integer", "number", "string", "null"]},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "prediction": {
+      "type": "object",
+      "required": ["probability", "lower_bound", "upper_bound", "confidence_grade"],
+      "properties": {
+        "probability": {"type": "number", "minimum": 0, "maximum": 1},
+        "lower_bound": {"type": "number", "minimum": 0, "maximum": 1},
+        "upper_bound": {"type": "number", "minimum": 0, "maximum": 1},
+        "confidence_grade": {"enum": ["A", "B", "C", "D"]}
+      },
+      "additionalProperties": false
+    },
+    "market": {
+      "type": "object",
+      "required": [
+        "market_no_vig_probability", "best_price", "best_price_books", "break_even_probability",
+        "edge_percentage_points", "expected_value_per_unit_risk", "eligible_bookmaker_count"
+      ],
+      "properties": {
+        "market_no_vig_probability": {"$ref": "#/$defs/nullableNumber"},
+        "best_price": {"$ref": "#/$defs/nullableNumber"},
+        "best_price_books": {"type": "array", "items": {"type": "string"}},
+        "break_even_probability": {"$ref": "#/$defs/nullableNumber"},
+        "edge_percentage_points": {"$ref": "#/$defs/nullableNumber"},
+        "expected_value_per_unit_risk": {"$ref": "#/$defs/nullableNumber"},
+        "eligible_bookmaker_count": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "cardItem": {
+      "type": "object",
+      "required": [
+        "event_id", "prediction_id", "policy_evaluation_id", "scheduled_first_pitch_utc",
+        "home_team_key", "away_team_key", "selected_team_key", "automated_status",
+        "all_gates_passed", "gate_results", "prediction", "analyst_evidence", "market_evaluation",
+        "prediction_checksum", "evidence_checksum", "policy_evaluation_checksum",
+        "required_source_checksums"
+      ],
+      "properties": {
+        "event_id": {"type": "string"},
+        "prediction_id": {"type": "string"},
+        "policy_evaluation_id": {"type": "string"},
+        "scheduled_first_pitch_utc": {"type": "string", "format": "date-time"},
+        "home_team_key": {"type": "string"},
+        "away_team_key": {"type": "string"},
+        "selected_team_key": {"type": "string"},
+        "automated_status": {"enum": ["PASS", "CANDIDATE_REQUIRES_REVIEW"]},
+        "all_gates_passed": {"type": "boolean"},
+        "gate_results": {
+          "type": "array", "minItems": 15, "maxItems": 15,
+          "items": {"$ref": "#/$defs/gate"}
+        },
+        "prediction": {"$ref": "#/$defs/prediction"},
+        "analyst_evidence": {"$ref": "#/$defs/analystEvidence"},
+        "market_evaluation": {"$ref": "#/$defs/market"},
+        "prediction_checksum": {"$ref": "#/$defs/checksum"},
+        "evidence_checksum": {"$ref": "#/$defs/checksum"},
+        "policy_evaluation_checksum": {"$ref": "#/$defs/checksum"},
+        "required_source_checksums": {"type": "object", "additionalProperties": {"type": "string"}}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

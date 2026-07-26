@@ -1,0 +1,5 @@
+gid,team,stattype,gametype,b_pa,start_l1,start_l2,start_l3,start_l4,start_l5,start_l6,start_l7,start_l8,start_l9,start_f1,start_f2,start_f3,start_f4,start_f5,start_f6,start_f7,start_f8,start_f9,start_f10
+LAN202607100,LAN,value,regular,38,known001,known002,,,,,,,,,,known002,,,,,known001,,
+LAN202607110,CHA,value,regular,36,inter001,,,,,,,,,,,,inter001,,,,,,
+LAN202610010,LAN,value,postseason,35,known001,,,,,,,,,,,,,,,,known001,,
+BRO195509010,BRO,value,regular,34,former01,,,,,,,,,,,,,,former01,,,,

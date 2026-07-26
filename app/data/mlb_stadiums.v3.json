@@ -1,0 +1,2418 @@
+{
+  "policy_version": "DSE_MLB_STADIUM_METADATA_V1",
+  "catalog_version": 3,
+  "effective_date": "2026-07-13",
+  "coordinate_validation": {
+    "source_id": "OSM_NOMINATIM_2026",
+    "official_address_source_id": "MLB_TEAM_LOCATIONS_2026",
+    "accessed_at": "2026-07-12",
+    "request_count": 30,
+    "query_method": "One venue-name-plus-city query per active club, followed by exact stadium-feature and official MLB address reconciliation.",
+    "accepted_feature_category": "leisure",
+    "accepted_feature_type": "stadium",
+    "reconciliation_tolerance_meters": 250,
+    "attribution": "Data © OpenStreetMap contributors, ODbL 1.0."
+  },
+  "sources": [
+    {
+      "id": "DSE_STADIUM_POLICY_V1",
+      "publisher": "Daily Sports Edge",
+      "url": "docs/STADIUM_METADATA_VALIDATION_REPORT.md",
+      "accessed_at": "2026-07-12",
+      "notes": "Internal canonical-key, alias, and verification-state policy."
+    },
+    {
+      "id": "LEGACY_STARTER_CATALOG",
+      "publisher": "Daily Sports Edge",
+      "url": "app/data/mlb_stadiums.json",
+      "accessed_at": "2026-07-12",
+      "notes": "Unverified starter values retained for traceability; not factual verification."
+    },
+    {
+      "id": "MLB_TEAM_LOCATIONS_2026",
+      "publisher": "Major League Baseball",
+      "url": "https://www.mlb.com/team",
+      "accessed_at": "2026-07-12",
+      "notes": "Official all-30-club venue names and addresses."
+    },
+    {
+      "id": "IANA_TZDB_2026",
+      "publisher": "Internet Assigned Numbers Authority",
+      "url": "https://www.iana.org/time-zones",
+      "accessed_at": "2026-07-12",
+      "notes": "IANA zone identifiers cross-checked against official MLB venue addresses."
+    },
+    {
+      "id": "OSM_NOMINATIM_2026",
+      "publisher": "OpenStreetMap contributors",
+      "url": "https://nominatim.openstreetmap.org/",
+      "accessed_at": "2026-07-12",
+      "licence": "Open Data Commons Open Database License (ODbL) 1.0",
+      "attribution": "Data © OpenStreetMap contributors.",
+      "notes": "Exact venue-name and city queries at one request per second. Only stadium features whose identity and address reconciled with MLB_TEAM_LOCATIONS_2026 were accepted; stable OSM object IDs are retained per record."
+    },
+    {
+      "id": "MLB_ATH_SUTTER_2024",
+      "publisher": "Athletics / Major League Baseball",
+      "url": "https://www.mlb.com/athletics/press-release/press-release-sutter-health-park-in-west-sacramento-to-host-a-s-for-2025-2027-seasons",
+      "accessed_at": "2026-07-12",
+      "notes": "Sutter Health Park is the Athletics home for the 2025-2027 seasons; Oakland was final in 2024."
+    },
+    {
+      "id": "MLB_DODGERS_UNIQLO_2026",
+      "publisher": "Los Angeles Dodgers / Major League Baseball",
+      "url": "https://www.mlb.com/dodgers/news/dodger-stadium-announces-partnership-with-uniqlo",
+      "accessed_at": "2026-07-12",
+      "notes": "UNIQLO names the field while the Dodger Stadium ballpark name and physical venue remain."
+    },
+    {
+      "id": "MLB_ORIOLES_2026",
+      "publisher": "Baltimore Orioles / Major League Baseball",
+      "url": "https://www.mlb.com/press-release/press-release-orioles-announce-2026-regular-season-schedule",
+      "accessed_at": "2026-07-12",
+      "notes": "Official 2026 use of Oriole Park at Camden Yards."
+    },
+    {
+      "id": "MLB_HOU_NAMING_2024",
+      "publisher": "Houston Astros / Major League Baseball",
+      "url": "https://www.mlb.com/press-release/release-astros-announce-ballpark-naming-rights-partnership-with-daikin-comfort-technologies",
+      "accessed_at": "2026-07-12",
+      "notes": "Daikin Park naming effective January 1, 2025; same physical park formerly Minute Maid Park."
+    },
+    {
+      "id": "MLB_ARI_ROOF",
+      "publisher": "Arizona Diamondbacks / Major League Baseball",
+      "source_title": "Roof Information",
+      "url": "https://www.mlb.com/dbacks/ballpark/information/roof",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct venue-specific retractable-roof statement; no authoritative conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Opening paragraph under Roof Information",
+        "minimal_evidence_text": "The retractable roof, comprising 9 million pounds of structural steel, operates",
+        "normalized_text_sha256": "3b1ddf7f8b69c69c5e8c17c4750835a8dcba2d4a74191ed82df1920962939d72",
+        "observed_value": "retractable",
+        "notes": "Direct venue-specific retractable-roof statement; no authoritative conflict found."
+      }
+    },
+    {
+      "id": "MLB_HOU_ROOF",
+      "publisher": "Houston Astros / Major League Baseball",
+      "source_title": "Facts and Figures",
+      "url": "https://www.mlb.com/astros/ballpark/information/facts-and-figures",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct current-venue retractable-roof statement; no authoritative conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Opening paragraph under Facts and Figures",
+        "minimal_evidence_text": "Daikin Park's 242-foot high, retractable roof.",
+        "normalized_text_sha256": "a638f41c573e53b943e222af1bc9b784deaaa5f2f959a0671ded03a5905d8f41",
+        "observed_value": "retractable",
+        "notes": "Direct current-venue retractable-roof statement; no authoritative conflict found."
+      }
+    },
+    {
+      "id": "MLB_MIA_ROOF_HISTORY",
+      "publisher": "Major League Baseball",
+      "source_title": "Explore loanDepot park, home of the Miami Marlins",
+      "url": "https://www.mlb.com/news/featured/loandepot-park-guide-capacity-seating-chart-parking-and-more",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct current-venue retractable-roof statement; source also supports same-venue naming history.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Opening paragraph",
+        "minimal_evidence_text": "Home to the Miami Marlins since 2012, it is one of seven MLB stadiums with a retractable roof.",
+        "normalized_text_sha256": "c403e46d3fddb6454c8b046d9104a581c10632b4a260edbfe9855d1490ddc374",
+        "observed_value": "retractable",
+        "notes": "Direct current-venue retractable-roof statement; source also supports same-venue naming history."
+      }
+    },
+    {
+      "id": "MLB_MIL_ROOF_HISTORY",
+      "publisher": "Milwaukee Brewers / Major League Baseball",
+      "source_title": "Governor proposes funding to upgrade American Family Field",
+      "url": "https://www.mlb.com/brewers/news/governor-proposes-funding-to-upgrade-american-family-field",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct venue-specific retractable-roof statement; source also supports same-venue naming history.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Funding and maintenance paragraph",
+        "minimal_evidence_text": "American Family Field's unique, fan-shaped retractable roof",
+        "normalized_text_sha256": "672111401e007dcec72786073963ca8f37213236c716da508722eaeade3db277",
+        "observed_value": "retractable",
+        "notes": "Direct venue-specific retractable-roof statement; source also supports same-venue naming history."
+      }
+    },
+    {
+      "id": "MLB_SEA_ROOF",
+      "publisher": "Major League Baseball",
+      "source_title": "Explore T-Mobile Park, home of the Seattle Mariners",
+      "url": "https://www.mlb.com/news/featured/t-mobile-park-guide-capacity-seating-chart-parking-and-more",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct venue-specific retractable-roof statement; no authoritative conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Unique Characteristics",
+        "minimal_evidence_text": "most unique of all, a retractable roof that essentially serves as a massive, metallic umbrella.",
+        "normalized_text_sha256": "a0bbd4095df4630bc47146ef5222a752310e1778973d5b41b8c40ff77fa35a87",
+        "observed_value": "retractable",
+        "notes": "Direct venue-specific retractable-roof statement; no authoritative conflict found."
+      }
+    },
+    {
+      "id": "MLB_TB_2026",
+      "publisher": "Tampa Bay Rays / Major League Baseball",
+      "source_title": "Explore Tropicana Field, home of the Tampa Bay Rays",
+      "url": "https://www.mlb.com/news/featured/tropicana-field-guide-capacity-seating-chart-parking-and-more",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct current-venue fixed-roof statement; source also supports venue and display-name history.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Unique Characteristics",
+        "minimal_evidence_text": "That fixed white roof is tilted at a 6.5-degree angle",
+        "normalized_text_sha256": "863480ab46076ef459cd66b578b204746105ac2ecb6d01cea8bf6edc7f6e5363",
+        "observed_value": "fixed",
+        "notes": "Direct current-venue fixed-roof statement; source also supports venue and display-name history."
+      }
+    },
+    {
+      "id": "MLB_TEX_FACTS",
+      "publisher": "Texas Rangers / Major League Baseball",
+      "source_title": "Globe Life Field Facts & Figures",
+      "url": "https://www.mlb.com/rangers/ballpark/facts-figures",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct venue-specific retractable-roof statement; source also distinguishes the former physical venue.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Retractable Roof",
+        "minimal_evidence_text": "The 5.5 acre retractable roof is one of the most prominent features of Globe Life Field",
+        "normalized_text_sha256": "b329e0aac97aca6bc6e0e70a6d296a7852f1c66076b1737f8053609a9eb07584",
+        "observed_value": "retractable",
+        "notes": "Direct venue-specific retractable-roof statement; source also distinguishes the former physical venue."
+      }
+    },
+    {
+      "id": "MLB_TOR_HISTORY",
+      "publisher": "Toronto Blue Jays / Major League Baseball",
+      "source_title": "Rogers Centre | History",
+      "url": "https://www.mlb.com/bluejays/ballpark/information/history",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct current retractable-roof statement; source also supports SkyDome naming history.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Roof-history paragraph",
+        "minimal_evidence_text": "The most remarkable feature, still in use today, is a fully retractable roof",
+        "normalized_text_sha256": "a77d848ff7023bdbaad6706661fd271bd1ff819c5772b4aa3548ddd1aa19bf6f",
+        "observed_value": "retractable",
+        "notes": "Direct current retractable-roof statement; source also supports SkyDome naming history."
+      }
+    },
+    {
+      "id": "MLB_GROUP4_OPEN_AIR_2026",
+      "publisher": "Major League Baseball",
+      "source_title": "What's the trickiest -- and easiest -- outfield to play? Let's rate each ballpark",
+      "url": "https://www.mlb.com/news/ranking-every-mlb-outfield-by-fielding-difficulty",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "The group list explicitly includes Oriole Park at Camden Yards, Citi Field, Progressive Field, Yankee Stadium, and Nationals Park; no conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Group 4 venue list and immediately following first paragraph",
+        "minimal_evidence_text": "It's notable that all of the parks here are open-air",
+        "normalized_text_sha256": "957ef49bc649a0a38e61fb2abfb3fc2530a010ef4fa654ffedf6cf72263c2213",
+        "observed_value": "open",
+        "notes": "The group list explicitly includes Oriole Park at Camden Yards, Citi Field, Progressive Field, Yankee Stadium, and Nationals Park; no conflict found."
+      }
+    },
+    {
+      "id": "MLB_FENWAY_NON_DOMED_2026",
+      "publisher": "Major League Baseball",
+      "source_title": "What's the trickiest -- and easiest -- outfield to play? Let's rate each ballpark",
+      "url": "https://www.mlb.com/news/ranking-every-mlb-outfield-by-fielding-difficulty",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "The subsection heading resolves 'this one' to Fenway Park; no authoritative conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Fenway Park subsection, first analytical paragraph",
+        "minimal_evidence_text": "Among all non-domed parks, this one showed up with the biggest \"home field advantage\"",
+        "normalized_text_sha256": "296bb61dc7643a0ed9829d90576b0fcd4ac0ee28800646a4812df8ecda1404ee",
+        "observed_value": "open",
+        "notes": "The subsection heading resolves 'this one' to Fenway Park; no authoritative conflict found."
+      }
+    },
+    {
+      "id": "MLB_CHC_OPEN_AIR_2026",
+      "publisher": "Chicago Cubs / Major League Baseball",
+      "source_title": "Wrigley Field Weather Guide: What to Expect Month by Month",
+      "url": "https://www.mlb.com/cubs/guide/wrigley-field-weather-guide-by-month",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct whole-ballpark open-air statement; limited covered areas do not conflict with the roof enum.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Frequently Asked Questions > Does Wrigley Field have a roof or covered seating?",
+        "minimal_evidence_text": "Wrigley Field is an open-air ballpark with limited covered areas.",
+        "normalized_text_sha256": "bd29615ec78e22f638c8b8077bbcfe81cad97254cb5a27189bfb0919227e7590",
+        "observed_value": "open",
+        "notes": "Direct whole-ballpark open-air statement; limited covered areas do not conflict with the roof enum."
+      }
+    },
+    {
+      "id": "MLB_COL_OPEN_AIR_2026",
+      "publisher": "Colorado Rockies / Major League Baseball",
+      "source_title": "Peanut Allergy Friendly Game",
+      "url": "https://www.mlb.com/rockies/tickets/specials/themes/peanut-allergy-friendly",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct whole-ballpark open-air statement; no authoritative conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Important Note on Peanut-Controlled Game",
+        "minimal_evidence_text": "Coors Field is an open-air ballpark",
+        "normalized_text_sha256": "0ae5b4480683a3aa3360f67f34c064fe22b28f9282ee217e3bf191bdc5c7b0b8",
+        "observed_value": "open",
+        "notes": "Direct whole-ballpark open-air statement; no authoritative conflict found."
+      }
+    },
+    {
+      "id": "MLB_DET_OPEN_AIR_2018",
+      "publisher": "Detroit Tigers / Major League Baseball",
+      "source_title": "Detroit Tigers to Offer Peanut-Friendly Games During the 2018 Season",
+      "url": "https://www.mlb.com/press-release/detroit-tigers-to-offer-peanut-friendly-games-during-the-2018-season-268678578",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct whole-ballpark statement for the same physical venue; no authoritative conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Body paragraph after ticket and waiver details",
+        "minimal_evidence_text": "Comerica Park is an open-air ballpark",
+        "normalized_text_sha256": "406259cf00a588d000cf97ea2725aec698fa56747758fd533a8e0ef44f54a058",
+        "observed_value": "open",
+        "notes": "Direct whole-ballpark statement for the same physical venue; no authoritative conflict found."
+      }
+    },
+    {
+      "id": "MLB_KC_ROOF_NEVER_BUILT_2021",
+      "publisher": "Major League Baseball",
+      "source_title": "Royals, Chiefs team up to blaze stadium trail",
+      "url": "https://www.mlb.com/news/kauffman-stadium-arrowhead-stadium-connection",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct venue-wide roof-never-built history, including rejection of the later roof measure; no conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Stadium-construction history paragraph after Kauffman signature features",
+        "minimal_evidence_text": "The original plan designed by Deaton called for a rolling roof that could cover both stadiums, but that plan never came to fruition.",
+        "normalized_text_sha256": "0a9552fafaa161e1582d37008f4e67d5ef90196f61d7ecb617fa3ece88d438bf",
+        "observed_value": "open",
+        "notes": "Direct venue-wide roof-never-built history, including rejection of the later roof measure; no conflict found."
+      }
+    },
+    {
+      "id": "MLB_LAD_OPEN_AIR_2026",
+      "publisher": "Los Angeles Dodgers / Major League Baseball",
+      "source_title": "Peanut Allergy Friendly Night",
+      "url": "https://www.mlb.com/dodgers/tickets/specials/peanut-allergy",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct same-physical-venue statement; the page also uses current UNIQLO Field at Dodger Stadium branding.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Event footnote before the release",
+        "minimal_evidence_text": "Dodger Stadium is an open-air ballpark",
+        "normalized_text_sha256": "1bc94b86dd426831b9aff1a58828b345033daa9c0000d6d2594e6ad9f346fa86",
+        "observed_value": "open",
+        "notes": "Direct same-physical-venue statement; the page also uses current UNIQLO Field at Dodger Stadium branding."
+      }
+    },
+    {
+      "id": "MBA_MIN_OPEN_AIR_2011",
+      "publisher": "Minnesota Ballpark Authority",
+      "source_title": "Annual Financial Report, December 31, 2011",
+      "url": "https://ballparkauthority.com/PDFs/2011CAFR.pdf",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Public ballpark owner directly describes the completed physical venue as open air; no conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "PDF page 13 / printed page 7, Ballpark Future",
+        "minimal_evidence_text": "The completed open air ballpark has six separate levels totaling approximately one million square feet, and a natural grass playing field.",
+        "normalized_text_sha256": "dc2471ebc2cbf6e387a306cd5476947cd48c560525affe802468d6e9400af706",
+        "observed_value": "open",
+        "notes": "Public ballpark owner directly describes the completed physical venue as open air; no conflict found."
+      }
+    },
+    {
+      "id": "MLB_NYM_OPEN_AIR_2026",
+      "publisher": "New York Mets / Major League Baseball",
+      "source_title": "Citi Field Information",
+      "url": "https://www.mlb.com/mets/ballpark/information",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct whole-ballpark open-air statement; no authoritative conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Opening paragraph under Citi Field Information",
+        "minimal_evidence_text": "The open-air ballpark connects the Mets' National League heritage to the future",
+        "normalized_text_sha256": "6ae884838c14681e34968a2cf0f42b203552b697a60409de9b93b2b08bd392c5",
+        "observed_value": "open",
+        "notes": "Direct whole-ballpark open-air statement; no authoritative conflict found."
+      }
+    },
+    {
+      "id": "MLB_NYY_OUTDOOR_CONTEXT_2013",
+      "publisher": "Major League Baseball / New York Yankees",
+      "source_title": "National Hockey League to play a twin bill at Yankee Stadium",
+      "url": "https://www.mlb.com/news/national-hockey-league-to-play-a-twin-bill-at-yankee-stadium/c-47605916",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "An outdoor event confirms exposure but does not alone rule out a retractable roof; retained as context only.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "inference_only",
+        "locator": "Opening body paragraph",
+        "minimal_evidence_text": "Two outdoor regular-season NHL games will be played at Yankee Stadium",
+        "normalized_text_sha256": "d64f2ae760a886bf45c981387d8d954219e483d7fc9d55a9967c6b08d079d913",
+        "observed_value": null,
+        "notes": "An outdoor event confirms exposure but does not alone rule out a retractable roof; retained as context only."
+      }
+    },
+    {
+      "id": "MLB_SD_OPEN_AIR_2021",
+      "publisher": "San Diego Padres / Major League Baseball",
+      "source_title": "Health & Safety Guidelines",
+      "url": "https://www.mlb.com/padres/fans/health-guidelines",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Direct whole-ballpark outdoor and open-air statement; no authoritative conflict found.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Open-Air Environment",
+        "minimal_evidence_text": "As an outdoor ballpark with an open-air environment, Petco Park remains one of the safest venues in San Diego.",
+        "normalized_text_sha256": "136586f832018576f343b1b140a58df17ea30722dfe7cb77b006ee599af470de",
+        "observed_value": "open",
+        "notes": "Direct whole-ballpark outdoor and open-air statement; no authoritative conflict found."
+      }
+    },
+    {
+      "id": "MLB_SF_OPEN_AIR_2013",
+      "publisher": "San Francisco Giants / Major League Baseball",
+      "source_title": "Candlestick Park leaves us with frosty memories",
+      "url": "https://www.mlb.com/giants/news/terence-moore-candlestick-park-leaves-us-with-frosty-baseball-memories/c-66191512",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "The preceding sentence identifies 'It' as AT&T Park; current-name continuity is separately sourced.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Paragraph contrasting Candlestick with AT&T Park",
+        "minimal_evidence_text": "It also has the greatest view beyond its outfield walls of any open-air facility in sports.",
+        "normalized_text_sha256": "130fdd415b74b3c1e0c1786cde66d0f66a641ec25bf8da4dfdb1a2c23193cf44",
+        "observed_value": "open",
+        "notes": "The preceding sentence identifies 'It' as AT&T Park; current-name continuity is separately sourced."
+      }
+    },
+    {
+      "id": "MLB_SF_ORACLE_RENAME_2019",
+      "publisher": "San Francisco Giants / Major League Baseball",
+      "source_title": "Giants, Oracle agree to naming rights deal",
+      "url": "https://www.mlb.com/giants/news/giants-oracle-agree-to-naming-rights-deal-c302553388",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Identity continuity support only: the direct roof statement uses the former display name AT&T Park.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "inference_only",
+        "locator": "Opening body paragraph",
+        "minimal_evidence_text": "the ballpark -- which is now known as Oracle Park after 13 seasons as AT&T Park",
+        "normalized_text_sha256": "fd0278a27e98f8f4eeb07331cc53aeabfb34a9012e075650d60dc8707bddc003",
+        "observed_value": null,
+        "notes": "Identity continuity support only: the direct roof statement uses the former display name AT&T Park."
+      }
+    },
+    {
+      "id": "MLB_STL_OPEN_AIR_2021",
+      "publisher": "St. Louis Cardinals / Major League Baseball",
+      "source_title": "Cardinals approved to host fans at Busch Stadium in 2021",
+      "url": "https://www.mlb.com/press-release/press-release-cardinals-to-host-fans-at-busch-stadium-in-2021",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Whole-venue open-air footprint statement; separately mentioned enclosed spaces are not a conflict.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Final stadium-operations quotation",
+        "minimal_evidence_text": "Busch Stadium's vast open-air footprint, six entry gates and wide concourses",
+        "normalized_text_sha256": "d2f8ba7d3f973674a7d764fe9d03bc14a97a956236a0cf74438ebeacf34ecb0b",
+        "observed_value": "open",
+        "notes": "Whole-venue open-air footprint statement; separately mentioned enclosed spaces are not a conflict."
+      }
+    },
+    {
+      "id": "MLB_WSH_OPEN_AIR_2026",
+      "publisher": "Washington Nationals / Major League Baseball",
+      "source_title": "Entire Ballpark",
+      "url": "https://www.mlb.com/nationals/ballpark/events/outdoor-venues/ballpark",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "The entire-ballpark page directly establishes an open-air setting; indoor subspaces are not a conflict.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "direct_statement",
+        "locator": "Opening paragraph",
+        "minimal_evidence_text": "Nationals Park can seat up to 41,000 in an open-air setting",
+        "normalized_text_sha256": "53a92f6d61455a93087e90dfd7035d7a3a7f3ecad8d4fcc2696cf285b3717e39",
+        "observed_value": "open",
+        "notes": "The entire-ballpark page directly establishes an open-air setting; indoor subspaces are not a conflict."
+      }
+    },
+    {
+      "id": "MLB_ATH_OPEN_AREA_CONTEXT_2026",
+      "publisher": "Athletics / Major League Baseball",
+      "source_title": "Sutter Health Park A-Z Guide",
+      "url": "https://www.mlb.com/athletics/ballpark/information/guide",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Area-specific context only; it does not classify the whole physical venue or playing bowl.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "inference_only",
+        "locator": "H > HOSPITALITY SPACES",
+        "minimal_evidence_text": "select open-air hospitality areas including the Rooftop, Porch, and Sky River Casino Solon Club.",
+        "normalized_text_sha256": "12cd16bc6840fff224f200c7449b30689a6c91dd9a1865ffab9c70fd727d6036",
+        "observed_value": null,
+        "notes": "Area-specific context only; it does not classify the whole physical venue or playing bowl."
+      }
+    },
+    {
+      "id": "MLB_ATL_ROOF_CANOPY_CONTEXT_2026",
+      "publisher": "Atlanta Braves / Major League Baseball",
+      "source_title": "Truist Park Policies and Procedures",
+      "url": "https://www.mlb.com/braves/ballpark/information/guide?bpexternal=true",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "A canopy over part of the venue does not establish the whole physical venue roof type.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "inference_only",
+        "locator": "V > Video Board",
+        "minimal_evidence_text": "special effect lighting that lights up the underside of the roof canopy.",
+        "normalized_text_sha256": "1a570219c79e07aab78bfc993056f6788e78b3f3a42451d9cd048066e7e15220",
+        "observed_value": null,
+        "notes": "A canopy over part of the venue does not establish the whole physical venue roof type."
+      }
+    },
+    {
+      "id": "MLB_CIN_WEATHER_CONTEXT_2026",
+      "publisher": "Cincinnati Reds / Major League Baseball",
+      "source_title": "Great American Ball Park Policies and Procedures",
+      "url": "https://www.mlb.com/reds/ballpark/information/guide?partnerId=redirect-fan-safety",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Weather-delay exposure is operational context, not a direct whole-venue roof classification.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "inference_only",
+        "locator": "R > Rain Delays",
+        "minimal_evidence_text": "Weather can affect the start and/or continuation of the game.",
+        "normalized_text_sha256": "5b37fd9e681d5bee31e922d85a1fa70fc8dee1e7e9ca359aa917bd91962cb315",
+        "observed_value": null,
+        "notes": "Weather-delay exposure is operational context, not a direct whole-venue roof classification."
+      }
+    },
+    {
+      "id": "MLB_LAA_SUN_CONTEXT_2026",
+      "publisher": "Los Angeles Angels / Major League Baseball",
+      "source_title": "Accessibility Guide",
+      "url": "https://www.mlb.com/angels/ballpark/accessibility-guide",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Exposed seating does not prove that the whole physical venue lacks a fixed or retractable roof.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "inference_only",
+        "locator": "Sun & Shade",
+        "minimal_evidence_text": "Seating at Angel Stadium includes seats in full sun, in full shade, as well as partial sun/partial shade.",
+        "normalized_text_sha256": "1c6027411da2e168d444fb4a5cae951d44ce099847ea5454696f5787fabc6c94",
+        "observed_value": null,
+        "notes": "Exposed seating does not prove that the whole physical venue lacks a fixed or retractable roof."
+      }
+    },
+    {
+      "id": "MLB_CWS_WEATHER_CONTEXT_2026",
+      "publisher": "Chicago White Sox / Major League Baseball",
+      "source_title": "Rate Field Policies and Procedures",
+      "url": "https://www.mlb.com/whitesox/ballpark/information/guide",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Guest weather policy does not directly classify the physical venue roof.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "inference_only",
+        "locator": "U > Umbrellas",
+        "minimal_evidence_text": "Small collapsible umbrellas are allowed into the ballpark.",
+        "normalized_text_sha256": "c49b9e94d2a3650a95b1b17c69e6a90d4318f14b6c28c2f8334f55ac897b4fe7",
+        "observed_value": null,
+        "notes": "Guest weather policy does not directly classify the physical venue roof."
+      }
+    },
+    {
+      "id": "MLB_PHI_OPEN_AREA_CONTEXT_2026",
+      "publisher": "Philadelphia Phillies / Major League Baseball",
+      "source_title": "Facts, Figures and Fun Features",
+      "url": "https://www.mlb.com/phillies/ballpark/information/facts-figures-fun-features",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "Open-air modifies concourses and open outfield describes design; neither directly classifies the whole venue roof.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "inference_only",
+        "locator": "Architects & Design and City Skyline",
+        "minimal_evidence_text": "The walk-around, open-air concourses offer a continuous, uninterrupted view of the field. Citizens Bank Park is designed with an open outfield.",
+        "normalized_text_sha256": "ed64772efe7ffe51f2fdd329ed93e181cba42cf9f19f29b5a976609535c3dec2",
+        "observed_value": null,
+        "notes": "Open-air modifies concourses and open outfield describes design; neither directly classifies the whole venue roof."
+      }
+    },
+    {
+      "id": "MLB_PIT_OPEN_AREA_CONTEXT_2026",
+      "publisher": "Pittsburgh Pirates / Major League Baseball",
+      "source_title": "Main Concourse",
+      "url": "https://www.mlb.com/pirates/ballpark/events/venues/main-concourse",
+      "accessed_at": "2026-07-13",
+      "retrieval_date": "2026-07-13",
+      "retrieved_at": "2026-07-13T19:19:24-07:00",
+      "notes": "The source describes a covered-outdoor subarea, not the whole physical venue roof.",
+      "roof_evidence": {
+        "revision": 1,
+        "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+        "kind": "inference_only",
+        "locator": "Main Concourse description",
+        "minimal_evidence_text": "your event can extend the entire Main Concourse and relish in the open-air feel, with the ballpark as your backdrop.",
+        "normalized_text_sha256": "83608e154dd5b4fe558060ee73bb01beda572a528c4c8ec8161e9657c159d069",
+        "observed_value": null,
+        "notes": "The source describes a covered-outdoor subarea, not the whole physical venue roof."
+      }
+    }
+  ],
+  "default_field_verification": {
+    "team_key": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "DSE_STADIUM_POLICY_V1",
+        "MLB_TEAM_LOCATIONS_2026"
+      ],
+      "verified_at": "2026-07-12",
+      "notes": "Canonical team key cross-checked against the versioned team-alias catalog.",
+      "conflicts": []
+    },
+    "team_name": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "MLB_TEAM_LOCATIONS_2026"
+      ],
+      "verified_at": "2026-07-12",
+      "conflicts": []
+    },
+    "physical_venue_key": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "DSE_STADIUM_POLICY_V1",
+        "MLB_TEAM_LOCATIONS_2026"
+      ],
+      "verified_at": "2026-07-12",
+      "notes": "Stable internal identity tied to the MLB-listed physical venue, not its sponsorship name.",
+      "conflicts": []
+    },
+    "active_club_association": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "MLB_TEAM_LOCATIONS_2026"
+      ],
+      "verified_at": "2026-07-12",
+      "conflicts": []
+    },
+    "base_venue_name": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "MLB_TEAM_LOCATIONS_2026"
+      ],
+      "verified_at": "2026-07-12",
+      "conflicts": []
+    },
+    "current_display_name": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "MLB_TEAM_LOCATIONS_2026"
+      ],
+      "verified_at": "2026-07-12",
+      "conflicts": []
+    },
+    "aliases": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "DSE_STADIUM_POLICY_V1",
+        "MLB_TEAM_LOCATIONS_2026"
+      ],
+      "verified_at": "2026-07-12",
+      "notes": "Exact aliases only; no fuzzy matching.",
+      "conflicts": []
+    },
+    "historical_display_names": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "DSE_STADIUM_POLICY_V1"
+      ],
+      "verified_at": "2026-07-12",
+      "notes": "Empty unless a supported same-physical-venue history is explicitly sourced.",
+      "conflicts": []
+    },
+    "former_physical_venues": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "DSE_STADIUM_POLICY_V1"
+      ],
+      "verified_at": "2026-07-12",
+      "notes": "Protective exact-match list; empty unless a different physical venue is explicitly sourced.",
+      "conflicts": []
+    },
+    "latitude": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "MLB_TEAM_LOCATIONS_2026",
+        "OSM_NOMINATIM_2026"
+      ],
+      "verified_at": "2026-07-12",
+      "notes": "OpenStreetMap stadium-feature centroid reconciled to the official MLB venue identity and address; see coordinate_evidence.",
+      "conflicts": []
+    },
+    "longitude": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "MLB_TEAM_LOCATIONS_2026",
+        "OSM_NOMINATIM_2026"
+      ],
+      "verified_at": "2026-07-12",
+      "notes": "OpenStreetMap stadium-feature centroid reconciled to the official MLB venue identity and address; see coordinate_evidence.",
+      "conflicts": []
+    },
+    "timezone": {
+      "status": "VERIFIED",
+      "source_ids": [
+        "MLB_TEAM_LOCATIONS_2026",
+        "IANA_TZDB_2026"
+      ],
+      "verified_at": "2026-07-12",
+      "notes": "Installed IANA identifier manually cross-checked against the official venue address jurisdiction.",
+      "conflicts": []
+    },
+    "roof_type": {
+      "status": "UNVERIFIED",
+      "source_ids": [
+        "LEGACY_STARTER_CATALOG"
+      ],
+      "verified_at": null,
+      "notes": "Structurally valid legacy value; only individually sourced roof records override this state.",
+      "conflicts": []
+    },
+    "outfield_bearing_degrees": {
+      "status": "UNVERIFIED",
+      "source_ids": [
+        "LEGACY_STARTER_CATALOG"
+      ],
+      "verified_at": null,
+      "notes": "Starter bearing lacks direct published evidence and must not drive field-relative wind facts.",
+      "conflicts": []
+    },
+    "elevation_meters": {
+      "status": "UNKNOWN",
+      "source_ids": [
+        "LEGACY_STARTER_CATALOG"
+      ],
+      "verified_at": null,
+      "notes": "No source-verified elevation is available.",
+      "conflicts": []
+    }
+  },
+  "stadiums": [
+    {
+      "team_key": "ARI",
+      "team_name": "Arizona Diamondbacks",
+      "physical_venue_key": "chase-field-phoenix",
+      "base_venue_name": "Chase Field",
+      "current_display_name": "Chase Field",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Chase Field"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Chase Field",
+        "osm_type": "way",
+        "osm_id": 24635438,
+        "result_name": "Chase Field",
+        "observed_latitude": 33.4454856,
+        "observed_longitude": -112.0666928,
+        "legacy_latitude": 33.4453,
+        "legacy_longitude": -112.0667,
+        "legacy_difference_meters": 20.6,
+        "matched_official_address": true
+      },
+      "latitude": 33.4454856,
+      "longitude": -112.0666928,
+      "timezone": "America/Phoenix",
+      "roof_type": "retractable",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 0,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_ARI_ROOF"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "ATH",
+      "team_name": "Athletics",
+      "physical_venue_key": "sutter-health-park-west-sacramento",
+      "base_venue_name": "Sutter Health Park",
+      "current_display_name": "Sutter Health Park",
+      "current_display_effective_from": "2025",
+      "aliases": [
+        "Sutter Health Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [
+        {
+          "physical_venue_key": "oakland-coliseum-oakland",
+          "names": [
+            "Oakland Coliseum",
+            "RingCentral Coliseum",
+            "O.co Coliseum"
+          ],
+          "association_ended_after_season": 2024,
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_ATH_SUTTER_2024"
+          ]
+        }
+      ],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Sutter Health Park",
+        "osm_type": "way",
+        "osm_id": 199460948,
+        "result_name": "Sutter Health Park",
+        "observed_latitude": 38.5803717,
+        "observed_longitude": -121.5134097,
+        "legacy_latitude": 38.5803,
+        "legacy_longitude": -121.5139,
+        "legacy_difference_meters": 43.4,
+        "matched_official_address": true
+      },
+      "latitude": 38.5803717,
+      "longitude": -121.5134097,
+      "timezone": "America/Los_Angeles",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 45,
+      "field_verification": {
+        "active_club_association": {
+          "source_ids": [
+            "MLB_ATH_SUTTER_2024",
+            "MLB_TEAM_LOCATIONS_2026"
+          ]
+        },
+        "base_venue_name": {
+          "source_ids": [
+            "MLB_ATH_SUTTER_2024",
+            "MLB_TEAM_LOCATIONS_2026"
+          ]
+        },
+        "current_display_name": {
+          "source_ids": [
+            "MLB_ATH_SUTTER_2024",
+            "MLB_TEAM_LOCATIONS_2026"
+          ]
+        },
+        "former_physical_venues": {
+          "source_ids": [
+            "MLB_ATH_SUTTER_2024"
+          ],
+          "notes": "Oakland Coliseum is a different former physical home and is rejected for current association."
+        },
+        "roof_type": {
+          "status": "UNVERIFIED",
+          "source_ids": [
+            "LEGACY_STARTER_CATALOG",
+            "MLB_ATH_OPEN_AREA_CONTEXT_2026"
+          ],
+          "verified_at": null,
+          "notes": "Official context was reviewed but does not directly classify the whole physical venue roof; fail closed.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "ATL",
+      "team_name": "Atlanta Braves",
+      "physical_venue_key": "truist-park-cobb",
+      "base_venue_name": "Truist Park",
+      "current_display_name": "Truist Park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Truist Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Truist Park",
+        "osm_type": "way",
+        "osm_id": 483842488,
+        "result_name": "Truist Park",
+        "observed_latitude": 33.890738,
+        "observed_longitude": -84.4676163,
+        "legacy_latitude": 33.8908,
+        "legacy_longitude": -84.4677,
+        "legacy_difference_meters": 10.4,
+        "matched_official_address": true
+      },
+      "latitude": 33.890738,
+      "longitude": -84.4676163,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 20,
+      "field_verification": {
+        "roof_type": {
+          "status": "UNVERIFIED",
+          "source_ids": [
+            "LEGACY_STARTER_CATALOG",
+            "MLB_ATL_ROOF_CANOPY_CONTEXT_2026"
+          ],
+          "verified_at": null,
+          "notes": "Official context was reviewed but does not directly classify the whole physical venue roof; fail closed.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "BAL",
+      "team_name": "Baltimore Orioles",
+      "physical_venue_key": "oriole-park-camden-yards-baltimore",
+      "base_venue_name": "Oriole Park at Camden Yards",
+      "current_display_name": "Oriole Park at Camden Yards",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Oriole Park at Camden Yards",
+        "Oriole Park",
+        "Camden Yards"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Oriole Park at Camden Yards",
+        "osm_type": "way",
+        "osm_id": 1171328455,
+        "result_name": "Oriole Park at Camden Yards",
+        "observed_latitude": 39.2837383,
+        "observed_longitude": -76.6216056,
+        "legacy_latitude": 39.284,
+        "legacy_longitude": -76.6217,
+        "legacy_difference_meters": 30.2,
+        "matched_official_address": true
+      },
+      "latitude": 39.2837383,
+      "longitude": -76.6216056,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 110,
+      "field_verification": {
+        "base_venue_name": {
+          "source_ids": [
+            "MLB_ORIOLES_2026"
+          ]
+        },
+        "current_display_name": {
+          "source_ids": [
+            "MLB_ORIOLES_2026"
+          ]
+        },
+        "aliases": {
+          "source_ids": [
+            "MLB_ORIOLES_2026",
+            "MLB_TEAM_LOCATIONS_2026"
+          ]
+        },
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_GROUP4_OPEN_AIR_2026"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "BOS",
+      "team_name": "Boston Red Sox",
+      "physical_venue_key": "fenway-park-boston",
+      "base_venue_name": "Fenway Park",
+      "current_display_name": "Fenway Park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Fenway Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Fenway Park",
+        "osm_type": "relation",
+        "osm_id": 11188464,
+        "result_name": "Fenway Park",
+        "observed_latitude": 42.3464614,
+        "observed_longitude": -71.0970999,
+        "legacy_latitude": 42.3467,
+        "legacy_longitude": -71.0972,
+        "legacy_difference_meters": 27.8,
+        "matched_official_address": true
+      },
+      "latitude": 42.3464614,
+      "longitude": -71.0970999,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 55,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_FENWAY_NON_DOMED_2026"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "CHC",
+      "team_name": "Chicago Cubs",
+      "physical_venue_key": "wrigley-field-chicago",
+      "base_venue_name": "Wrigley Field",
+      "current_display_name": "Wrigley Field",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Wrigley Field"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Wrigley Field",
+        "osm_type": "relation",
+        "osm_id": 17379974,
+        "result_name": "Wrigley Field",
+        "observed_latitude": 41.9481846,
+        "observed_longitude": -87.655559,
+        "legacy_latitude": 41.9484,
+        "legacy_longitude": -87.6553,
+        "legacy_difference_meters": 32.1,
+        "matched_official_address": true
+      },
+      "latitude": 41.9481846,
+      "longitude": -87.655559,
+      "timezone": "America/Chicago",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 35,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_CHC_OPEN_AIR_2026"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "CWS",
+      "team_name": "Chicago White Sox",
+      "physical_venue_key": "rate-field-chicago",
+      "base_venue_name": "Rate Field",
+      "current_display_name": "Rate Field",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Rate Field"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Rate Field",
+        "osm_type": "way",
+        "osm_id": 1285780677,
+        "result_name": "Rate Field",
+        "observed_latitude": 41.829692,
+        "observed_longitude": -87.6337919,
+        "legacy_latitude": 41.83,
+        "legacy_longitude": -87.6338,
+        "legacy_difference_meters": 34.3,
+        "matched_official_address": true
+      },
+      "latitude": 41.829692,
+      "longitude": -87.6337919,
+      "timezone": "America/Chicago",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 130,
+      "field_verification": {
+        "roof_type": {
+          "status": "UNVERIFIED",
+          "source_ids": [
+            "LEGACY_STARTER_CATALOG",
+            "MLB_CWS_WEATHER_CONTEXT_2026"
+          ],
+          "verified_at": null,
+          "notes": "Official context was reviewed but does not directly classify the whole physical venue roof; fail closed.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "CIN",
+      "team_name": "Cincinnati Reds",
+      "physical_venue_key": "great-american-ball-park-cincinnati",
+      "base_venue_name": "Great American Ball Park",
+      "current_display_name": "Great American Ball Park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Great American Ball Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Great American Ball Park",
+        "osm_type": "way",
+        "osm_id": 24587940,
+        "result_name": "Great American Ball Park",
+        "observed_latitude": 39.0972484,
+        "observed_longitude": -84.5066233,
+        "legacy_latitude": 39.0979,
+        "legacy_longitude": -84.5082,
+        "legacy_difference_meters": 154.2,
+        "matched_official_address": true
+      },
+      "latitude": 39.0972484,
+      "longitude": -84.5066233,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 65,
+      "field_verification": {
+        "roof_type": {
+          "status": "UNVERIFIED",
+          "source_ids": [
+            "LEGACY_STARTER_CATALOG",
+            "MLB_CIN_WEATHER_CONTEXT_2026"
+          ],
+          "verified_at": null,
+          "notes": "Official context was reviewed but does not directly classify the whole physical venue roof; fail closed.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "CLE",
+      "team_name": "Cleveland Guardians",
+      "physical_venue_key": "progressive-field-cleveland",
+      "base_venue_name": "Progressive Field",
+      "current_display_name": "Progressive Field",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Progressive Field"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Progressive Field",
+        "osm_type": "way",
+        "osm_id": 25312466,
+        "result_name": "Progressive Field",
+        "observed_latitude": 41.4960906,
+        "observed_longitude": -81.6851319,
+        "legacy_latitude": 41.4962,
+        "legacy_longitude": -81.6852,
+        "legacy_difference_meters": 13.4,
+        "matched_official_address": true
+      },
+      "latitude": 41.4960906,
+      "longitude": -81.6851319,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 5,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_GROUP4_OPEN_AIR_2026"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "COL",
+      "team_name": "Colorado Rockies",
+      "physical_venue_key": "coors-field-denver",
+      "base_venue_name": "Coors Field",
+      "current_display_name": "Coors Field",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Coors Field"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Coors Field",
+        "osm_type": "relation",
+        "osm_id": 4423251,
+        "result_name": "Coors Field",
+        "observed_latitude": 39.7560314,
+        "observed_longitude": -104.9929286,
+        "legacy_latitude": 39.7559,
+        "legacy_longitude": -104.9942,
+        "legacy_difference_meters": 109.7,
+        "matched_official_address": true
+      },
+      "latitude": 39.7560314,
+      "longitude": -104.9929286,
+      "timezone": "America/Denver",
+      "roof_type": "open",
+      "elevation_meters": 1609,
+      "outfield_bearing_degrees": 25,
+      "field_verification": {
+        "elevation_meters": {
+          "status": "UNVERIFIED",
+          "source_ids": [
+            "LEGACY_STARTER_CATALOG"
+          ],
+          "verified_at": null,
+          "notes": "Legacy value retained without field-specific source."
+        },
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_COL_OPEN_AIR_2026"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "DET",
+      "team_name": "Detroit Tigers",
+      "physical_venue_key": "comerica-park-detroit",
+      "base_venue_name": "Comerica Park",
+      "current_display_name": "Comerica Park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Comerica Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Comerica Park",
+        "osm_type": "way",
+        "osm_id": 1307250153,
+        "result_name": "Comerica Park",
+        "observed_latitude": 42.3392219,
+        "observed_longitude": -83.0488632,
+        "legacy_latitude": 42.339,
+        "legacy_longitude": -83.0485,
+        "legacy_difference_meters": 38.7,
+        "matched_official_address": true
+      },
+      "latitude": 42.3392219,
+      "longitude": -83.0488632,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 150,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_DET_OPEN_AIR_2018"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "HOU",
+      "team_name": "Houston Astros",
+      "physical_venue_key": "downtown-houston-ballpark-2000",
+      "base_venue_name": "Daikin Park",
+      "current_display_name": "Daikin Park",
+      "current_display_effective_from": "2025-01-01",
+      "aliases": [
+        "Daikin Park"
+      ],
+      "historical_display_names": [
+        "Minute Maid Park"
+      ],
+      "display_name_history": [
+        {
+          "name": "Minute Maid Park",
+          "effective_from": "2002",
+          "effective_to": "2024",
+          "source_ids": [
+            "MLB_HOU_NAMING_2024"
+          ]
+        }
+      ],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Daikin Park",
+        "osm_type": "way",
+        "osm_id": 129025430,
+        "result_name": "Daikin Park",
+        "observed_latitude": 29.7572321,
+        "observed_longitude": -95.3552344,
+        "legacy_latitude": 29.7573,
+        "legacy_longitude": -95.3555,
+        "legacy_difference_meters": 26.7,
+        "matched_official_address": true
+      },
+      "latitude": 29.7572321,
+      "longitude": -95.3552344,
+      "timezone": "America/Chicago",
+      "roof_type": "retractable",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 30,
+      "field_verification": {
+        "base_venue_name": {
+          "source_ids": [
+            "MLB_HOU_NAMING_2024"
+          ]
+        },
+        "current_display_name": {
+          "source_ids": [
+            "MLB_HOU_NAMING_2024"
+          ]
+        },
+        "historical_display_names": {
+          "source_ids": [
+            "MLB_HOU_NAMING_2024"
+          ]
+        },
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_HOU_ROOF"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "KC",
+      "team_name": "Kansas City Royals",
+      "physical_venue_key": "kauffman-stadium-kansas-city",
+      "base_venue_name": "Kauffman Stadium",
+      "current_display_name": "Kauffman Stadium",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Kauffman Stadium"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Kauffman Stadium",
+        "osm_type": "way",
+        "osm_id": 1351194912,
+        "result_name": "Kauffman Stadium",
+        "observed_latitude": 39.0515081,
+        "observed_longitude": -94.4804598,
+        "legacy_latitude": 39.0517,
+        "legacy_longitude": -94.4803,
+        "legacy_difference_meters": 25.4,
+        "matched_official_address": true
+      },
+      "latitude": 39.0515081,
+      "longitude": -94.4804598,
+      "timezone": "America/Chicago",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 65,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_KC_ROOF_NEVER_BUILT_2021"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "LAA",
+      "team_name": "Los Angeles Angels",
+      "physical_venue_key": "angel-stadium-anaheim",
+      "base_venue_name": "Angel Stadium",
+      "current_display_name": "Angel Stadium",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Angel Stadium"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Angel Stadium",
+        "osm_type": "way",
+        "osm_id": 23973377,
+        "result_name": "Angel Stadium of Anaheim",
+        "observed_latitude": 33.8002599,
+        "observed_longitude": -117.8817426,
+        "legacy_latitude": 33.8003,
+        "legacy_longitude": -117.8827,
+        "legacy_difference_meters": 88.6,
+        "matched_official_address": true
+      },
+      "latitude": 33.8002599,
+      "longitude": -117.8817426,
+      "timezone": "America/Los_Angeles",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 55,
+      "field_verification": {
+        "roof_type": {
+          "status": "UNVERIFIED",
+          "source_ids": [
+            "LEGACY_STARTER_CATALOG",
+            "MLB_LAA_SUN_CONTEXT_2026"
+          ],
+          "verified_at": null,
+          "notes": "Official context was reviewed but does not directly classify the whole physical venue roof; fail closed.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "LAD",
+      "team_name": "Los Angeles Dodgers",
+      "physical_venue_key": "dodger-stadium-los-angeles",
+      "base_venue_name": "Dodger Stadium",
+      "current_display_name": "UNIQLO Field at Dodger Stadium",
+      "current_display_effective_from": "2026-03-26",
+      "aliases": [
+        "UNIQLO Field at Dodger Stadium",
+        "Dodger Stadium"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Dodger Stadium",
+        "osm_type": "way",
+        "osm_id": 1353249584,
+        "result_name": "Dodger Stadium",
+        "observed_latitude": 34.0736255,
+        "observed_longitude": -118.2398452,
+        "legacy_latitude": 34.0739,
+        "legacy_longitude": -118.24,
+        "legacy_difference_meters": 33.7,
+        "matched_official_address": true
+      },
+      "latitude": 34.0736255,
+      "longitude": -118.2398452,
+      "timezone": "America/Los_Angeles",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 25,
+      "field_verification": {
+        "base_venue_name": {
+          "source_ids": [
+            "MLB_DODGERS_UNIQLO_2026",
+            "MLB_TEAM_LOCATIONS_2026"
+          ],
+          "notes": "Dodger Stadium remains the ballpark/base name."
+        },
+        "current_display_name": {
+          "source_ids": [
+            "MLB_DODGERS_UNIQLO_2026"
+          ],
+          "notes": "Field branding does not create a new physical venue."
+        },
+        "aliases": {
+          "source_ids": [
+            "MLB_DODGERS_UNIQLO_2026",
+            "MLB_TEAM_LOCATIONS_2026"
+          ]
+        },
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_LAD_OPEN_AIR_2026"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "MIA",
+      "team_name": "Miami Marlins",
+      "physical_venue_key": "miami-ballpark-2012",
+      "base_venue_name": "loanDepot park",
+      "current_display_name": "loanDepot park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "loanDepot park"
+      ],
+      "historical_display_names": [
+        "Marlins Park"
+      ],
+      "display_name_history": [
+        {
+          "name": "Marlins Park",
+          "effective_from": "2012",
+          "effective_to": "2021",
+          "source_ids": [
+            "MLB_MIA_ROOF_HISTORY"
+          ]
+        }
+      ],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "loanDepot park",
+        "osm_type": "relation",
+        "osm_id": 8736190,
+        "result_name": "LoanDepot Park",
+        "observed_latitude": 25.7780733,
+        "observed_longitude": -80.219554,
+        "legacy_latitude": 25.7781,
+        "legacy_longitude": -80.2197,
+        "legacy_difference_meters": 14.9,
+        "matched_official_address": true
+      },
+      "latitude": 25.7780733,
+      "longitude": -80.219554,
+      "timezone": "America/New_York",
+      "roof_type": "retractable",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 140,
+      "field_verification": {
+        "historical_display_names": {
+          "source_ids": [
+            "MLB_MIA_ROOF_HISTORY"
+          ]
+        },
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_MIA_ROOF_HISTORY"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "MIL",
+      "team_name": "Milwaukee Brewers",
+      "physical_venue_key": "milwaukee-ballpark-2001",
+      "base_venue_name": "American Family Field",
+      "current_display_name": "American Family Field",
+      "current_display_effective_from": null,
+      "aliases": [
+        "American Family Field"
+      ],
+      "historical_display_names": [
+        "Miller Park"
+      ],
+      "display_name_history": [
+        {
+          "name": "Miller Park",
+          "effective_from": "2001",
+          "effective_to": "2020",
+          "source_ids": [
+            "MLB_MIL_ROOF_HISTORY"
+          ]
+        }
+      ],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "American Family Field",
+        "osm_type": "way",
+        "osm_id": 663006116,
+        "result_name": "American Family Field",
+        "observed_latitude": 43.0280619,
+        "observed_longitude": -87.9712694,
+        "legacy_latitude": 43.028,
+        "legacy_longitude": -87.9712,
+        "legacy_difference_meters": 8.9,
+        "matched_official_address": true
+      },
+      "latitude": 43.0280619,
+      "longitude": -87.9712694,
+      "timezone": "America/Chicago",
+      "roof_type": "retractable",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 55,
+      "field_verification": {
+        "historical_display_names": {
+          "source_ids": [
+            "MLB_MIL_ROOF_HISTORY"
+          ]
+        },
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_MIL_ROOF_HISTORY"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "MIN",
+      "team_name": "Minnesota Twins",
+      "physical_venue_key": "target-field-minneapolis",
+      "base_venue_name": "Target Field",
+      "current_display_name": "Target Field",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Target Field"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Target Field",
+        "osm_type": "relation",
+        "osm_id": 6133680,
+        "result_name": "Target Field",
+        "observed_latitude": 44.9816845,
+        "observed_longitude": -93.2778643,
+        "legacy_latitude": 44.9817,
+        "legacy_longitude": -93.2776,
+        "legacy_difference_meters": 20.9,
+        "matched_official_address": true
+      },
+      "latitude": 44.9816845,
+      "longitude": -93.2778643,
+      "timezone": "America/Chicago",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 85,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MBA_MIN_OPEN_AIR_2011"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "NYM",
+      "team_name": "New York Mets",
+      "physical_venue_key": "citi-field-queens",
+      "base_venue_name": "Citi Field",
+      "current_display_name": "Citi Field",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Citi Field"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Citi Field",
+        "osm_type": "way",
+        "osm_id": 604023701,
+        "result_name": "Citi Field",
+        "observed_latitude": 40.7572778,
+        "observed_longitude": -73.8458788,
+        "legacy_latitude": 40.7571,
+        "legacy_longitude": -73.8458,
+        "legacy_difference_meters": 20.9,
+        "matched_official_address": true
+      },
+      "latitude": 40.7572778,
+      "longitude": -73.8458788,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 70,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_NYM_OPEN_AIR_2026"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "NYY",
+      "team_name": "New York Yankees",
+      "physical_venue_key": "yankee-stadium-bronx-2009",
+      "base_venue_name": "Yankee Stadium",
+      "current_display_name": "Yankee Stadium",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Yankee Stadium"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Yankee Stadium",
+        "osm_type": "way",
+        "osm_id": 24801630,
+        "result_name": "Yankee Stadium",
+        "observed_latitude": 40.8295828,
+        "observed_longitude": -73.9265212,
+        "legacy_latitude": 40.8296,
+        "legacy_longitude": -73.9262,
+        "legacy_difference_meters": 27.1,
+        "matched_official_address": true
+      },
+      "latitude": 40.8295828,
+      "longitude": -73.9265212,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 95,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_GROUP4_OPEN_AIR_2026",
+            "MLB_NYY_OUTDOOR_CONTEXT_2013"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "PHI",
+      "team_name": "Philadelphia Phillies",
+      "physical_venue_key": "citizens-bank-park-philadelphia",
+      "base_venue_name": "Citizens Bank Park",
+      "current_display_name": "Citizens Bank Park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Citizens Bank Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Citizens Bank Park",
+        "osm_type": "way",
+        "osm_id": 255489463,
+        "result_name": "Citizens Bank Park",
+        "observed_latitude": 39.9059221,
+        "observed_longitude": -75.1664804,
+        "legacy_latitude": 39.9061,
+        "legacy_longitude": -75.1665,
+        "legacy_difference_meters": 19.9,
+        "matched_official_address": true
+      },
+      "latitude": 39.9059221,
+      "longitude": -75.1664804,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 70,
+      "field_verification": {
+        "roof_type": {
+          "status": "UNVERIFIED",
+          "source_ids": [
+            "LEGACY_STARTER_CATALOG",
+            "MLB_PHI_OPEN_AREA_CONTEXT_2026"
+          ],
+          "verified_at": null,
+          "notes": "Official context was reviewed but does not directly classify the whole physical venue roof; fail closed.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "PIT",
+      "team_name": "Pittsburgh Pirates",
+      "physical_venue_key": "pnc-park-pittsburgh",
+      "base_venue_name": "PNC Park",
+      "current_display_name": "PNC Park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "PNC Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "PNC Park",
+        "osm_type": "way",
+        "osm_id": 24722803,
+        "result_name": "PNC Park",
+        "observed_latitude": 40.4469258,
+        "observed_longitude": -80.0056063,
+        "legacy_latitude": 40.4469,
+        "legacy_longitude": -80.0057,
+        "legacy_difference_meters": 8.4,
+        "matched_official_address": true
+      },
+      "latitude": 40.4469258,
+      "longitude": -80.0056063,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 45,
+      "field_verification": {
+        "roof_type": {
+          "status": "UNVERIFIED",
+          "source_ids": [
+            "LEGACY_STARTER_CATALOG",
+            "MLB_PIT_OPEN_AREA_CONTEXT_2026"
+          ],
+          "verified_at": null,
+          "notes": "Official context was reviewed but does not directly classify the whole physical venue roof; fail closed.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "SD",
+      "team_name": "San Diego Padres",
+      "physical_venue_key": "petco-park-san-diego",
+      "base_venue_name": "Petco Park",
+      "current_display_name": "Petco Park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Petco Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Petco Park",
+        "osm_type": "way",
+        "osm_id": 24616919,
+        "result_name": "Petco Park",
+        "observed_latitude": 32.7071874,
+        "observed_longitude": -117.156913,
+        "legacy_latitude": 32.7076,
+        "legacy_longitude": -117.157,
+        "legacy_difference_meters": 46.6,
+        "matched_official_address": true
+      },
+      "latitude": 32.7071874,
+      "longitude": -117.156913,
+      "timezone": "America/Los_Angeles",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 20,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_SD_OPEN_AIR_2021"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "SF",
+      "team_name": "San Francisco Giants",
+      "physical_venue_key": "oracle-park-san-francisco",
+      "base_venue_name": "Oracle Park",
+      "current_display_name": "Oracle Park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Oracle Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Oracle Park",
+        "osm_type": "relation",
+        "osm_id": 7325085,
+        "result_name": "Oracle Park",
+        "observed_latitude": 37.7786059,
+        "observed_longitude": -122.3894716,
+        "legacy_latitude": 37.7786,
+        "legacy_longitude": -122.3893,
+        "legacy_difference_meters": 15.1,
+        "matched_official_address": true
+      },
+      "latitude": 37.7786059,
+      "longitude": -122.3894716,
+      "timezone": "America/Los_Angeles",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 70,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_SF_OPEN_AIR_2013",
+            "MLB_SF_ORACLE_RENAME_2019"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "SEA",
+      "team_name": "Seattle Mariners",
+      "physical_venue_key": "t-mobile-park-seattle",
+      "base_venue_name": "T-Mobile Park",
+      "current_display_name": "T-Mobile Park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "T-Mobile Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "T-Mobile Park",
+        "osm_type": "relation",
+        "osm_id": 18550612,
+        "result_name": "T-Mobile Park",
+        "observed_latitude": 47.5913974,
+        "observed_longitude": -122.332507,
+        "legacy_latitude": 47.5914,
+        "legacy_longitude": -122.3325,
+        "legacy_difference_meters": 0.6,
+        "matched_official_address": true
+      },
+      "latitude": 47.5913974,
+      "longitude": -122.332507,
+      "timezone": "America/Los_Angeles",
+      "roof_type": "retractable",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 60,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_SEA_ROOF"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "STL",
+      "team_name": "St. Louis Cardinals",
+      "physical_venue_key": "busch-stadium-st-louis-2006",
+      "base_venue_name": "Busch Stadium",
+      "current_display_name": "Busch Stadium",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Busch Stadium"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Busch Stadium",
+        "osm_type": "way",
+        "osm_id": 42341545,
+        "result_name": "Busch Stadium",
+        "observed_latitude": 38.6225054,
+        "observed_longitude": -90.1930037,
+        "legacy_latitude": 38.6226,
+        "legacy_longitude": -90.1928,
+        "legacy_difference_meters": 20.6,
+        "matched_official_address": true
+      },
+      "latitude": 38.6225054,
+      "longitude": -90.1930037,
+      "timezone": "America/Chicago",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 95,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_STL_OPEN_AIR_2021"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "TB",
+      "team_name": "Tampa Bay Rays",
+      "physical_venue_key": "tropicana-field-st-petersburg",
+      "base_venue_name": "Tropicana Field",
+      "current_display_name": "Tropicana Field",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Tropicana Field"
+      ],
+      "historical_display_names": [
+        "Florida Suncoast Dome",
+        "ThunderDome"
+      ],
+      "display_name_history": [
+        {
+          "name": "Florida Suncoast Dome",
+          "effective_from": "1990-03-03",
+          "effective_to": "1993",
+          "source_ids": [
+            "MLB_TB_2026"
+          ]
+        },
+        {
+          "name": "ThunderDome",
+          "effective_from": "1993",
+          "effective_to": "1996-10",
+          "source_ids": [
+            "MLB_TB_2026"
+          ]
+        }
+      ],
+      "former_physical_venues": [
+        {
+          "physical_venue_key": "steinbrenner-field-tampa",
+          "names": [
+            "George M. Steinbrenner Field"
+          ],
+          "association_started_season": 2025,
+          "association_ended_after_season": 2025,
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_TB_2026"
+          ]
+        }
+      ],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Tropicana Field",
+        "osm_type": "way",
+        "osm_id": 712876268,
+        "result_name": "Tropicana Field",
+        "observed_latitude": 27.7680559,
+        "observed_longitude": -82.6532755,
+        "legacy_latitude": 27.7682,
+        "legacy_longitude": -82.6534,
+        "legacy_difference_meters": 20.2,
+        "matched_official_address": true
+      },
+      "latitude": 27.7680559,
+      "longitude": -82.6532755,
+      "timezone": "America/New_York",
+      "roof_type": "fixed",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 65,
+      "field_verification": {
+        "active_club_association": {
+          "source_ids": [
+            "MLB_TB_2026",
+            "MLB_TEAM_LOCATIONS_2026"
+          ]
+        },
+        "historical_display_names": {
+          "source_ids": [
+            "MLB_TB_2026"
+          ]
+        },
+        "former_physical_venues": {
+          "source_ids": [
+            "MLB_TB_2026"
+          ]
+        },
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_TB_2026"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "TEX",
+      "team_name": "Texas Rangers",
+      "physical_venue_key": "globe-life-field-arlington",
+      "base_venue_name": "Globe Life Field",
+      "current_display_name": "Globe Life Field",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Globe Life Field"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [
+        {
+          "physical_venue_key": "globe-life-park-arlington",
+          "names": [
+            "Globe Life Park in Arlington",
+            "The Ballpark in Arlington",
+            "Ameriquest Field in Arlington",
+            "Rangers Ballpark in Arlington"
+          ],
+          "association_started_season": 1994,
+          "association_ended_after_season": 2019,
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_TEX_FACTS"
+          ]
+        }
+      ],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Globe Life Field",
+        "osm_type": "way",
+        "osm_id": 704674261,
+        "result_name": "Globe Life Field (Texas Rangers Stadium)",
+        "observed_latitude": 32.747642,
+        "observed_longitude": -97.0841049,
+        "legacy_latitude": 32.7473,
+        "legacy_longitude": -97.0846,
+        "legacy_difference_meters": 59.9,
+        "matched_official_address": true
+      },
+      "latitude": 32.747642,
+      "longitude": -97.0841049,
+      "timezone": "America/Chicago",
+      "roof_type": "retractable",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 40,
+      "field_verification": {
+        "former_physical_venues": {
+          "source_ids": [
+            "MLB_TEX_FACTS"
+          ]
+        },
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_TEX_FACTS"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "TOR",
+      "team_name": "Toronto Blue Jays",
+      "physical_venue_key": "rogers-centre-toronto",
+      "base_venue_name": "Rogers Centre",
+      "current_display_name": "Rogers Centre",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Rogers Centre"
+      ],
+      "historical_display_names": [
+        "SkyDome"
+      ],
+      "display_name_history": [
+        {
+          "name": "SkyDome",
+          "effective_from": "1989",
+          "effective_to": "2005",
+          "source_ids": [
+            "MLB_TOR_HISTORY"
+          ]
+        }
+      ],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Rogers Centre",
+        "osm_type": "way",
+        "osm_id": 7969701,
+        "result_name": "Rogers Centre",
+        "observed_latitude": 43.6416598,
+        "observed_longitude": -79.3891976,
+        "legacy_latitude": 43.6414,
+        "legacy_longitude": -79.3894,
+        "legacy_difference_meters": 33.2,
+        "matched_official_address": true
+      },
+      "latitude": 43.6416598,
+      "longitude": -79.3891976,
+      "timezone": "America/Toronto",
+      "roof_type": "retractable",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 35,
+      "field_verification": {
+        "historical_display_names": {
+          "source_ids": [
+            "MLB_TOR_HISTORY"
+          ]
+        },
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_TOR_HISTORY"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    },
+    {
+      "team_key": "WSH",
+      "team_name": "Washington Nationals",
+      "physical_venue_key": "nationals-park-washington",
+      "base_venue_name": "Nationals Park",
+      "current_display_name": "Nationals Park",
+      "current_display_effective_from": null,
+      "aliases": [
+        "Nationals Park"
+      ],
+      "historical_display_names": [],
+      "display_name_history": [],
+      "former_physical_venues": [],
+      "active_club_association": true,
+      "coordinate_evidence": {
+        "source_id": "OSM_NOMINATIM_2026",
+        "query_name": "Nationals Park",
+        "osm_type": "way",
+        "osm_id": 67260011,
+        "result_name": "Nationals Park",
+        "observed_latitude": 38.8727332,
+        "observed_longitude": -77.0074815,
+        "legacy_latitude": 38.873,
+        "legacy_longitude": -77.0074,
+        "legacy_difference_meters": 30.5,
+        "matched_official_address": true
+      },
+      "latitude": 38.8727332,
+      "longitude": -77.0074815,
+      "timezone": "America/New_York",
+      "roof_type": "open",
+      "elevation_meters": null,
+      "outfield_bearing_degrees": 35,
+      "field_verification": {
+        "roof_type": {
+          "status": "VERIFIED",
+          "source_ids": [
+            "MLB_WSH_OPEN_AIR_2026"
+          ],
+          "verified_at": "2026-07-13",
+          "notes": "Field-level direct evidence reviewed under DSE_MLB_STADIUM_METADATA_V1 catalog revision 3.",
+          "conflicts": []
+        }
+      }
+    }
+  ],
+  "evidence_contract": {
+    "version": "DSE_STADIUM_FIELD_EVIDENCE_V1",
+    "catalog_revision": 3,
+    "normalization_version": "DSE_EVIDENCE_TEXT_NORM_V1",
+    "retrieval_timezone": "America/Los_Angeles",
+    "revision_policy": "Evidence or classification changes require a new catalog revision and normal review; prior catalog files remain immutable."
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daily-sports-edge.local/schemas/mlb-features-v1.schema.json",
+  "title": "mlb-features-v1",
+  "type": "object",
+  "required": [
+    "contract_version", "event_id", "canonical_game_checksum", "schedule_context",
+    "team_context", "venue_context", "weather_context", "market_context",
+    "data_quality_state", "uncertainty_flags", "generated_at", "checksum"
+  ],
+  "properties": {
+    "contract_version": {"const": "mlb-features-v1"},
+    "event_id": {"type": "string", "minLength": 1},
+    "canonical_game_checksum": {"$ref": "#/$defs/checksum"},
+    "schedule_context": {"type": "object"},
+    "team_context": {"type": "object"},
+    "venue_context": {"type": "object"},
+    "weather_context": {"type": "object"},
+    "market_context": {"type": "object"},
+    "data_quality_state": {"enum": ["ready", "degraded", "blocked"]},
+    "uncertainty_flags": {"type": "array", "items": {"type": "string"}},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "checksum": {"$ref": "#/$defs/checksum"}
+  },
+  "$defs": {"checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+  "additionalProperties": false
+}

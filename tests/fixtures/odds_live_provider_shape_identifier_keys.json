@@ -1,0 +1,32 @@
+[
+  {
+    "id": "sanitized-live-shape-event",
+    "sport_key": "baseball_mlb",
+    "commence_time": "2026-07-12T20:06:00Z",
+    "home_team": "St. Louis Cardinals",
+    "away_team": "Atlanta Braves",
+    "bookmakers": [
+      {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "last_update": "2026-07-12T21:12:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-07-12T21:12:00Z",
+            "outcomes": [
+              {
+                "name": "Atlanta Braves",
+                "price": 2200
+              },
+              {
+                "name": "St. Louis Cardinals",
+                "price": -10000
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,12 @@
+-c requirements.txt
+-r requirements.in
+
+mypy==2.2.0
+pip-audit==2.10.1
+pip-tools==7.5.3
+# build 1.5.1 is yanked; keep development lock resolution on a supported build.
+build!=1.5.1
+pytest==9.1.1
+ruff==0.15.20
+types-requests==2.32.4.20260324
+httpx==0.28.1

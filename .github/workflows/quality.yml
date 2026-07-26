@@ -1,0 +1,108 @@
+name: quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "rc/**"
+      - "phase1/**"
+
+permissions:
+  contents: read
+
+jobs:
+  python-quality:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Tracked credential and secret scan
+        run: python scripts/scan_repository_secrets.py --skip-env
+      - name: Install locked development dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+      - name: Tests
+        run: python -m pytest -q
+      - name: Ruff
+        run: python -m ruff check .
+      - name: Mypy
+        run: python -m mypy
+      - name: Dependency consistency
+        run: python -m pip check
+      - name: Locked runtime vulnerability audit
+        run: python -m pip_audit --require-hashes -r requirements.txt --progress-spinner off
+      - name: Locked-install dry run
+        run: python -m pip install --dry-run --ignore-installed --require-hashes -r requirements-dev.txt
+
+  stats-quality:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-stats.txt
+      - name: Install standalone locked stats environment
+        run: python -m pip install --require-hashes -r requirements-stats.txt
+      - name: Python 3.12 pybaseball offline capability compatibility
+        run: python scripts/check_pybaseball_compatibility.py
+      - name: Focused stats tests
+        run: python -m pytest -q tests/stats
+      - name: Full tests in stats environment
+        run: python -m pytest -q
+      - name: Stats dependency consistency
+        run: python -m pip check
+      - name: Locked stats vulnerability audit
+        run: python -m pip_audit --require-hashes -r requirements-stats.txt --progress-spinner off
+      - name: Locked stats install dry run
+        run: python -m pip install --dry-run --ignore-installed --require-hashes -r requirements-stats.txt
+
+  linux-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install locked development dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+      - name: Symlink containment and raw-evidence tests
+        run: >-
+          python -m pytest -q
+          tests/test_artifacts.py::test_resolve_contained_path_rejects_symlink_even_when_target_is_inside_root
+          tests/test_artifacts.py::test_resolve_contained_path_rejects_symlink_to_outside_root
+          tests/test_artifacts.py::test_write_json_rejects_symlink_target
+          tests/test_artifacts.py::test_create_zip_rejects_symlink_source
+          tests/test_artifacts.py::test_create_zip_rejects_symlink_run_directory
+          tests/test_stats_evidence_secret_scan.py::test_symlink_is_not_followed
+
+  docker-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Build and verify exact release image
+        env:
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          VERIFICATION_OUTPUT: .validation/docker-release/verification.json
+        run: bash scripts/verify_docker_release.sh
+      - name: Upload sanitized Docker evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docker-release-verification-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .validation/docker-release/verification.json
+          if-no-files-found: error
+          retention-days: 14

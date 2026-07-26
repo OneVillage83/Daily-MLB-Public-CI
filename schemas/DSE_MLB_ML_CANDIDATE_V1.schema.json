@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daily-sports-edge.local/schemas/DSE_MLB_ML_CANDIDATE_V1.schema.json",
+  "title": "DSE_MLB_ML_CANDIDATE_V1 policy result",
+  "type": "object",
+  "required": [
+    "policy_version", "evaluation_id", "event_id", "prediction_id", "prediction_checksum",
+    "canonical_game_checksum", "evaluated_at", "selected_team_key", "side_evaluations",
+    "prediction_probability", "probability_lower", "probability_upper",
+    "market_no_vig_probability", "best_price", "best_price_books",
+    "break_even_probability", "edge_percentage_points", "expected_value_per_unit_risk",
+    "eligible_bookmaker_count", "eligible_bookmakers", "confidence_grade",
+    "gate_results", "decision", "checksum"
+  ],
+  "properties": {
+    "policy_version": {"const": "DSE_MLB_ML_CANDIDATE_V1"},
+    "evaluation_id": {"type": "string", "minLength": 1},
+    "event_id": {"type": "string", "minLength": 1},
+    "prediction_id": {"type": "string", "minLength": 1},
+    "prediction_checksum": {"$ref": "#/$defs/checksum"},
+    "canonical_game_checksum": {"$ref": "#/$defs/checksum"},
+    "evaluated_at": {"type": "string", "format": "date-time"},
+    "selected_team_key": {"type": "string", "minLength": 1},
+    "side_evaluations": {"type": "array", "items": {"$ref": "#/$defs/side"}},
+    "prediction_probability": {"$ref": "#/$defs/probability"},
+    "probability_lower": {"$ref": "#/$defs/probability"},
+    "probability_upper": {"$ref": "#/$defs/probability"},
+    "market_no_vig_probability": {"$ref": "#/$defs/nullableProbability"},
+    "best_price": {"type": ["number", "null"]},
+    "best_price_books": {"type": "array", "items": {"type": "string"}},
+    "break_even_probability": {"$ref": "#/$defs/nullableProbability"},
+    "edge_percentage_points": {"type": ["number", "null"]},
+    "expected_value_per_unit_risk": {"type": ["number", "null"]},
+    "eligible_bookmaker_count": {"type": "integer", "minimum": 0},
+    "eligible_bookmakers": {"type": "array", "items": {"type": "string"}},
+    "confidence_grade": {"enum": ["A", "B", "C", "D"]},
+    "gate_results": {
+      "type": "array", "minItems": 15, "maxItems": 15,
+      "items": {"$ref": "#/$defs/gate"}
+    },
+    "decision": {"enum": ["PASS", "CANDIDATE_REQUIRES_REVIEW"]},
+    "checksum": {"$ref": "#/$defs/checksum"}
+  },
+  "$defs": {
+    "checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "probability": {"type": "number", "minimum": 0, "maximum": 1},
+    "nullableProbability": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "gateValue": {"type": ["boolean", "integer", "number", "string", "null"]},
+    "gate": {
+      "type": "object",
+      "required": ["code", "passed", "threshold", "observed_value", "reason"],
+      "properties": {
+        "code": {"enum": [
+          "prediction_valid", "market_independent", "identity_valid", "market_supported",
+          "minimum_book_count", "odds_fresh", "best_price_eligible", "data_quality_clear",
+          "minimum_edge", "minimum_ev", "uncertainty_clears_market", "minimum_confidence",
+          "weather_gate_clear", "phase2_live_weather_accepted", "event_pregame"
+        ]},
+        "passed": {"type": "boolean"},
+        "threshold": {"$ref": "#/$defs/gateValue"},
+        "observed_value": {"$ref": "#/$defs/gateValue"},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "side": {
+      "type": "object",
+      "required": [
+        "team_key", "prediction_probability", "probability_lower", "probability_upper",
+        "market_no_vig_probability", "best_price", "best_price_books",
+        "break_even_probability", "edge_percentage_points", "expected_value_per_unit_risk"
+      ],
+      "properties": {
+        "team_key": {"type": "string", "minLength": 1},
+        "prediction_probability": {"$ref": "#/$defs/probability"},
+        "probability_lower": {"$ref": "#/$defs/probability"},
+        "probability_upper": {"$ref": "#/$defs/probability"},
+        "market_no_vig_probability": {"$ref": "#/$defs/nullableProbability"},
+        "best_price": {"type": ["number", "null"]},
+        "best_price_books": {"type": "array", "items": {"type": "string"}},
+        "break_even_probability": {"$ref": "#/$defs/nullableProbability"},
+        "edge_percentage_points": {"type": ["number", "null"]},
+        "expected_value_per_unit_risk": {"type": ["number", "null"]}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

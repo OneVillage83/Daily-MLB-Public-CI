@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "providers": {
+    "baseball_reference": {
+      "ARI": "ARI", "ATH": "ATH", "ATL": "ATL", "BAL": "BAL",
+      "BOS": "BOS", "CHC": "CHC", "CHW": "CWS", "CIN": "CIN",
+      "CLE": "CLE", "COL": "COL", "DET": "DET", "HOU": "HOU",
+      "KCR": "KC", "LAA": "LAA", "LAD": "LAD", "MIA": "MIA",
+      "MIL": "MIL", "MIN": "MIN", "NYM": "NYM", "NYY": "NYY",
+      "PHI": "PHI", "PIT": "PIT", "SDP": "SD", "SEA": "SEA",
+      "SFG": "SF", "STL": "STL", "TBR": "TB", "TEX": "TEX",
+      "TOR": "TOR", "WSN": "WSH"
+    },
+    "baseball_reference_daily": {
+      "Arizona|Maj-NL": "ARI", "Athletics|Maj-AL": "ATH",
+      "Atlanta|Maj-NL": "ATL", "Baltimore|Maj-AL": "BAL",
+      "Boston|Maj-AL": "BOS", "Chicago|Maj-AL": "CWS",
+      "Chicago|Maj-NL": "CHC", "Cincinnati|Maj-NL": "CIN",
+      "Cleveland|Maj-AL": "CLE", "Colorado|Maj-NL": "COL",
+      "Detroit|Maj-AL": "DET", "Houston|Maj-AL": "HOU",
+      "Kansas City|Maj-AL": "KC", "Los Angeles|Maj-AL": "LAA",
+      "Los Angeles|Maj-NL": "LAD", "Miami|Maj-NL": "MIA",
+      "Milwaukee|Maj-NL": "MIL", "Minnesota|Maj-AL": "MIN",
+      "New York|Maj-AL": "NYY", "New York|Maj-NL": "NYM",
+      "Philadelphia|Maj-NL": "PHI", "Pittsburgh|Maj-NL": "PIT",
+      "San Diego|Maj-NL": "SD", "San Francisco|Maj-NL": "SF",
+      "Seattle|Maj-AL": "SEA", "St. Louis|Maj-NL": "STL",
+      "Tampa Bay|Maj-AL": "TB", "Texas|Maj-AL": "TEX",
+      "Toronto|Maj-AL": "TOR", "Washington|Maj-NL": "WSH"
+    },
+    "statcast": {
+      "ARI": "ARI", "AZ": "ARI", "ATH": "ATH", "ATL": "ATL",
+      "BAL": "BAL", "BOS": "BOS", "CHC": "CHC", "CWS": "CWS",
+      "CIN": "CIN", "CLE": "CLE", "COL": "COL", "DET": "DET",
+      "HOU": "HOU", "KC": "KC", "LAA": "LAA", "LAD": "LAD",
+      "MIA": "MIA", "MIL": "MIL", "MIN": "MIN", "NYM": "NYM",
+      "NYY": "NYY", "PHI": "PHI", "PIT": "PIT", "SD": "SD",
+      "SEA": "SEA", "SF": "SF", "STL": "STL", "TB": "TB",
+      "TEX": "TEX", "TOR": "TOR", "WSH": "WSH"
+    },
+    "retrosheet": {
+      "ANA": "LAA", "ARI": "ARI", "ATH": "ATH", "ATL": "ATL",
+      "BAL": "BAL", "BOS": "BOS", "CHA": "CWS", "CHN": "CHC",
+      "CIN": "CIN", "CLE": "CLE", "COL": "COL", "DET": "DET",
+      "HOU": "HOU", "KCA": "KC", "LAN": "LAD", "MIA": "MIA",
+      "MIL": "MIL", "MIN": "MIN", "NYA": "NYY", "NYN": "NYM",
+      "OAK": "ATH", "PHI": "PHI", "PIT": "PIT", "SDN": "SD",
+      "SEA": "SEA", "SFN": "SF", "SLN": "STL", "TBA": "TB",
+      "TEX": "TEX", "TOR": "TOR", "WAS": "WSH"
+    }
+  }
+}

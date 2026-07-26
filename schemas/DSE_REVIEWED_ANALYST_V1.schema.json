@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daily-sports-edge.local/schemas/DSE_REVIEWED_ANALYST_V1.schema.json",
+  "title": "DSE_REVIEWED_ANALYST_V1 sealed prediction",
+  "type": "object",
+  "required": [
+    "contract_version", "prediction_id", "run_id", "event_id", "home_team_key",
+    "away_team_key", "home_probability", "away_probability", "home_probability_lower",
+    "home_probability_upper", "away_probability_lower", "away_probability_upper",
+    "lower_bound", "upper_bound", "generated_at", "sealed_at", "feature_checksum",
+    "market_independence_attested", "evidence", "evidence_checksum", "checksum",
+    "prediction_checksum", "analyst_id", "method_version"
+  ],
+  "properties": {
+    "contract_version": {"const": "DSE_REVIEWED_ANALYST_V1"},
+    "prediction_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "event_id": {"type": "string", "minLength": 1},
+    "home_team_key": {"type": "string", "minLength": 1},
+    "away_team_key": {"type": "string", "minLength": 1},
+    "home_probability": {"$ref": "#/$defs/probability"},
+    "away_probability": {"$ref": "#/$defs/probability"},
+    "home_probability_lower": {"$ref": "#/$defs/probability"},
+    "home_probability_upper": {"$ref": "#/$defs/probability"},
+    "away_probability_lower": {"$ref": "#/$defs/probability"},
+    "away_probability_upper": {"$ref": "#/$defs/probability"},
+    "lower_bound": {"$ref": "#/$defs/probability"},
+    "upper_bound": {"$ref": "#/$defs/probability"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "sealed_at": {"type": "string", "format": "date-time"},
+    "feature_checksum": {"$ref": "#/$defs/checksum"},
+    "market_independence_attested": {"type": "boolean"},
+    "evidence": {"$ref": "#/$defs/evidence"},
+    "evidence_checksum": {"$ref": "#/$defs/checksum"},
+    "checksum": {"$ref": "#/$defs/checksum"},
+    "prediction_checksum": {"$ref": "#/$defs/checksum"},
+    "analyst_id": {"type": "string", "minLength": 1},
+    "method_version": {"const": "DSE_REVIEWED_ANALYST_V1"}
+  },
+  "$defs": {
+    "probability": {"type": "number", "minimum": 0, "maximum": 1},
+    "checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "assessment": {
+      "type": "object",
+      "required": ["state", "assessment", "source_ids"],
+      "properties": {
+        "state": {"enum": ["available", "unknown"]},
+        "assessment": {"type": ["string", "null"]},
+        "source_ids": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["source_id", "source_name", "reference", "observed_at"],
+      "properties": {
+        "source_id": {"type": "string", "minLength": 1},
+        "source_name": {"type": "string", "minLength": 1},
+        "reference": {"type": "string", "minLength": 1},
+        "observed_at": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "analyst_identity", "method_version", "starting_pitching", "bullpen",
+        "offensive_matchup", "lineup_information_state", "lineup_notes",
+        "lineup_source_ids", "venue_context", "weather_context", "schedule_rest_context",
+        "material_unknowns", "source_provenance"
+      ],
+      "properties": {
+        "analyst_identity": {"type": "string", "minLength": 1},
+        "method_version": {"const": "DSE_REVIEWED_ANALYST_V1"},
+        "starting_pitching": {"$ref": "#/$defs/assessment"},
+        "bullpen": {"$ref": "#/$defs/assessment"},
+        "offensive_matchup": {"$ref": "#/$defs/assessment"},
+        "lineup_information_state": {"enum": ["confirmed", "projected", "unavailable", "unknown"]},
+        "lineup_notes": {"type": ["string", "null"]},
+        "lineup_source_ids": {"type": "array", "items": {"type": "string"}},
+        "venue_context": {"$ref": "#/$defs/assessment"},
+        "weather_context": {"$ref": "#/$defs/assessment"},
+        "schedule_rest_context": {"$ref": "#/$defs/assessment"},
+        "material_unknowns": {"type": "array", "items": {"type": "string"}},
+        "source_provenance": {"type": "array", "items": {"$ref": "#/$defs/source"}}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
