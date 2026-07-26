@@ -377,6 +377,148 @@ def test_failed_phase_retry_and_failed_run_resume_are_explicit(
     assert resumed.error_message is None
 
 
+def test_frozen_phase_contract_rejects_running_to_skipped(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    _create(repository)
+    repository.transition_pipeline_phase(
+        RUN_ID,
+        PipelinePhaseKey.DAILY_SLATE,
+        PipelinePhaseStatus.RUNNING,
+    )
+
+    with pytest.raises(InvalidPipelineTransition):
+        repository.transition_pipeline_phase(
+            RUN_ID,
+            PipelinePhaseKey.DAILY_SLATE,
+            PipelinePhaseStatus.SKIPPED,
+        )
+
+    phase = repository.get_pipeline_run_phases(RUN_ID)[0]
+    assert phase.status is PipelinePhaseStatus.RUNNING
+    assert phase.attempt_count == 1
+
+
+def test_compound_failed_resume_updates_run_and_phase_atomically(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    _create(repository)
+    repository.transition_pipeline_run(RUN_ID, PipelineRunStatus.RUNNING)
+    repository.transition_pipeline_phase(
+        RUN_ID,
+        PipelinePhaseKey.DAILY_SLATE,
+        PipelinePhaseStatus.RUNNING,
+    )
+    repository.fail_running_pipeline_phase_and_run(
+        RUN_ID,
+        PipelinePhaseKey.DAILY_SLATE,
+        error={"message": "synthetic failure"},
+        error_message="synthetic failure",
+        reason="atomic failure fixture",
+    )
+
+    resumed = repository.resume_failed_pipeline_run_and_phase(
+        RUN_ID,
+        PipelinePhaseKey.DAILY_SLATE,
+        reason="atomic resume fixture",
+    )
+
+    assert resumed.run.status is PipelineRunStatus.RUNNING
+    assert resumed.run.failure_phase is None
+    assert resumed.run.error_message is None
+    assert resumed.phases[0].status is PipelinePhaseStatus.RUNNING
+    assert resumed.phases[0].attempt_count == 2
+    assert resumed.phases[0].error is None
+
+
+def test_compound_failed_resume_rolls_back_run_if_phase_retry_fails(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    _create(repository)
+    repository.transition_pipeline_run(RUN_ID, PipelineRunStatus.RUNNING)
+    repository.transition_pipeline_phase(
+        RUN_ID,
+        PipelinePhaseKey.DAILY_SLATE,
+        PipelinePhaseStatus.RUNNING,
+    )
+    repository.fail_running_pipeline_phase_and_run(
+        RUN_ID,
+        PipelinePhaseKey.DAILY_SLATE,
+        error={"message": "synthetic failure"},
+        error_message="synthetic failure",
+        reason="atomic failure fixture",
+    )
+    with repository.database.connect(write=True) as connection:
+        connection.execute(
+            """
+            CREATE TRIGGER test_reject_phase_retry
+            BEFORE UPDATE ON pipeline_run_phases
+            WHEN OLD.status='failed' AND NEW.status='running'
+            BEGIN
+                SELECT RAISE(ABORT, 'synthetic retry failure');
+            END
+            """
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="synthetic retry failure"):
+        repository.resume_failed_pipeline_run_and_phase(
+            RUN_ID,
+            PipelinePhaseKey.DAILY_SLATE,
+            reason="must roll back",
+        )
+
+    run = repository.get_pipeline_run(RUN_ID)
+    phase = repository.get_pipeline_run_phases(RUN_ID)[0]
+    assert run is not None
+    assert run.status is PipelineRunStatus.FAILED
+    assert run.failure_phase is PipelinePhaseKey.DAILY_SLATE
+    assert phase.status is PipelinePhaseStatus.FAILED
+    assert phase.attempt_count == 1
+
+
+def test_compound_failure_rolls_back_phase_if_run_failure_fails(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    _create(repository)
+    repository.transition_pipeline_run(RUN_ID, PipelineRunStatus.RUNNING)
+    repository.transition_pipeline_phase(
+        RUN_ID,
+        PipelinePhaseKey.DAILY_SLATE,
+        PipelinePhaseStatus.RUNNING,
+    )
+    with repository.database.connect(write=True) as connection:
+        connection.execute(
+            """
+            CREATE TRIGGER test_reject_run_failure
+            BEFORE UPDATE ON pipeline_runs
+            WHEN OLD.status='running' AND NEW.status='failed'
+            BEGIN
+                SELECT RAISE(ABORT, 'synthetic run failure');
+            END
+            """
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="synthetic run failure"):
+        repository.fail_running_pipeline_phase_and_run(
+            RUN_ID,
+            PipelinePhaseKey.DAILY_SLATE,
+            error={"message": "must roll back"},
+            error_message="must roll back",
+            reason="must roll back",
+        )
+
+    run = repository.get_pipeline_run(RUN_ID)
+    phase = repository.get_pipeline_run_phases(RUN_ID)[0]
+    assert run is not None
+    assert run.status is PipelineRunStatus.RUNNING
+    assert run.failure_phase is None
+    assert phase.status is PipelinePhaseStatus.RUNNING
+    assert phase.error is None
+    assert phase.attempt_count == 1
+
+
 def test_reuse_and_forced_refresh_require_explicit_valid_source_metadata(
     tmp_path: Path,
 ) -> None:

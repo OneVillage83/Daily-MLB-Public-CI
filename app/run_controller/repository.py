@@ -703,6 +703,284 @@ class PipelineRunRepository:
             transitioned_at=transitioned_at,
         )
 
+    def resume_failed_pipeline_run_and_phase(
+        self,
+        run_id: str,
+        phase_key: PipelinePhaseKey,
+        *,
+        reason: str,
+        transitioned_at: str | None = None,
+    ) -> PipelineRunSummaryV1:
+        """Atomically resume a failed run and retry its failed phase."""
+
+        safe_run_id = validate_run_id(run_id)
+        safe_phase_key = (
+            phase_key
+            if isinstance(phase_key, PipelinePhaseKey)
+            else PipelinePhaseKey(phase_key)
+        )
+        safe_reason = redact_text(reason, self.secret_values)
+        timestamp = transitioned_at or utc_now()
+        with self.database.connect(write=True) as connection:
+            run_row = connection.execute(
+                "SELECT * FROM pipeline_runs WHERE run_id=?",
+                (safe_run_id,),
+            ).fetchone()
+            phase_row = connection.execute(
+                """
+                SELECT * FROM pipeline_run_phases
+                WHERE run_id=? AND phase_key=?
+                """,
+                (safe_run_id, safe_phase_key.value),
+            ).fetchone()
+            if run_row is None:
+                raise PipelineRunNotFoundError(
+                    f"pipeline run not found: {safe_run_id}"
+                )
+            if phase_row is None:
+                raise PipelinePhaseNotFoundError(
+                    f"pipeline phase not found: {safe_run_id}/{safe_phase_key.value}"
+                )
+            run_status = PipelineRunStatus(run_row["status"])
+            phase_status = PipelinePhaseStatus(phase_row["status"])
+            validate_pipeline_run_transition(
+                run_status,
+                PipelineRunStatus.RUNNING,
+                transition_type=PipelineTransitionType.RESUME,
+            )
+            validate_pipeline_phase_transition(
+                phase_status,
+                PipelinePhaseStatus.RUNNING,
+                transition_type=PipelineTransitionType.RETRY,
+            )
+            if (
+                run_row["failure_phase"] != safe_phase_key.value
+                or phase_status is not PipelinePhaseStatus.FAILED
+            ):
+                raise PipelineRepositoryInvariantError(
+                    "failed run and failed phase do not identify the same retry target"
+                )
+
+            attempt_count = int(phase_row["attempt_count"]) + 1
+            connection.execute(
+                """
+                UPDATE pipeline_runs
+                SET status='running',failure_phase=NULL,error_message=NULL,
+                    final_summary_json=NULL,completed_at=NULL,updated_at=?
+                WHERE run_id=?
+                """,
+                (timestamp, safe_run_id),
+            )
+            connection.execute(
+                """
+                UPDATE pipeline_run_phases
+                SET status='running',attempt_count=?,started_at=?,completed_at=NULL,
+                    updated_at=?,output_checksum=NULL,artifact_relpath=NULL,
+                    warnings_json=NULL,error_json=NULL,reused_from_run_id=NULL
+                WHERE run_id=? AND phase_key=?
+                """,
+                (
+                    attempt_count,
+                    timestamp,
+                    timestamp,
+                    safe_run_id,
+                    safe_phase_key.value,
+                ),
+            )
+            self._insert_transition(
+                connection,
+                run_id=safe_run_id,
+                phase_key=None,
+                from_status=run_status.value,
+                to_status=PipelineRunStatus.RUNNING.value,
+                transition_type=PipelineTransitionType.RESUME,
+                reason=safe_reason,
+                audit_metadata={
+                    "failure_phase": None,
+                    "error_message": None,
+                    "final_summary": None,
+                },
+                transitioned_at=timestamp,
+            )
+            self._insert_transition(
+                connection,
+                run_id=safe_run_id,
+                phase_key=safe_phase_key,
+                from_status=phase_status.value,
+                to_status=PipelinePhaseStatus.RUNNING.value,
+                transition_type=PipelineTransitionType.RETRY,
+                reason=safe_reason,
+                audit_metadata={
+                    "attempt_count": attempt_count,
+                    "input_checksum": phase_row["input_checksum"],
+                    "output_checksum": None,
+                    "artifact_relpath": None,
+                    "warnings": None,
+                    "error": None,
+                    "reused_from_run_id": None,
+                },
+                transitioned_at=timestamp,
+            )
+            updated_run = connection.execute(
+                "SELECT * FROM pipeline_runs WHERE run_id=?",
+                (safe_run_id,),
+            ).fetchone()
+            updated_phases = connection.execute(
+                """
+                SELECT * FROM pipeline_run_phases
+                WHERE run_id=? ORDER BY ordinal
+                """,
+                (safe_run_id,),
+            ).fetchall()
+        if updated_run is None:
+            raise PipelineRepositoryInvariantError("resumed pipeline run disappeared")
+        return PipelineRunSummaryV1(
+            run=_run_from_row(updated_run),
+            phases=tuple(_phase_from_row(row) for row in updated_phases),
+        )
+
+    def fail_running_pipeline_phase_and_run(
+        self,
+        run_id: str,
+        phase_key: PipelinePhaseKey,
+        *,
+        error: Any,
+        error_message: str,
+        reason: str,
+        transitioned_at: str | None = None,
+    ) -> PipelineRunSummaryV1:
+        """Atomically fail a running phase and its running pipeline run."""
+
+        safe_run_id = validate_run_id(run_id)
+        safe_phase_key = (
+            phase_key
+            if isinstance(phase_key, PipelinePhaseKey)
+            else PipelinePhaseKey(phase_key)
+        )
+        _, error_json = _safe_json(
+            error,
+            secret_values=self.secret_values,
+            name="error",
+        )
+        safe_error_message = redact_text(error_message, self.secret_values)
+        if not safe_error_message:
+            raise ValueError("error_message must not be empty")
+        safe_reason = redact_text(reason, self.secret_values)
+        timestamp = transitioned_at or utc_now()
+        with self.database.connect(write=True) as connection:
+            run_row = connection.execute(
+                "SELECT * FROM pipeline_runs WHERE run_id=?",
+                (safe_run_id,),
+            ).fetchone()
+            phase_row = connection.execute(
+                """
+                SELECT * FROM pipeline_run_phases
+                WHERE run_id=? AND phase_key=?
+                """,
+                (safe_run_id, safe_phase_key.value),
+            ).fetchone()
+            if run_row is None:
+                raise PipelineRunNotFoundError(
+                    f"pipeline run not found: {safe_run_id}"
+                )
+            if phase_row is None:
+                raise PipelinePhaseNotFoundError(
+                    f"pipeline phase not found: {safe_run_id}/{safe_phase_key.value}"
+                )
+            run_status = PipelineRunStatus(run_row["status"])
+            phase_status = PipelinePhaseStatus(phase_row["status"])
+            validate_pipeline_phase_transition(
+                phase_status,
+                PipelinePhaseStatus.FAILED,
+            )
+            validate_pipeline_run_transition(
+                run_status,
+                PipelineRunStatus.FAILED,
+            )
+
+            connection.execute(
+                """
+                UPDATE pipeline_run_phases
+                SET status='failed',completed_at=?,updated_at=?,
+                    output_checksum=NULL,artifact_relpath=NULL,warnings_json=NULL,
+                    error_json=?,reused_from_run_id=NULL
+                WHERE run_id=? AND phase_key=?
+                """,
+                (
+                    timestamp,
+                    timestamp,
+                    error_json,
+                    safe_run_id,
+                    safe_phase_key.value,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE pipeline_runs
+                SET status='failed',failure_phase=?,error_message=?,
+                    final_summary_json=NULL,completed_at=?,updated_at=?
+                WHERE run_id=?
+                """,
+                (
+                    safe_phase_key.value,
+                    safe_error_message,
+                    timestamp,
+                    timestamp,
+                    safe_run_id,
+                ),
+            )
+            self._insert_transition(
+                connection,
+                run_id=safe_run_id,
+                phase_key=safe_phase_key,
+                from_status=phase_status.value,
+                to_status=PipelinePhaseStatus.FAILED.value,
+                transition_type=PipelineTransitionType.STATE_TRANSITION,
+                reason=safe_reason,
+                audit_metadata={
+                    "attempt_count": int(phase_row["attempt_count"]),
+                    "input_checksum": phase_row["input_checksum"],
+                    "output_checksum": None,
+                    "artifact_relpath": None,
+                    "warnings": None,
+                    "error": _decode_json(error_json),
+                    "reused_from_run_id": None,
+                },
+                transitioned_at=timestamp,
+            )
+            self._insert_transition(
+                connection,
+                run_id=safe_run_id,
+                phase_key=None,
+                from_status=run_status.value,
+                to_status=PipelineRunStatus.FAILED.value,
+                transition_type=PipelineTransitionType.STATE_TRANSITION,
+                reason=safe_reason,
+                audit_metadata={
+                    "failure_phase": safe_phase_key.value,
+                    "error_message": safe_error_message,
+                    "final_summary": None,
+                },
+                transitioned_at=timestamp,
+            )
+            updated_run = connection.execute(
+                "SELECT * FROM pipeline_runs WHERE run_id=?",
+                (safe_run_id,),
+            ).fetchone()
+            updated_phases = connection.execute(
+                """
+                SELECT * FROM pipeline_run_phases
+                WHERE run_id=? ORDER BY ordinal
+                """,
+                (safe_run_id,),
+            ).fetchall()
+        if updated_run is None:
+            raise PipelineRepositoryInvariantError("failed pipeline run disappeared")
+        return PipelineRunSummaryV1(
+            run=_run_from_row(updated_run),
+            phases=tuple(_phase_from_row(row) for row in updated_phases),
+        )
+
     def force_refresh_pipeline_phase(
         self,
         run_id: str,
