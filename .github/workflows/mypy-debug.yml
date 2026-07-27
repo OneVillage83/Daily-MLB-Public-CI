@@ -1,0 +1,20 @@
+name: mypy-debug
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  mypy:
+    runs-on: windows-latest
+    steps:
+      - name: Mypy diagnostics only
+        shell: pwsh
+        run: |
+          git clone --quiet --depth 1 --branch debug/ds1b-mypy https://github.com/OneVillage83/Daily-MLB-Public-CI.git source
+          Set-Location source
+          py -3.12 --version
+          py -3.12 -m pip install --quiet --disable-pip-version-check --require-hashes -r requirements-dev.txt
+          py -3.12 -m mypy
