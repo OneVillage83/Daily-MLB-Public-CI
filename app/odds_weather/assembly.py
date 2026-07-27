@@ -92,7 +92,8 @@ def _warning(
 
 
 def _material_errors_for_fields(
-    stadium: Mapping[str, Any], fields: frozenset[str]
+    stadium: Mapping[str, Any],
+    fields: frozenset[str],
 ) -> tuple[str, ...]:
     return tuple(
         sorted(
@@ -157,9 +158,7 @@ def _venue_context(slate_game: DailySlateGameV1) -> VenueWeatherContextV1 | None
             else None
         ),
         latitude=(float(latitude) if isinstance(latitude, int | float) else None),
-        longitude=(
-            float(longitude) if isinstance(longitude, int | float) else None
-        ),
+        longitude=(float(longitude) if isinstance(longitude, int | float) else None),
         timezone_name=(
             str(stadium["timezone"]) if stadium.get("timezone") else None
         ),
@@ -218,14 +217,16 @@ def _latest_odds_revisions(
         by_event[event.provider_event_id].append(event)
 
     selected: list[OddsProviderEventV1] = []
-    for _provider_event_id, candidates in sorted(by_event.items()):
-        latest_time = max(candidate.retrieved_at for candidate in candidates)
+    for _provider_event_id, event_revisions in sorted(by_event.items()):
+        latest_time = max(revision.retrieved_at for revision in event_revisions)
         latest = [
-            candidate for candidate in candidates if candidate.retrieved_at == latest_time
+            revision
+            for revision in event_revisions
+            if revision.retrieved_at == latest_time
         ]
         if len(latest) > 1 and any(
-            not _same_odds_revision(latest[0], candidate)
-            for candidate in latest[1:]
+            not _same_odds_revision(latest[0], revision)
+            for revision in latest[1:]
         ):
             raise OddsWeatherAssemblyError(
                 "conflicting odds revisions share one provider event/retrieval time"
@@ -233,9 +234,9 @@ def _latest_odds_revisions(
         selected.append(
             min(
                 latest,
-                key=lambda candidate: (
-                    candidate.raw_capture_checksum,
-                    canonical_sha256(candidate.as_dict()),
+                key=lambda revision: (
+                    revision.raw_capture_checksum,
+                    canonical_sha256(revision.as_dict()),
                 ),
             )
         )
@@ -253,11 +254,12 @@ def _match_odds_events(
         raise OddsWeatherAssemblyError(
             "odds event match tolerance must be greater than zero"
         )
+
     assigned: dict[str, list[tuple[OddsProviderEventV1, float]]] = defaultdict(
         list
     )
     for event in odds_events:
-        candidates: list[tuple[DailySlateGameV1, float]] = []
+        game_candidates: list[tuple[DailySlateGameV1, float]] = []
         for game in games:
             if (
                 game.home_team_id != event.home_team_id
@@ -266,14 +268,16 @@ def _match_odds_events(
             ):
                 continue
             scheduled = _aware_utc(
-                game.scheduled_start_time, "scheduled_start_time"
+                game.scheduled_start_time,
+                "scheduled_start_time",
             )
             offset = abs(
                 (event.commence_time - scheduled).total_seconds()
             ) / 60.0
             if offset <= tolerance_minutes:
-                candidates.append((game, offset))
-        if not candidates:
+                game_candidates.append((game, offset))
+
+        if not game_candidates:
             warnings.append(
                 _warning(
                     "odds_event_unmatched",
@@ -284,34 +288,35 @@ def _match_odds_events(
                 )
             )
             continue
-        minimum = min(offset for _game, offset in candidates)
-        nearest = [
+
+        minimum = min(offset for _game, offset in game_candidates)
+        nearest_games = [
             (game, offset)
-            for game, offset in candidates
+            for game, offset in game_candidates
             if abs(offset - minimum) <= 1e-9
         ]
-        if len(nearest) != 1:
+        if len(nearest_games) != 1:
             raise OddsWeatherAssemblyError(
                 "provider odds event is equally close to multiple canonical games"
             )
-        game, offset = nearest[0]
+        game, offset = nearest_games[0]
         assigned[game.source_game_id].append((event, offset))
 
     result: dict[str, tuple[OddsProviderEventV1, float]] = {}
-    for source_game_id, candidates in sorted(assigned.items()):
-        minimum = min(offset for _event, offset in candidates)
-        nearest = [
+    for source_game_id, event_candidates in sorted(assigned.items()):
+        minimum = min(offset for _event, offset in event_candidates)
+        nearest_events = [
             (event, offset)
-            for event, offset in candidates
+            for event, offset in event_candidates
             if abs(offset - minimum) <= 1e-9
         ]
-        if len(nearest) != 1:
+        if len(nearest_events) != 1:
             raise OddsWeatherAssemblyError(
                 "canonical game has equally close competing provider odds events"
             )
-        selected_event, selected_offset = nearest[0]
+        selected_event, selected_offset = nearest_events[0]
         result[source_game_id] = (selected_event, selected_offset)
-        for excluded_event, _offset in candidates:
+        for excluded_event, _offset in event_candidates:
             if excluded_event.provider_event_id == selected_event.provider_event_id:
                 continue
             warnings.append(
@@ -342,7 +347,8 @@ def _latest_weather_revisions(
     warnings: list[OddsWeatherWarningV1],
 ) -> dict[tuple[str, WeatherProvider], WeatherForecastEvidenceV1]:
     grouped: dict[
-        tuple[str, WeatherProvider], list[WeatherForecastEvidenceV1]
+        tuple[str, WeatherProvider],
+        list[WeatherForecastEvidenceV1],
     ] = defaultdict(list)
     for evidence in weather_evidence:
         if not isinstance(evidence, WeatherForecastEvidenceV1):
@@ -374,25 +380,26 @@ def _latest_weather_revisions(
         grouped[(evidence.source_game_id, evidence.provider)].append(evidence)
 
     result: dict[tuple[str, WeatherProvider], WeatherForecastEvidenceV1] = {}
-    for key, candidates in sorted(
-        grouped.items(), key=lambda item: (item[0][0], item[0][1].value)
+    for key, revisions in sorted(
+        grouped.items(),
+        key=lambda item: (item[0][0], item[0][1].value),
     ):
-        latest_time = max(candidate.retrieved_at for candidate in candidates)
+        latest_time = max(revision.retrieved_at for revision in revisions)
         latest = [
-            candidate for candidate in candidates if candidate.retrieved_at == latest_time
+            revision for revision in revisions if revision.retrieved_at == latest_time
         ]
         if len(latest) > 1 and any(
-            not _same_weather_revision(latest[0], candidate)
-            for candidate in latest[1:]
+            not _same_weather_revision(latest[0], revision)
+            for revision in latest[1:]
         ):
             raise OddsWeatherAssemblyError(
                 "conflicting weather revisions share one game/provider/retrieval time"
             )
         result[key] = min(
             latest,
-            key=lambda candidate: (
-                candidate.raw_capture_checksums,
-                canonical_sha256(candidate.as_dict()),
+            key=lambda revision: (
+                revision.raw_capture_checksums,
+                canonical_sha256(revision.as_dict()),
             ),
         )
     return result
@@ -434,7 +441,8 @@ def _build_weather_snapshot(
     *,
     slate_game: DailySlateGameV1,
     revisions: Mapping[
-        tuple[str, WeatherProvider], WeatherForecastEvidenceV1
+        tuple[str, WeatherProvider],
+        WeatherForecastEvidenceV1,
     ],
     warnings: list[OddsWeatherWarningV1],
 ) -> WeatherSnapshotV1:
@@ -550,8 +558,10 @@ def _build_weather_snapshot(
     for evidence in (nws, openweather):
         if evidence is not None:
             _validate_weather_first_pitch(
-                evidence, slate_game.scheduled_start_time
+                evidence,
+                slate_game.scheduled_start_time,
             )
+
     if nws is None and openweather is None:
         warnings.append(
             _warning(
@@ -569,9 +579,7 @@ def _build_weather_snapshot(
             nws=None,
             openweather=None,
             comparison={"agreement": "unavailable"},
-            baseball_wind_impact=_unavailable_wind(
-                "weather_forecast_missing"
-            ),
+            baseball_wind_impact=_unavailable_wind("weather_forecast_missing"),
         )
 
     if nws is None or openweather is None:
@@ -595,11 +603,10 @@ def _build_weather_snapshot(
             "status", VerificationState.UNKNOWN.value
         )
     )
-    bearing = verified_outfield_bearing(stadium)
     wind = wind_impact(
         primary.forecast.get("wind_direction_deg"),
         primary.forecast.get("wind_speed_mph"),
-        bearing,
+        verified_outfield_bearing(stadium),
         bearing_verification_state=bearing_verification,
     )
     relevance = WeatherRelevance.DIRECT
@@ -621,9 +628,7 @@ def _build_weather_snapshot(
         openweather=openweather,
         comparison=compare(
             None if nws is None else thaw_mapping(nws.forecast),
-            None
-            if openweather is None
-            else thaw_mapping(openweather.forecast),
+            None if openweather is None else thaw_mapping(openweather.forecast),
         ),
         baseball_wind_impact=wind,
     )
@@ -775,6 +780,7 @@ def assemble_odds_weather(
         raise OddsWeatherAssemblyError(
             "DailySlate and Baseball Intelligence as_of_time values disagree"
         )
+
     slate_ids = tuple(game.source_game_id for game in slate.games)
     intelligence_ids = tuple(
         game.source_game_id for game in baseball_intelligence.games
@@ -784,7 +790,9 @@ def assemble_odds_weather(
             "DailySlate and Baseball Intelligence game ordering/set must match exactly"
         )
     for slate_game, intelligence_game in zip(
-        slate.games, baseball_intelligence.games, strict=True
+        slate.games,
+        baseball_intelligence.games,
+        strict=True,
     ):
         _validate_upstream_game(slate_game, intelligence_game)
 
@@ -835,7 +843,9 @@ def assemble_odds_weather(
     games: list[OddsWeatherGameV1] = []
     raw_checksums: set[str] = set()
     for slate_game, intelligence_game in zip(
-        slate.games, baseball_intelligence.games, strict=True
+        slate.games,
+        baseball_intelligence.games,
+        strict=True,
     ):
         odds = _build_odds_snapshot(
             slate_game=slate_game,
