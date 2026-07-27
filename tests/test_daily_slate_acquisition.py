@@ -185,7 +185,9 @@ def test_unknown_status_and_doubleheader_are_preserved_as_warnings() -> None:
 
 def test_explicit_start_time_tbd_is_allowed_with_warning() -> None:
     game = _game()
-    status = dict(game["status"])  # type: ignore[arg-type]
+    raw_status = game["status"]
+    assert isinstance(raw_status, dict)
+    status = dict(raw_status)
     status["startTimeTBD"] = True
     game["status"] = status
     game.pop("gameDate")
