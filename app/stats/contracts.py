@@ -18,6 +18,7 @@ CsvRow: TypeAlias = Mapping[str, str]
 
 
 class StatsProvider(StrEnum):
+    MLB = "mlb"
     RETROSHEET = "retrosheet"
     BASEBALL_REFERENCE = "baseball_reference"
     STATCAST = "statcast"

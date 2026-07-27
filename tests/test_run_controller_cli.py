@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings
-from app.run_controller.contracts import PipelineRunStatus
+from app.run_controller.contracts import PipelinePhaseKey, PipelineRunStatus
 from scripts.run_controller import (
-    EXIT_BLOCKED,
     EXIT_CONFLICT,
     EXIT_SUCCESS,
+    build_controller,
     main,
 )
 
@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def _settings(database_path: Path) -> Settings:
     return Settings(
         database_path=database_path,
+        artifact_dir=database_path.parent / "artifacts",
         report_timezone="America/Los_Angeles",
         service_auth_token="fixture-service-secret",
         odds_api_key="fixture-odds-secret",
@@ -32,7 +33,7 @@ def _settings(database_path: Path) -> Settings:
     )
 
 
-def test_cli_start_show_json_duplicate_and_blocked_resume(
+def test_cli_start_show_json_and_duplicate_without_executing_network(
     tmp_path: Path,
     capsys,
 ) -> None:
@@ -72,21 +73,6 @@ def test_cli_start_show_json_duplicate_and_blocked_resume(
     assert duplicate_code == EXIT_CONFLICT
     assert "CONFLICT:" in duplicate_output.err
 
-    resume_code = main(
-        [
-            "resume",
-            "--database",
-            str(database),
-            "--run-id",
-            start_output["run_id"],
-        ],
-        configured_settings=configured,
-    )
-    resume_output = capsys.readouterr()
-    assert resume_code == EXIT_BLOCKED
-    assert "EXECUTION BLOCKED:" in resume_output.err
-    assert "daily_slate" in resume_output.err
-
     final_code = main(
         [
             "show",
@@ -105,6 +91,18 @@ def test_cli_start_show_json_duplicate_and_blocked_resume(
     serialized = json.dumps(final_output, sort_keys=True)
     assert configured.odds_api_key not in serialized
     assert configured.service_auth_token not in serialized
+
+
+def test_production_controller_registers_only_daily_slate(tmp_path: Path) -> None:
+    configured = _settings(tmp_path / "handlers.db")
+
+    controller = build_controller(
+        configured.database_path,
+        configured_settings=configured,
+    )
+
+    assert tuple(controller.handlers) == (PipelinePhaseKey.DAILY_SLATE,)
+    assert PipelinePhaseKey.GAME_STATE not in controller.handlers
 
 
 def test_cli_human_show_lists_all_phases(tmp_path: Path, capsys) -> None:
@@ -159,9 +157,11 @@ def test_cli_script_entrypoint_start_and_show_use_temporary_database(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "subprocess.db"
+    artifact_dir = tmp_path / "artifacts"
     environment = dict(os.environ)
     environment.update(
         {
+            "ARTIFACT_DIR": str(artifact_dir),
             "OPENWEATHER_ENABLED": "false",
             "REPORT_TIMEZONE": "America/Los_Angeles",
         }
