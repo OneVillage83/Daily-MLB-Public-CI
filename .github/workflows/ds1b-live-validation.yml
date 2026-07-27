@@ -1,0 +1,117 @@
+name: ds1b-live-validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  live-daily-slate:
+    if: github.head_ref == 'live/ds1b-20260726'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Controlled authoritative MLB slate validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch live/ds1b-20260726 https://github.com/OneVillage83/Daily-MLB-Public-CI.git source
+          cd source
+          python3 --version
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet --disable-pip-version-check --require-hashes -r requirements-dev.txt
+          .venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from app.config import Settings
+          from app.daily_slate.handler import daily_slate_raw_link_relpath
+          from app.daily_slate.repository import DailySlateRepository
+          from app.database import Database
+          from app.run_controller.contracts import PipelinePhaseKey, PipelinePhaseStatus
+          from app.run_controller.service import ManualRunExecutionBlocked
+          from scripts.run_controller import build_controller
+
+          requested_date = "2026-07-26"
+          expected_game_count = 15
+          root = Path.cwd()
+          database_path = root / "ds1b-live-validation.sqlite3"
+          artifact_root = root / "ds1b-live-artifacts"
+          configured = Settings(
+              database_path=database_path,
+              artifact_dir=artifact_root,
+              report_timezone="America/Los_Angeles",
+              openweather_enabled=False,
+              openweather_api_key="",
+          )
+          controller = build_controller(database_path, configured_settings=configured)
+          created = controller.start(requested_date)
+          try:
+              controller.resume(created.run.run_id)
+          except ManualRunExecutionBlocked as exc:
+              if exc.phase_key is not PipelinePhaseKey.GAME_STATE:
+                  raise
+          else:
+              raise AssertionError("controller did not block at GAME_STATE")
+
+          summary = controller.show(created.run.run_id)
+          daily_slate = summary.phases[0]
+          game_state = summary.phases[1]
+          assert daily_slate.phase_key is PipelinePhaseKey.DAILY_SLATE
+          assert daily_slate.status in {
+              PipelinePhaseStatus.SUCCEEDED,
+              PipelinePhaseStatus.SUCCEEDED_WITH_WARNINGS,
+          }
+          assert daily_slate.attempt_count == 1
+          assert daily_slate.input_checksum is not None
+          assert daily_slate.output_checksum is not None
+          assert daily_slate.artifact_relpath is not None
+          assert game_state.phase_key is PipelinePhaseKey.GAME_STATE
+          assert game_state.status is PipelinePhaseStatus.PENDING
+          assert game_state.attempt_count == 0
+
+          database = Database(database_path)
+          snapshot = DailySlateRepository(database).get_latest_daily_slate_for_run(
+              created.run.run_id
+          )
+          assert snapshot is not None
+          assert snapshot.phase_attempt == 1
+          assert snapshot.slate.requested_date == requested_date
+          assert len(snapshot.slate.games) == expected_game_count, (
+              len(snapshot.slate.games),
+              expected_game_count,
+          )
+          assert len({game.source_game_id for game in snapshot.slate.games}) == expected_game_count
+          assert snapshot.slate.checksum == daily_slate.output_checksum
+
+          canonical_path = artifact_root / str(daily_slate.artifact_relpath)
+          assert canonical_path.read_bytes() == snapshot.slate.canonical_json_bytes()
+          raw_link_path = artifact_root / daily_slate_raw_link_relpath(created.run.run_id, 1)
+          raw_link = json.loads(raw_link_path.read_text(encoding="utf-8"))
+          assert raw_link["evidence_state"] == "normalized"
+          assert raw_link["final_raw_checksum_sha256"] == daily_slate.input_checksum
+          assert raw_link["http_status"] == 200
+          assert raw_link["captures"]
+
+          output = {
+              "requested_date": requested_date,
+              "game_count": len(snapshot.slate.games),
+              "phase_status": daily_slate.status.value,
+              "warning_count": len(daily_slate.warnings or []),
+              "snapshot_checksum": snapshot.slate.checksum,
+              "raw_checksum": daily_slate.input_checksum,
+              "next_phase": game_state.phase_key.value,
+              "next_phase_status": game_state.status.value,
+              "games": [
+                  {
+                      "source_game_id": game.source_game_id,
+                      "away_team_id": game.away_team_id,
+                      "home_team_id": game.home_team_id,
+                      "status": game.game_status.value,
+                      "official_date": game.official_date,
+                  }
+                  for game in snapshot.slate.games
+              ],
+          }
+          print("DS1B_LIVE_VALIDATION=" + json.dumps(output, sort_keys=True))
+          PY
