@@ -165,6 +165,16 @@ def _positive_decimal(value: object, field_name: str) -> str:
     return str(number)
 
 
+def _canonical_game_id(value: object, field_name: str) -> str:
+    return canonical_authoritative_game_id(_positive_decimal(value, field_name))
+
+
+def _required_aware_utc(value: object, field_name: str) -> datetime:
+    if not isinstance(value, (datetime, str)):
+        raise DailySlateNormalizationError(f"{field_name} must be an ISO datetime")
+    return _aware_utc(value, field_name)
+
+
 def build_mlb_schedule_request(
     requested_date: str,
     *,
@@ -301,9 +311,7 @@ def _schedule_games(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]
         raise DailySlateNormalizationError(
             "authoritative MLB schedule totalGames is internally inconsistent"
         )
-    source_ids = [
-        canonical_authoritative_game_id(game.get("gamePk")) for game in flattened
-    ]
+    source_ids = [_canonical_game_id(game.get("gamePk"), "gamePk") for game in flattened]
     if len(source_ids) != len(set(source_ids)):
         raise DailySlateNormalizationError(
             "duplicate authoritative MLB game identity in schedule response"
@@ -450,7 +458,7 @@ def _normalize_game(
     player_identity_resolver: PlayerIdentityResolver | None,
     warnings: list[DailySlateWarningV1],
 ) -> DailySlateGameV1:
-    source_game_id = canonical_authoritative_game_id(raw_game.get("gamePk"))
+    source_game_id = _canonical_game_id(raw_game.get("gamePk"), "gamePk")
     official_date = _required_text(raw_game.get("officialDate"), "officialDate")
     parse_requested_date(official_date)
 
@@ -476,7 +484,7 @@ def _normalize_game(
             )
         )
     else:
-        scheduled_start_time = _aware_utc(raw_game.get("gameDate"), "gameDate")
+        scheduled_start_time = _required_aware_utc(raw_game.get("gameDate"), "gameDate")
 
     teams = _mapping(raw_game.get("teams"), "teams")
     away_record = _mapping(teams.get("away"), "teams.away")
