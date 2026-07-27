@@ -103,17 +103,20 @@ def _material_errors_for_fields(
     )
 
 
-def _venue_context(
-    slate_game: DailySlateGameV1,
-) -> VenueWeatherContextV1 | None:
+def _venue_context(slate_game: DailySlateGameV1) -> VenueWeatherContextV1 | None:
     stadium = stadium_for_team(slate_game.home_team_id)
     if stadium is None:
         return None
+
     association_errors = list(
         _material_errors_for_fields(stadium, _ASSOCIATION_FIELDS)
     )
     if str(stadium.get("team_key") or "") != slate_game.home_team_id:
         association_errors.append("venue_metadata_invalid:active_club_team_key")
+
+    physical_key = str(stadium.get("physical_venue_key") or "")
+    if slate_game.venue_id is not None and slate_game.venue_id != physical_key:
+        association_errors.append("venue_metadata_invalid:physical_venue_identity")
 
     if slate_game.source_venue_name:
         resolution = resolve_venue_alias(
@@ -122,7 +125,9 @@ def _venue_context(
         )
         if resolution.get("status") not in {"current", "historical_same_venue"}:
             association_errors.append("venue_metadata_invalid:daily_slate_venue_alias")
-        elif resolution.get("physical_venue_key") != stadium.get("physical_venue_key"):
+        elif resolution.get("physical_venue_key") != stadium.get(
+            "physical_venue_key"
+        ):
             association_errors.append("venue_metadata_invalid:physical_venue_identity")
 
     coordinate_errors = list(
@@ -145,18 +150,16 @@ def _venue_context(
     bearing = stadium.get("outfield_bearing_degrees")
     return VenueWeatherContextV1(
         team_id=slate_game.home_team_id,
-        physical_venue_key=(
-            str(stadium["physical_venue_key"])
-            if stadium.get("physical_venue_key")
-            else None
-        ),
+        physical_venue_key=physical_key or None,
         venue_name=(
             str(stadium.get("current_display_name") or stadium.get("venue"))
             if stadium.get("current_display_name") or stadium.get("venue")
             else None
         ),
         latitude=(float(latitude) if isinstance(latitude, int | float) else None),
-        longitude=(float(longitude) if isinstance(longitude, int | float) else None),
+        longitude=(
+            float(longitude) if isinstance(longitude, int | float) else None
+        ),
         timezone_name=(
             str(stadium["timezone"]) if stadium.get("timezone") else None
         ),
@@ -215,7 +218,7 @@ def _latest_odds_revisions(
         by_event[event.provider_event_id].append(event)
 
     selected: list[OddsProviderEventV1] = []
-    for provider_event_id, candidates in sorted(by_event.items()):
+    for _provider_event_id, candidates in sorted(by_event.items()):
         latest_time = max(candidate.retrieved_at for candidate in candidates)
         latest = [
             candidate for candidate in candidates if candidate.retrieved_at == latest_time
@@ -250,7 +253,9 @@ def _match_odds_events(
         raise OddsWeatherAssemblyError(
             "odds event match tolerance must be greater than zero"
         )
-    assigned: dict[str, list[tuple[OddsProviderEventV1, float]]] = defaultdict(list)
+    assigned: dict[str, list[tuple[OddsProviderEventV1, float]]] = defaultdict(
+        list
+    )
     for event in odds_events:
         candidates: list[tuple[DailySlateGameV1, float]] = []
         for game in games:
@@ -260,8 +265,12 @@ def _match_odds_events(
                 or game.scheduled_start_time is None
             ):
                 continue
-            scheduled = _aware_utc(game.scheduled_start_time, "scheduled_start_time")
-            offset = abs((event.commence_time - scheduled).total_seconds()) / 60.0
+            scheduled = _aware_utc(
+                game.scheduled_start_time, "scheduled_start_time"
+            )
+            offset = abs(
+                (event.commence_time - scheduled).total_seconds()
+            ) / 60.0
             if offset <= tolerance_minutes:
                 candidates.append((game, offset))
         if not candidates:
@@ -394,13 +403,18 @@ def _validate_weather_first_pitch(
     scheduled_start_time: datetime,
 ) -> None:
     scheduled = _aware_utc(scheduled_start_time, "scheduled_start_time")
-    computed = abs((evidence.forecast_time - scheduled).total_seconds()) / 60.0
+    computed = abs(
+        (evidence.forecast_time - scheduled).total_seconds()
+    ) / 60.0
     if computed > MAX_WEATHER_FORECAST_OFFSET_MINUTES + 1e-9:
         raise OddsWeatherAssemblyError(
             "weather forecast does not cover first pitch within 60 minutes"
         )
     reported = evidence.forecast.get("forecast_offset_minutes")
-    if isinstance(reported, int | float) and abs(float(reported) - computed) > 0.05:
+    if (
+        isinstance(reported, int | float)
+        and abs(float(reported) - computed) > 0.05
+    ):
         raise OddsWeatherAssemblyError(
             "weather forecast offset disagrees with authoritative first pitch"
         )
@@ -445,7 +459,9 @@ def _build_weather_snapshot(
             baseball_wind_impact=_unavailable_wind("stadium_metadata_missing"),
         )
 
-    roof_verified = context.roof_verification_state == VerificationState.VERIFIED.value
+    roof_verified = (
+        context.roof_verification_state == VerificationState.VERIFIED.value
+    )
     fixed_indoor = (
         not context.association_errors
         and context.roof_type == "fixed"
@@ -522,7 +538,9 @@ def _build_weather_snapshot(
             nws=None,
             openweather=None,
             comparison={"agreement": "unavailable"},
-            baseball_wind_impact=_unavailable_wind("missing_scheduled_start_time"),
+            baseball_wind_impact=_unavailable_wind(
+                "missing_scheduled_start_time"
+            ),
         )
 
     nws = revisions.get((slate_game.source_game_id, WeatherProvider.NWS))
@@ -531,7 +549,9 @@ def _build_weather_snapshot(
     )
     for evidence in (nws, openweather):
         if evidence is not None:
-            _validate_weather_first_pitch(evidence, slate_game.scheduled_start_time)
+            _validate_weather_first_pitch(
+                evidence, slate_game.scheduled_start_time
+            )
     if nws is None and openweather is None:
         warnings.append(
             _warning(
@@ -549,7 +569,9 @@ def _build_weather_snapshot(
             nws=None,
             openweather=None,
             comparison={"agreement": "unavailable"},
-            baseball_wind_impact=_unavailable_wind("weather_forecast_missing"),
+            baseball_wind_impact=_unavailable_wind(
+                "weather_forecast_missing"
+            ),
         )
 
     if nws is None or openweather is None:
@@ -591,13 +613,17 @@ def _build_weather_snapshot(
         relevance=relevance,
         venue_context=context,
         primary_source=(
-            WeatherProvider.NWS if nws is not None else WeatherProvider.OPENWEATHER
+            WeatherProvider.NWS
+            if nws is not None
+            else WeatherProvider.OPENWEATHER
         ),
         nws=nws,
         openweather=openweather,
         comparison=compare(
             None if nws is None else thaw_mapping(nws.forecast),
-            None if openweather is None else thaw_mapping(openweather.forecast),
+            None
+            if openweather is None
+            else thaw_mapping(openweather.forecast),
         ),
         baseball_wind_impact=wind,
     )
@@ -612,15 +638,26 @@ def _build_odds_snapshot(
     warnings: list[OddsWeatherWarningV1],
 ) -> OddsSnapshotV1:
     if selected is None:
-        warnings.append(
-            _warning(
-                "odds_event_missing",
-                OddsWeatherWarningDomain.ODDS_MATCHING,
-                "No provider odds event matched this canonical DailySlate game",
-                source_game_id=slate_game.source_game_id,
-                provider="the_odds_api",
+        if slate_game.scheduled_start_time is None:
+            warnings.append(
+                _warning(
+                    "odds_unavailable_missing_start_time",
+                    OddsWeatherWarningDomain.ODDS_MATCHING,
+                    "Odds cannot be canonically matched because DailySlate has no scheduled start time",
+                    source_game_id=slate_game.source_game_id,
+                    provider="the_odds_api",
+                )
             )
-        )
+        else:
+            warnings.append(
+                _warning(
+                    "odds_event_missing",
+                    OddsWeatherWarningDomain.ODDS_MATCHING,
+                    "No provider odds event matched this canonical DailySlate game",
+                    source_game_id=slate_game.source_game_id,
+                    provider="the_odds_api",
+                )
+            )
         return OddsSnapshotV1(
             availability=OddsAvailability.UNAVAILABLE,
             provider_event_id=None,
@@ -680,19 +717,33 @@ def _validate_upstream_game(
     intelligence_game: BaseballIntelligenceGameV1,
 ) -> None:
     comparisons = (
-        ("edge_event_id", slate_game.edge_event_id, intelligence_game.edge_event_id),
+        (
+            "edge_event_id",
+            slate_game.edge_event_id,
+            intelligence_game.edge_event_id,
+        ),
         (
             "daily_mlb_game_id",
             slate_game.daily_mlb_game_id,
             intelligence_game.daily_mlb_game_id,
         ),
-        ("source_game_id", slate_game.source_game_id, intelligence_game.source_game_id),
-        ("away_team_id", slate_game.away_team_id, intelligence_game.away_team_id),
-        ("home_team_id", slate_game.home_team_id, intelligence_game.home_team_id),
+        (
+            "source_game_id",
+            slate_game.source_game_id,
+            intelligence_game.source_game_id,
+        ),
+        (
+            "away_team_id",
+            slate_game.away_team_id,
+            intelligence_game.away_team_id,
+        ),
+        (
+            "home_team_id",
+            slate_game.home_team_id,
+            intelligence_game.home_team_id,
+        ),
     )
-    mismatches = [
-        name for name, left, right in comparisons if left != right
-    ]
+    mismatches = [name for name, left, right in comparisons if left != right]
     if mismatches:
         raise OddsWeatherAssemblyError(
             "DailySlate/Baseball Intelligence game identity mismatch: "
@@ -706,6 +757,7 @@ def assemble_odds_weather(
     baseball_intelligence: BaseballIntelligenceAssemblyV1,
     odds_events: Iterable[OddsProviderEventV1] = (),
     weather_evidence: Iterable[WeatherForecastEvidenceV1] = (),
+    source_warnings: Iterable[OddsWeatherWarningV1] = (),
     observed_at: datetime | None = None,
     odds_event_match_tolerance_minutes: float = DEFAULT_ODDS_EVENT_MATCH_TOLERANCE_MINUTES,
     freshness_thresholds: FreshnessThresholds | None = None,
@@ -753,6 +805,13 @@ def assemble_odds_weather(
             )
 
     warnings: list[OddsWeatherWarningV1] = []
+    for warning in source_warnings:
+        if not isinstance(warning, OddsWeatherWarningV1):
+            raise OddsWeatherAssemblyError(
+                "source_warnings must contain OddsWeatherWarningV1 values"
+            )
+        warnings.append(warning)
+
     selected_odds_revisions = _latest_odds_revisions(
         odds_inventory,
         observed_at=selected_observed_at,
@@ -791,10 +850,6 @@ def assemble_odds_weather(
             warnings=warnings,
         )
         raw_checksums.update(selected_raw_capture_checksums(odds, weather))
-        if slate_game.scheduled_start_time is None:
-            raise OddsWeatherAssemblyError(
-                "OddsWeatherGameV1 requires DailySlate scheduled_start_time"
-            )
         games.append(
             OddsWeatherGameV1(
                 edge_event_id=slate_game.edge_event_id,
