@@ -21,6 +21,8 @@ from app.migrations import (
     FORMAL_SCHEMA_V6_FINGERPRINT,
     FORMAL_SCHEMA_V6_STATEMENTS,
     FORMAL_SCHEMA_V7_FINGERPRINT,
+    FORMAL_SCHEMA_V7_STATEMENTS,
+    FORMAL_SCHEMA_V8_FINGERPRINT,
     MIGRATION_HISTORY,
     MIGRATION_V6_CHECKSUM,
     MIGRATION_V6_NAME,
@@ -871,19 +873,19 @@ def _install_formal_v6(path: Path) -> None:
         connection.close()
 
 
-def test_v6_upgrades_to_v7_and_empty_database_installs_current_schema(
+def test_v6_upgrades_through_v8_and_empty_database_installs_current_schema(
     tmp_path: Path,
 ) -> None:
     v6_path = tmp_path / "formal-v6.db"
     _install_formal_v6(v6_path)
 
     upgraded = ensure_schema(v6_path)
-    assert upgraded.version == 7
-    assert upgraded.schema_fingerprint == FORMAL_SCHEMA_V7_FINGERPRINT
+    assert upgraded.version == 8
+    assert upgraded.schema_fingerprint == FORMAL_SCHEMA_V8_FINGERPRINT
     assert MIGRATION_HISTORY[5] == (6, MIGRATION_V6_NAME, MIGRATION_V6_CHECKSUM)
     verification = sqlite3.connect(v6_path)
     try:
-        assert verification.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert verification.execute("PRAGMA user_version").fetchone()[0] == 8
         assert verification.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert verification.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
@@ -891,7 +893,7 @@ def test_v6_upgrades_to_v7_and_empty_database_installs_current_schema(
 
     empty = Database(tmp_path / "empty.db")
     assert empty.schema_info()["version"] == CURRENT_SCHEMA_VERSION
-    assert empty.schema_info()["fingerprint"] == FORMAL_SCHEMA_V7_FINGERPRINT
+    assert empty.schema_info()["fingerprint"] == FORMAL_SCHEMA_V8_FINGERPRINT
     assert empty.schema_info()["checksum"] == MIGRATION_HISTORY[-1][2]
     assert empty.integrity_check() == {
         "ok": True,
@@ -967,6 +969,39 @@ def test_v7_collector_run_rebuild_preserves_structure_data_and_dependencies(
             """,
             (RUN_ID, TS),
         )
+        connection.execute(
+            """
+            INSERT INTO collector_run_transitions(
+                run_id,from_status,to_status,failure_stage,error_message,
+                transitioned_at
+            ) VALUES (?, 'running', 'completed', NULL, NULL, ?)
+            """,
+            (RUN_ID, TS),
+        )
+        connection.execute(
+            """
+            INSERT INTO odds_snapshots(
+                run_id,event_id,bookmaker_key,bookmaker_title,market_key,
+                market_last_update,outcome_name,price,point,
+                bookmaker_last_update,retrieved_at,raw_json
+            ) VALUES (
+                ?,'event-v6','book','Book','h2h',?,'Home',-110,NULL,?,?, '{}'
+            )
+            """,
+            (RUN_ID, TS, TS, TS),
+        )
+        connection.execute(
+            """
+            INSERT INTO weather_snapshots(
+                run_id,event_id,provider,forecast_time,temperature_f,
+                humidity_pct,precipitation_probability_pct,wind_speed_mph,
+                wind_direction_deg,short_forecast,raw_json,retrieved_at
+            ) VALUES (
+                ?,'event-v6','nws',?,72,40,0,8,270,'Clear','{}',?
+            )
+            """,
+            (RUN_ID, TS, TS),
+        )
         connection.commit()
         before_rows = connection.execute(
             "SELECT * FROM collector_runs ORDER BY run_id"
@@ -1009,6 +1044,17 @@ def test_v7_collector_run_rebuild_preserves_structure_data_and_dependencies(
                 """
             )
         )
+        before_dependents = {
+            table: connection.execute(
+                f"SELECT * FROM {table} ORDER BY 1"
+            ).fetchall()
+            for table in (
+                "collector_run_transitions",
+                "run_games",
+                "odds_snapshots",
+                "weather_snapshots",
+            )
+        }
     finally:
         connection.close()
 
@@ -1056,21 +1102,231 @@ def test_v7_collector_run_rebuild_preserves_structure_data_and_dependencies(
                 """
             )
         )
+        after_dependents = {
+            table: verification.execute(
+                f"SELECT * FROM {table} ORDER BY 1"
+            ).fetchall()
+            for table in before_dependents
+        }
         assert after_rows == before_rows
         assert after_indexes == before_indexes
         assert after_dependent_fks == before_dependent_fks
         assert after_triggers == before_triggers
+        assert after_dependents == before_dependents
         compact_before = re.sub(r"\s+", "", before_sql)
         compact_after = re.sub(r"\s+", "", after_sql)
         assert compact_before.replace(
             "schema_versionIN(1,2,3,4,5,6)",
-            "schema_versionIN(1,2,3,4,5,6,7)",
+            "schema_versionIN(1,2,3,4,5,6,7,8)",
         ) == compact_after
         assert verification.execute(
             "SELECT run_id,event_id,associated_at FROM run_games"
         ).fetchall() == [(RUN_ID, "event-v6", TS)]
         assert verification.execute("PRAGMA foreign_key_check").fetchall() == []
         assert verification.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        verification.close()
+
+
+def _install_formal_v7(path: Path) -> None:
+    connection = sqlite3.connect(path, isolation_level=None)
+    try:
+        for version, statements, (history_version, name, checksum) in zip(
+            range(1, 8),
+            (
+                FORMAL_SCHEMA_V1_STATEMENTS,
+                FORMAL_SCHEMA_V2_STATEMENTS,
+                FORMAL_SCHEMA_V3_STATEMENTS,
+                FORMAL_SCHEMA_V4_STATEMENTS,
+                FORMAL_SCHEMA_V5_STATEMENTS,
+                FORMAL_SCHEMA_V6_STATEMENTS,
+                FORMAL_SCHEMA_V7_STATEMENTS,
+            ),
+            MIGRATION_HISTORY[:7],
+            strict=True,
+        ):
+            assert version == history_version
+            connection.execute("PRAGMA foreign_keys=OFF")
+            connection.execute("BEGIN IMMEDIATE")
+            for statement in statements:
+                connection.execute(statement)
+            connection.execute(
+                """
+                INSERT INTO schema_migrations(version,name,checksum,applied_at)
+                VALUES (?,?,?,?)
+                """,
+                (version, name, checksum, TS),
+            )
+            connection.execute(f"PRAGMA user_version={version}")
+            connection.commit()
+        assert schema_fingerprint(connection) == FORMAL_SCHEMA_V7_FINGERPRINT
+    finally:
+        connection.close()
+
+
+def test_v7_to_v8_preserves_pipeline_runs_and_widens_schema_version(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "pipeline-v7.db"
+    _install_formal_v7(path)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            """
+            INSERT INTO pipeline_runs(
+                run_id,sport,run_type,requested_date,as_of_time,timezone,
+                pipeline_version,configuration_version,
+                configuration_fingerprint,configuration_metadata_json,
+                code_revision,database_schema_version,force_refresh,status,
+                failure_phase,error_message,final_summary_json,created_at,
+                started_at,completed_at,updated_at
+            ) VALUES (
+                ?,'MLB','manual_daily','2026-07-26',?,'America/Los_Angeles',
+                'DSE_MANUAL_RUN_CONTROLLER_V1','DSE_DAILY_MLB_CONFIG_V1',
+                ?,'{}',?,7,0,'pending',NULL,NULL,NULL,?,NULL,NULL,?
+            )
+            """,
+            (RUN_ID, TS, HASH_A, "f" * 40, TS, TS),
+        )
+        for ordinal, definition in enumerate(CANONICAL_PIPELINE_PHASES, start=1):
+            connection.execute(
+                """
+                INSERT INTO pipeline_run_phases(
+                    run_id,phase_key,ordinal,status,attempt_count,
+                    started_at,completed_at,updated_at,input_checksum,
+                    output_checksum,artifact_relpath,warnings_json,error_json,
+                    reused_from_run_id
+                ) VALUES (?, ?, ?, 'pending', 0, NULL, NULL, ?, NULL, NULL,
+                          NULL, NULL, NULL, NULL)
+                """,
+                (RUN_ID, definition.key.value, ordinal, TS),
+            )
+        connection.execute(
+            """
+            UPDATE pipeline_run_phases
+            SET status='succeeded',attempt_count=1,started_at=?,completed_at=?,
+                input_checksum=?,output_checksum=?,artifact_relpath=?,
+                updated_at=?
+            WHERE run_id=? AND phase_key='daily_slate'
+            """,
+            (TS, TS, HASH_A, HASH_A, "daily_slate/example.json", TS, RUN_ID),
+        )
+        connection.execute(
+            """
+            UPDATE pipeline_run_phases
+            SET status='succeeded_with_warnings',attempt_count=1,started_at=?,
+                completed_at=?,warnings_json='["warning"]',updated_at=?
+            WHERE run_id=? AND phase_key='game_state'
+            """,
+            (TS, TS, TS, RUN_ID),
+        )
+        connection.execute(
+            """
+            UPDATE pipeline_run_phases
+            SET status='degraded',attempt_count=1,started_at=?,completed_at=?,
+                warnings_json='["degraded"]',updated_at=?
+            WHERE run_id=? AND phase_key='baseball_intelligence_assembly'
+            """,
+            (TS, TS, TS, RUN_ID),
+        )
+        connection.execute(
+            """
+            UPDATE pipeline_run_phases
+            SET status='skipped',completed_at=?,updated_at=?
+            WHERE run_id=? AND phase_key='odds_weather'
+            """,
+            (TS, TS, RUN_ID),
+        )
+        connection.execute(
+            """
+            UPDATE pipeline_run_phases
+            SET status='failed',attempt_count=1,started_at=?,completed_at=?,
+                error_json='{"message":"redacted failure"}',updated_at=?
+            WHERE run_id=? AND phase_key='data_quality'
+            """,
+            (TS, TS, TS, RUN_ID),
+        )
+        connection.executemany(
+            """
+            INSERT INTO pipeline_run_transitions(
+                run_id,phase_key,from_status,to_status,transition_type,reason,
+                audit_metadata_json,transitioned_at
+            ) VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (
+                (RUN_ID, None, None, "pending", "created", "created", "{}", TS),
+                (
+                    RUN_ID,
+                    "daily_slate",
+                    "running",
+                    "succeeded",
+                    "state_transition",
+                    "completed",
+                    "{}",
+                    TS,
+                ),
+                (
+                    RUN_ID,
+                    "odds_weather",
+                    "pending",
+                    "skipped",
+                    "state_transition",
+                    "not required",
+                    "{}",
+                    TS,
+                ),
+            ),
+        )
+        connection.commit()
+        before_run = connection.execute(
+            "SELECT * FROM pipeline_runs WHERE run_id=?", (RUN_ID,)
+        ).fetchone()
+        before_phases = connection.execute(
+            "SELECT * FROM pipeline_run_phases WHERE run_id=? ORDER BY ordinal",
+            (RUN_ID,),
+        ).fetchall()
+        before_transitions = connection.execute(
+            "SELECT * FROM pipeline_run_transitions ORDER BY id"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    result = ensure_schema(path)
+    assert result.version == 8
+    assert result.schema_fingerprint == FORMAL_SCHEMA_V8_FINGERPRINT
+    verification = sqlite3.connect(path)
+    try:
+        assert verification.execute(
+            "SELECT * FROM pipeline_runs WHERE run_id=?", (RUN_ID,)
+        ).fetchone() == before_run
+        assert verification.execute(
+            "SELECT * FROM pipeline_run_phases WHERE run_id=? ORDER BY ordinal",
+            (RUN_ID,),
+        ).fetchall() == before_phases
+        assert verification.execute(
+            "SELECT * FROM pipeline_run_transitions ORDER BY id"
+        ).fetchall() == before_transitions
+        pipeline_sql = "".join(
+            str(
+                verification.execute(
+                    "SELECT sql FROM sqlite_master WHERE name='pipeline_runs'"
+                ).fetchone()[0]
+            ).split()
+        )
+        assert "database_schema_versionIN(7,8)" in pipeline_sql
+        assert {
+            str(row[0])
+            for row in verification.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name LIKE 'daily_slate_%'
+                """
+            )
+        } == {"daily_slate_snapshots", "daily_slate_games"}
+        assert verification.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert verification.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert verification.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         verification.close()
 

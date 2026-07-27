@@ -14,7 +14,7 @@ from app.redaction import redact_text
 from app.fielding_grain_migration import FORMAL_SCHEMA_V6_STATEMENTS
 
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 MIGRATION_V1_NAME = "formal_phase1_schema"
 MIGRATION_V2_NAME = "phase1_odds_history_and_freshness"
 MIGRATION_V3_NAME = "release_candidate_evidence_ledger"
@@ -22,6 +22,7 @@ MIGRATION_V4_NAME = "release_candidate_policy_enforcement"
 MIGRATION_V5_NAME = "mlb_stats_persistence_foundation"
 MIGRATION_V6_NAME = "retrosheet_fielding_source_row_grain"
 MIGRATION_V7_NAME = "manual_pipeline_run_controller"
+MIGRATION_V8_NAME = "daily_slate_v1_temporal_persistence"
 
 DSE_MLB_ML_CANDIDATE_V1_GATE_CODES = (
     "prediction_valid",
@@ -2832,6 +2833,297 @@ FORMAL_SCHEMA_V7_STATEMENTS = (
 )
 
 
+_COLLECTOR_RUNS_V8_CREATE = (
+    FORMAL_SCHEMA_V7_STATEMENTS[1]
+    .replace("_collector_runs_v7", "_collector_runs_v8")
+    .replace(
+        "schema_version IN (1, 2, 3, 4, 5, 6, 7)",
+        "schema_version IN (1, 2, 3, 4, 5, 6, 7, 8)",
+    )
+)
+_COLLECTOR_RUNS_V8_COPY = FORMAL_SCHEMA_V7_STATEMENTS[2].replace(
+    "_collector_runs_v7", "_collector_runs_v8"
+)
+_PIPELINE_RUNS_V8_CREATE = (
+    FORMAL_SCHEMA_V7_STATEMENTS[6]
+    .replace("CREATE TABLE pipeline_runs", "CREATE TABLE _pipeline_runs_v8")
+    .replace(
+        "database_schema_version INTEGER NOT NULL CHECK (database_schema_version = 7)",
+        "database_schema_version INTEGER NOT NULL CHECK ("
+        "database_schema_version IN (7, 8))",
+    )
+)
+
+FORMAL_SCHEMA_V8_STATEMENTS = (
+    "DROP TRIGGER publication_batches_validate_draft",
+    _COLLECTOR_RUNS_V8_CREATE,
+    _COLLECTOR_RUNS_V8_COPY,
+    "DROP TABLE collector_runs",
+    "ALTER TABLE _collector_runs_v8 RENAME TO collector_runs",
+    _PIPELINE_RUNS_V8_CREATE,
+    """
+    INSERT INTO _pipeline_runs_v8(
+        run_id, sport, run_type, requested_date, as_of_time, timezone,
+        pipeline_version, configuration_version, configuration_fingerprint,
+        configuration_metadata_json, code_revision, database_schema_version,
+        force_refresh, status, failure_phase, error_message,
+        final_summary_json, created_at, started_at, completed_at, updated_at
+    )
+    SELECT
+        run_id, sport, run_type, requested_date, as_of_time, timezone,
+        pipeline_version, configuration_version, configuration_fingerprint,
+        configuration_metadata_json, code_revision, database_schema_version,
+        force_refresh, status, failure_phase, error_message,
+        final_summary_json, created_at, started_at, completed_at, updated_at
+    FROM pipeline_runs
+    """,
+    "DROP TABLE pipeline_runs",
+    "ALTER TABLE _pipeline_runs_v8 RENAME TO pipeline_runs",
+    FORMAL_SCHEMA_V7_STATEMENTS[7],
+    FORMAL_SCHEMA_V7_STATEMENTS[8],
+    """
+    CREATE TABLE daily_slate_snapshots (
+        snapshot_id TEXT PRIMARY KEY CHECK (
+            snapshot_id GLOB 'slate:[0-9a-f]*'
+            AND length(snapshot_id) = 70
+        ),
+        run_id TEXT NOT NULL,
+        phase_key TEXT NOT NULL DEFAULT 'daily_slate' CHECK (
+            phase_key = 'daily_slate'
+        ),
+        phase_attempt INTEGER NOT NULL CHECK (phase_attempt >= 1),
+        requested_date TEXT NOT NULL CHECK (
+            requested_date GLOB
+            '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+        ),
+        as_of_time TEXT NOT NULL CHECK (length(trim(as_of_time)) > 0),
+        observed_at TEXT NOT NULL CHECK (length(trim(observed_at)) > 0),
+        sport TEXT NOT NULL CHECK (sport = 'MLB'),
+        league TEXT NOT NULL CHECK (league = 'MLB'),
+        source_authority TEXT NOT NULL CHECK (
+            length(trim(source_authority)) > 0
+        ),
+        source_version TEXT,
+        contract_version TEXT NOT NULL CHECK (
+            contract_version = 'DSE_DAILY_SLATE_V1'
+        ),
+        snapshot_checksum TEXT NOT NULL CHECK (
+            length(snapshot_checksum) = 64
+            AND snapshot_checksum NOT GLOB '*[^0-9a-f]*'
+        ),
+        artifact_relpath TEXT,
+        artifact_checksum TEXT CHECK (
+            artifact_checksum IS NULL OR (
+                length(artifact_checksum) = 64
+                AND artifact_checksum NOT GLOB '*[^0-9a-f]*'
+            )
+        ),
+        provenance_json TEXT NOT NULL CHECK (json_valid(provenance_json)),
+        canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json)),
+        game_count INTEGER NOT NULL CHECK (game_count >= 0),
+        sealed_at TEXT,
+        created_at TEXT NOT NULL CHECK (length(trim(created_at)) > 0),
+        UNIQUE(run_id, phase_attempt),
+        FOREIGN KEY(run_id) REFERENCES pipeline_runs(run_id) ON DELETE RESTRICT,
+        FOREIGN KEY(run_id, phase_key)
+            REFERENCES pipeline_run_phases(run_id, phase_key) ON DELETE RESTRICT,
+        CHECK (
+            (artifact_relpath IS NULL AND artifact_checksum IS NULL)
+            OR (artifact_relpath IS NOT NULL AND artifact_checksum IS NOT NULL)
+        )
+    )
+    """,
+    """
+    CREATE INDEX idx_daily_slate_snapshots_run
+    ON daily_slate_snapshots(run_id, phase_attempt, created_at, snapshot_id)
+    """,
+    """
+    CREATE INDEX idx_daily_slate_snapshots_date
+    ON daily_slate_snapshots(requested_date, as_of_time, snapshot_id)
+    """,
+    """
+    CREATE TABLE daily_slate_games (
+        snapshot_id TEXT NOT NULL,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+        edge_event_id TEXT NOT NULL CHECK (length(trim(edge_event_id)) > 0),
+        daily_mlb_game_id TEXT NOT NULL CHECK (
+            length(trim(daily_mlb_game_id)) > 0
+        ),
+        official_date TEXT NOT NULL CHECK (
+            official_date GLOB
+            '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+        ),
+        scheduled_start_time TEXT,
+        away_team_id TEXT NOT NULL CHECK (length(trim(away_team_id)) > 0),
+        home_team_id TEXT NOT NULL CHECK (length(trim(home_team_id)) > 0),
+        venue_id TEXT,
+        venue_mapping_status TEXT NOT NULL CHECK (
+            venue_mapping_status IN ('resolved', 'unresolved')
+        ),
+        game_number INTEGER CHECK (game_number IS NULL OR game_number >= 1),
+        doubleheader_status TEXT NOT NULL CHECK (
+            doubleheader_status IN ('single', 'doubleheader', 'unknown')
+        ),
+        game_status TEXT NOT NULL CHECK (
+            game_status IN (
+                'scheduled', 'pregame', 'in_progress', 'delayed',
+                'postponed', 'suspended', 'final', 'cancelled', 'unknown'
+            )
+        ),
+        source_game_id TEXT NOT NULL CHECK (length(trim(source_game_id)) > 0),
+        source_provider TEXT NOT NULL CHECK (length(trim(source_provider)) > 0),
+        source_home_team_id TEXT,
+        source_away_team_id TEXT,
+        source_venue_id TEXT,
+        source_venue_name TEXT,
+        observed_at TEXT NOT NULL CHECK (length(trim(observed_at)) > 0),
+        source_updated_at TEXT,
+        away_probable_player_identity_id TEXT,
+        away_probable_canonical_player_id TEXT,
+        home_probable_player_identity_id TEXT,
+        home_probable_canonical_player_id TEXT,
+        provenance_json TEXT NOT NULL CHECK (json_valid(provenance_json)),
+        canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json)),
+        row_checksum TEXT NOT NULL CHECK (
+            length(row_checksum) = 64
+            AND row_checksum NOT GLOB '*[^0-9a-f]*'
+        ),
+        PRIMARY KEY(snapshot_id, edge_event_id),
+        UNIQUE(snapshot_id, ordinal),
+        UNIQUE(snapshot_id, daily_mlb_game_id),
+        UNIQUE(snapshot_id, source_provider, source_game_id),
+        FOREIGN KEY(snapshot_id)
+            REFERENCES daily_slate_snapshots(snapshot_id) ON DELETE RESTRICT,
+        FOREIGN KEY(away_probable_player_identity_id)
+            REFERENCES stats_player_identities(player_identity_id)
+                ON DELETE RESTRICT,
+        FOREIGN KEY(away_probable_canonical_player_id)
+            REFERENCES stats_canonical_players(canonical_player_id)
+                ON DELETE RESTRICT,
+        FOREIGN KEY(home_probable_player_identity_id)
+            REFERENCES stats_player_identities(player_identity_id)
+                ON DELETE RESTRICT,
+        FOREIGN KEY(home_probable_canonical_player_id)
+            REFERENCES stats_canonical_players(canonical_player_id)
+                ON DELETE RESTRICT,
+        CHECK (away_team_id <> home_team_id),
+        CHECK (
+            (venue_mapping_status = 'resolved' AND venue_id IS NOT NULL)
+            OR (venue_mapping_status = 'unresolved' AND venue_id IS NULL)
+        ),
+        CHECK (
+            (away_probable_player_identity_id IS NULL
+                AND away_probable_canonical_player_id IS NULL)
+            OR (away_probable_player_identity_id IS NOT NULL
+                AND away_probable_canonical_player_id IS NOT NULL)
+        ),
+        CHECK (
+            (home_probable_player_identity_id IS NULL
+                AND home_probable_canonical_player_id IS NULL)
+            OR (home_probable_player_identity_id IS NOT NULL
+                AND home_probable_canonical_player_id IS NOT NULL)
+        )
+    )
+    """,
+    """
+    CREATE INDEX idx_daily_slate_games_identity
+    ON daily_slate_games(daily_mlb_game_id, observed_at, snapshot_id)
+    """,
+    """
+    CREATE TRIGGER daily_slate_snapshots_validate_phase
+    BEFORE INSERT ON daily_slate_snapshots
+    BEGIN
+        SELECT CASE WHEN NOT EXISTS (
+            SELECT 1
+            FROM pipeline_runs AS run
+            JOIN pipeline_run_phases AS phase
+              ON phase.run_id=run.run_id
+             AND phase.phase_key='daily_slate'
+            WHERE run.run_id=NEW.run_id
+              AND run.requested_date=NEW.requested_date
+              AND phase.status='running'
+              AND phase.attempt_count=NEW.phase_attempt
+              AND NEW.sealed_at IS NULL
+        ) THEN RAISE(
+            ABORT,
+            'daily slate snapshot requires matching active pipeline phase attempt'
+        ) END;
+    END
+    """,
+    """
+    CREATE TRIGGER daily_slate_snapshots_reject_update
+    BEFORE UPDATE OF
+        snapshot_id, run_id, phase_key, phase_attempt, requested_date,
+        as_of_time, observed_at, sport, league, source_authority,
+        source_version, contract_version, snapshot_checksum,
+        artifact_relpath, artifact_checksum, provenance_json, canonical_json,
+        game_count, created_at
+    ON daily_slate_snapshots
+    BEGIN
+        SELECT RAISE(ABORT, 'daily slate snapshots are immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER daily_slate_snapshots_validate_seal
+    BEFORE UPDATE OF sealed_at ON daily_slate_snapshots
+    BEGIN
+        SELECT CASE WHEN
+            OLD.sealed_at IS NOT NULL
+            OR NEW.sealed_at IS NULL
+            OR length(trim(NEW.sealed_at)) = 0
+            OR (
+                SELECT count(*)
+                FROM daily_slate_games
+                WHERE snapshot_id=OLD.snapshot_id
+            ) <> OLD.game_count
+            OR json_array_length(OLD.canonical_json, '$.games') <> OLD.game_count
+        THEN RAISE(
+            ABORT,
+            'daily slate snapshot cannot seal incomplete game evidence'
+        ) END;
+    END
+    """,
+    """
+    CREATE TRIGGER daily_slate_snapshots_reject_delete
+    BEFORE DELETE ON daily_slate_snapshots
+    BEGIN
+        SELECT RAISE(ABORT, 'daily slate snapshots are retained evidence');
+    END
+    """,
+    """
+    CREATE TRIGGER daily_slate_games_reject_update
+    BEFORE UPDATE ON daily_slate_games
+    BEGIN
+        SELECT RAISE(ABORT, 'daily slate game observations are immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER daily_slate_games_validate_unsealed_snapshot
+    BEFORE INSERT ON daily_slate_games
+    BEGIN
+        SELECT CASE WHEN NOT EXISTS (
+            SELECT 1
+            FROM daily_slate_snapshots AS snapshot
+            WHERE snapshot.snapshot_id=NEW.snapshot_id
+              AND snapshot.sealed_at IS NULL
+              AND NEW.ordinal <= snapshot.game_count
+        ) THEN RAISE(
+            ABORT,
+            'daily slate game requires an unsealed snapshot construction'
+        ) END;
+    END
+    """,
+    """
+    CREATE TRIGGER daily_slate_games_reject_delete
+    BEFORE DELETE ON daily_slate_games
+    BEGIN
+        SELECT RAISE(ABORT, 'daily slate game observations are retained evidence');
+    END
+    """,
+    FORMAL_SCHEMA_V7_STATEMENTS[5],
+)
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -2989,6 +3281,23 @@ MIGRATION_V7_CHECKSUM = hashlib.sha256(
         + "\n".join(_canonical_sql(statement) for statement in FORMAL_SCHEMA_V7_STATEMENTS)
     ).encode("utf-8")
 ).hexdigest()
+FORMAL_SCHEMA_V8_FINGERPRINT = _fingerprint_for_migration_chain(
+    FORMAL_SCHEMA_V1_STATEMENTS,
+    FORMAL_SCHEMA_V2_STATEMENTS,
+    FORMAL_SCHEMA_V3_STATEMENTS,
+    FORMAL_SCHEMA_V4_STATEMENTS,
+    FORMAL_SCHEMA_V5_STATEMENTS,
+    FORMAL_SCHEMA_V6_STATEMENTS,
+    FORMAL_SCHEMA_V7_STATEMENTS,
+    FORMAL_SCHEMA_V8_STATEMENTS,
+)
+MIGRATION_V8_CHECKSUM = hashlib.sha256(
+    (
+        MIGRATION_V8_NAME
+        + "\nformal-v7-to-v8\n"
+        + "\n".join(_canonical_sql(statement) for statement in FORMAL_SCHEMA_V8_STATEMENTS)
+    ).encode("utf-8")
+).hexdigest()
 
 MIGRATION_HISTORY = (
     (1, MIGRATION_V1_NAME, MIGRATION_V1_CHECKSUM),
@@ -2998,6 +3307,7 @@ MIGRATION_HISTORY = (
     (5, MIGRATION_V5_NAME, MIGRATION_V5_CHECKSUM),
     (6, MIGRATION_V6_NAME, MIGRATION_V6_CHECKSUM),
     (7, MIGRATION_V7_NAME, MIGRATION_V7_CHECKSUM),
+    (8, MIGRATION_V8_NAME, MIGRATION_V8_CHECKSUM),
 )
 
 
@@ -3099,6 +3409,7 @@ def _assert_target_schema(connection: sqlite3.Connection, version: int) -> None:
         5: FORMAL_SCHEMA_V5_FINGERPRINT,
         6: FORMAL_SCHEMA_V6_FINGERPRINT,
         7: FORMAL_SCHEMA_V7_FINGERPRINT,
+        8: FORMAL_SCHEMA_V8_FINGERPRINT,
     }.get(version)
     if expected_fingerprint is None:
         raise SchemaVerificationError(f"Unsupported target schema version {version}")
@@ -3805,6 +4116,55 @@ def _upgrade_formal_v6_schema(
     )
 
 
+def _upgrade_formal_v7_schema(
+    connection: sqlite3.Connection,
+    prior_result: MigrationResult | None = None,
+) -> MigrationResult:
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) != 7:
+        raise SchemaVerificationError("Formal v7 upgrade requires PRAGMA user_version=7")
+    _assert_target_schema(connection, 7)
+
+    connection.execute("PRAGMA foreign_keys=OFF")
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 0:
+        raise SchemaVerificationError("Unable to prepare transactional schema v8 upgrade")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if schema_fingerprint(connection) != FORMAL_SCHEMA_V7_FINGERPRINT:
+            raise SchemaVerificationError("Formal v7 schema changed before migration lock")
+        _execute_statements(connection, FORMAL_SCHEMA_V8_STATEMENTS)
+        applied_at = _utc_now()
+        connection.execute(
+            """
+            INSERT INTO schema_migrations(version, name, checksum, applied_at)
+            VALUES (8, ?, ?, ?)
+            """,
+            (MIGRATION_V8_NAME, MIGRATION_V8_CHECKSUM, applied_at),
+        )
+        connection.execute("PRAGMA user_version=8")
+        _assert_target_schema(connection, 8)
+        connection.commit()
+    except Exception:
+        if connection.in_transaction:
+            connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+        raise SchemaVerificationError(
+            "Foreign-key enforcement could not be restored after schema v8 upgrade"
+        )
+    _assert_target_schema(connection, 8)
+    return MigrationResult(
+        version=8,
+        schema_fingerprint=FORMAL_SCHEMA_V8_FINGERPRINT,
+        migrated=True,
+        source_kind=prior_result.source_kind if prior_result else "formal_v7",
+        backup_path=prior_result.backup_path if prior_result else None,
+        diagnostic_path=prior_result.diagnostic_path if prior_result else None,
+    )
+
+
 def _validate_versioned_schema(connection: sqlite3.Connection) -> MigrationResult:
     rows = connection.execute(
         "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
@@ -3838,6 +4198,7 @@ def _validate_versioned_schema(connection: sqlite3.Connection) -> MigrationResul
         5: FORMAL_SCHEMA_V5_FINGERPRINT,
         6: FORMAL_SCHEMA_V6_FINGERPRINT,
         7: FORMAL_SCHEMA_V7_FINGERPRINT,
+        8: FORMAL_SCHEMA_V8_FINGERPRINT,
     }
     return MigrationResult(
         version=newest,
@@ -3893,6 +4254,8 @@ def ensure_schema(database_path: Path) -> MigrationResult:
             result = _upgrade_formal_v5_schema(connection, result)
         if result.version == 6:
             result = _upgrade_formal_v6_schema(connection, result)
+        if result.version == 7:
+            result = _upgrade_formal_v7_schema(connection, result)
 
         journal_mode = str(connection.execute("PRAGMA journal_mode=WAL").fetchone()[0])
         if journal_mode.lower() != "wal":

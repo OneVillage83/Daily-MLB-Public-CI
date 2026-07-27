@@ -98,7 +98,7 @@ def _add_common_database_argument(
         "--database",
         type=Path,
         default=configured_settings.database_path,
-        help="schema-v7 SQLite database path",
+        help="schema-v8 SQLite database path",
     )
 
 

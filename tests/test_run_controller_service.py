@@ -120,7 +120,7 @@ def test_start_initializes_pending_run_without_executing_daily_slate(
     summary = controller.start("2026-07-26")
 
     assert summary.run.status is PipelineRunStatus.PENDING
-    assert summary.run.database_schema_version == 7
+    assert summary.run.database_schema_version == CURRENT_SCHEMA_VERSION
     assert len(summary.phases) == 15
     assert all(
         phase.status is PipelinePhaseStatus.PENDING
@@ -854,7 +854,7 @@ def test_configured_secret_is_absent_from_summary_and_persistence(
     assert secret not in database_text
 
 
-def test_code_revision_fallback_schema_v7_and_collector_lifecycle_unchanged(
+def test_code_revision_fallback_current_schema_and_collector_lifecycle_unchanged(
     tmp_path: Path,
 ) -> None:
     controller, repository = _build(tmp_path)
@@ -866,8 +866,8 @@ def test_code_revision_fallback_schema_v7_and_collector_lifecycle_unchanged(
     summary = controller.start("2026-07-26")
 
     assert summary.run.code_revision == "unavailable"
-    assert CURRENT_SCHEMA_VERSION == 7
-    assert repository.database.schema_info()["version"] == 7
+    assert CURRENT_SCHEMA_VERSION == 8
+    assert repository.database.schema_info()["version"] == CURRENT_SCHEMA_VERSION
     assert repository.database.get_run(collector["run_id"]) == collector
 
 
