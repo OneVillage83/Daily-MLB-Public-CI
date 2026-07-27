@@ -46,7 +46,7 @@ jobs:
           games = [game for date in schedule.get("dates", []) for game in date.get("games", [])]
           assert games, "schedule probe returned no games"
           game_pk = games[0]["gamePk"]
-          feed = get_json(f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live")
+          feed = get_json(f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live")
 
           game_data = feed.get("gameData", {})
           live_data = feed.get("liveData", {})
