@@ -17,6 +17,11 @@ from app.game_state.acquisition import (
     normalize_mlb_game_feed,
     normalize_mlb_game_state,
 )
+from app.game_state.batch import (
+    GameStateBatchAcquisitionError,
+    MlbGameStateEvidenceSetV1,
+    acquire_mlb_game_state_feeds,
+)
 from app.game_state.contracts import (
     GAME_STATE_CONTRACT_VERSION,
     GAME_STATE_LEAGUE,
@@ -35,11 +40,18 @@ from app.game_state.contracts import (
     StarterStateV1,
     TeamGameStateV1,
 )
+from app.game_state.raw_link import (
+    GAME_STATE_RAW_LINK_CONTRACT,
+    GameStateRawLinkOutcome,
+    game_state_raw_link_relpath,
+    write_game_state_raw_link,
+)
 
 __all__ = [
     "GAME_STATE_CONTRACT_VERSION",
     "GAME_STATE_LEAGUE",
     "GAME_STATE_NORMALIZATION_VERSION",
+    "GAME_STATE_RAW_LINK_CONTRACT",
     "GAME_STATE_SPORT",
     "MLB_GAME_FEED_ENDPOINT_CATEGORY",
     "MLB_GAME_FEED_FIXTURE_PREFIX",
@@ -47,12 +59,14 @@ __all__ = [
     "MLB_GAME_FEED_URL_TEMPLATE",
     "GamedayPersonnelV1",
     "GameStateAcquisitionError",
+    "GameStateBatchAcquisitionError",
     "GameStateContractError",
     "GameStateGameV1",
     "GameStateNormalizationError",
     "GameStateNormalizationResultV1",
     "GameStatePlayerV1",
     "GameStateProvenanceV1",
+    "GameStateRawLinkOutcome",
     "GameStateV1",
     "GameStateWarningCode",
     "GameStateWarningV1",
@@ -60,14 +74,18 @@ __all__ = [
     "LineupEntryV1",
     "LineupStateV1",
     "MlbGameFeedEvidenceV1",
+    "MlbGameStateEvidenceSetV1",
     "PlayerIdentityResolution",
     "PlayerIdentityResolver",
     "StarterCertainty",
     "StarterStateV1",
     "TeamGameStateV1",
     "acquire_mlb_game_feed",
+    "acquire_mlb_game_state_feeds",
     "build_mlb_game_feed_request",
+    "game_state_raw_link_relpath",
     "mlb_game_feed_fixture_key",
     "normalize_mlb_game_feed",
     "normalize_mlb_game_state",
+    "write_game_state_raw_link",
 ]
