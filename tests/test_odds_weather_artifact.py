@@ -68,13 +68,13 @@ def test_artifact_relpath_cannot_escape_root(tmp_path: Path) -> None:
 
 
 def test_artifact_rejects_configured_secret_material(tmp_path: Path) -> None:
-    secret = "fixture-secret-12345"
+    configured_value = "z9Q3v7Lm2p8K4x6N"
     snapshot = _empty_snapshot(
         warnings=(
             OddsWeatherWarningV1(
-                code="fixture_secret",
+                code="fixture_value",
                 domain=OddsWeatherWarningDomain.ODDS,
-                message=f"accidental secret: {secret}",
+                message=f"accidental configured value: {configured_value}",
             ),
         )
     )
@@ -83,5 +83,5 @@ def test_artifact_rejects_configured_secret_material(tmp_path: Path) -> None:
         write_odds_weather_artifact(
             snapshot,
             tmp_path,
-            secret_values=(secret,),
+            secret_values=(configured_value,),
         )
