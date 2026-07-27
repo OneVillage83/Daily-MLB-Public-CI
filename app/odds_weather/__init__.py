@@ -38,6 +38,11 @@ from app.odds_weather.contracts import (
     WeatherSnapshotV1,
     WeatherStatus,
 )
+from app.odds_weather.history import (
+    OddsHistorySelectionError,
+    OddsHistorySource,
+    select_odds_history_at,
+)
 
 __all__ = [
     "DEFAULT_ODDS_EVENT_MATCH_TOLERANCE_MINUTES",
@@ -49,6 +54,8 @@ __all__ = [
     "WEATHER_FORECAST_CONTRACT_VERSION",
     "OddsAvailability",
     "OddsCollectionAdapterResultV1",
+    "OddsHistorySelectionError",
+    "OddsHistorySource",
     "OddsProviderEventV1",
     "OddsSnapshotV1",
     "OddsWeatherAdapterError",
@@ -71,5 +78,6 @@ __all__ = [
     "odds_collection_to_phase4",
     "odds_weather_artifact_relpath",
     "openweather_forecast_to_phase4",
+    "select_odds_history_at",
     "write_odds_weather_artifact",
 ]
