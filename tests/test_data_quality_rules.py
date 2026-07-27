@@ -68,7 +68,7 @@ def _state_team(
     personnel_available: bool = True,
 ) -> TeamGameStateV1:
     starter_player = None if starter_certainty is StarterCertainty.UNAVAILABLE else _player()
-    lineup_entries = ()
+    lineup_entries: tuple[LineupEntryV1, ...] = ()
     if lineup_availability is LineupAvailability.PARTIAL:
         lineup_entries = (LineupEntryV1(player=_player(720001), batting_order_slot=1),)
     elif lineup_availability is LineupAvailability.POSTED:
@@ -94,11 +94,7 @@ def _state_team(
     )
 
 
-def _slate_game(
-    *,
-    status: DailySlateGameStatus = DailySlateGameStatus.SCHEDULED,
-    start: datetime | None = START,
-) -> DailySlateGameV1:
+def _slate_game(start: datetime | None = START) -> DailySlateGameV1:
     return DailySlateGameV1(
         edge_event_id="edge:mlb:900001",
         daily_mlb_game_id="game:mlb:900001",
@@ -110,7 +106,7 @@ def _slate_game(
         venue_mapping_status=VenueMappingStatus.UNRESOLVED,
         game_number=1,
         doubleheader_status=DailySlateDoubleheaderStatus.SINGLE,
-        game_status=status,
+        game_status=DailySlateGameStatus.SCHEDULED,
         source_game_id="900001",
         source_provider="mlb",
         observed_at=OBSERVED,
@@ -119,7 +115,7 @@ def _slate_game(
             source_record_id="900001",
             observed_at=OBSERVED,
             source_version="statsapi-v1",
-            raw_status=status.value,
+            raw_status="Scheduled",
             upstream_checksum="a" * 64,
         ),
         source_home_team_id="119",
@@ -129,7 +125,7 @@ def _slate_game(
     )
 
 
-def _state_game(*, status: DailySlateGameStatus = DailySlateGameStatus.PREGAME) -> GameStateGameV1:
+def _state_game(status: DailySlateGameStatus = DailySlateGameStatus.PREGAME) -> GameStateGameV1:
     return GameStateGameV1(
         edge_event_id="edge:mlb:900001",
         daily_mlb_game_id="game:mlb:900001",
@@ -153,20 +149,15 @@ def _state_game(*, status: DailySlateGameStatus = DailySlateGameStatus.PREGAME) 
 
 def _intelligence_team(
     *,
-    team_id: str = "LAD",
-    source_team_id: str = "119",
     gameday: int = 10,
     resolved: int = 10,
     features: int = 10,
-    lineup: int = 9,
     lineup_features: int = 9,
-    bullpen: int = 1,
     bullpen_features: int = 1,
-    starter_feature: bool = True,
 ) -> TeamBaseballIntelligenceV1:
     return TeamBaseballIntelligenceV1(
-        team_id=team_id,
-        source_team_id=source_team_id,
+        team_id="LAD",
+        source_team_id="119",
         starter_source_player_id=None,
         lineup_source_player_ids=(),
         bullpen_source_player_ids=(),
@@ -178,13 +169,13 @@ def _intelligence_team(
             gameday_player_count=gameday,
             resolved_player_count=resolved,
             player_feature_count=features,
-            lineup_player_count=lineup,
+            lineup_player_count=9,
             lineup_feature_count=lineup_features,
-            bullpen_player_count=bullpen,
+            bullpen_player_count=1,
             bullpen_feature_count=bullpen_features,
             bench_player_count=0,
             bench_feature_count=0,
-            starter_feature_available=starter_feature,
+            starter_feature_available=True,
         ),
     )
 
@@ -247,6 +238,8 @@ def _available_odds(*, markets: tuple[str, ...], stale: int = 0) -> OddsSnapshot
             "contract_version": ODDS_CONSENSUS_CONTRACT_VERSION,
             "calculation_version": CALCULATION_VERSION,
             "event_id": "odds-event-1",
+            "home_team_key": "LAD",
+            "away_team_key": "SF",
             "markets": {market: {} for market in markets},
         },
         normalized_market_count=len(markets),
@@ -255,9 +248,7 @@ def _available_odds(*, markets: tuple[str, ...], stale: int = 0) -> OddsSnapshot
     )
 
 
-def _available_weather(
-    *, primary: WeatherProvider = WeatherProvider.NWS, agreement: str = "strong"
-) -> WeatherSnapshotV1:
+def _available_weather(primary: WeatherProvider, agreement: str) -> WeatherSnapshotV1:
     forecast = WeatherForecastEvidenceV1(
         source_game_id="900001",
         provider=primary,
@@ -278,7 +269,7 @@ def _available_weather(
         physical_venue_key="dodger-stadium-los-angeles",
         venue_name="Dodger Stadium",
         latitude=34.0739,
-        longitude=-118.2400,
+        longitude=-118.24,
         timezone_name="America/Los_Angeles",
         roof_type="open",
         operational_roof_status="open",
@@ -311,15 +302,13 @@ def _codes(issues: list[object]) -> set[str]:
 
 
 def test_schedule_missing_start_and_postponed_are_critical() -> None:
-    issues = _schedule_issues(
-        _slate_game(start=None), _state_game(status=DailySlateGameStatus.POSTPONED)
-    )
+    issues = _schedule_issues(_slate_game(None), _state_game(DailySlateGameStatus.POSTPONED))
     assert {"scheduled_start_time_missing", "game_postponed"} <= _codes(issues)
     assert all(issue.severity is QualityIssueSeverity.CRITICAL for issue in issues)
 
 
 def test_delayed_game_is_warning_not_critical() -> None:
-    issues = _schedule_issues(_slate_game(), _state_game(status=DailySlateGameStatus.DELAYED))
+    issues = _schedule_issues(_slate_game(), _state_game(DailySlateGameStatus.DELAYED))
     assert _codes(issues) == {"game_delayed"}
     assert issues[0].severity is QualityIssueSeverity.WARNING
 
@@ -352,16 +341,9 @@ def test_zero_team_player_features_is_critical() -> None:
 
 
 def test_partial_identity_and_feature_coverage_are_warnings() -> None:
-    intelligence = _intelligence_team(
-        gameday=10,
-        resolved=9,
-        features=8,
-        lineup=9,
-        lineup_features=8,
-        bullpen=1,
-        bullpen_features=1,
+    issues = _team_intelligence_issues(
+        _state_team(), _intelligence_team(gameday=10, resolved=9, features=8, lineup_features=8)
     )
-    issues = _team_intelligence_issues(_state_team(), intelligence)
     by_code = {issue.code: issue for issue in issues}
     assert by_code["player_identity_coverage_incomplete"].severity is QualityIssueSeverity.WARNING
     assert by_code["player_feature_coverage_incomplete"].severity is QualityIssueSeverity.WARNING
@@ -375,8 +357,9 @@ def test_odds_unavailable_is_warning_not_critical() -> None:
 
 
 def test_missing_supported_market_and_stale_market_are_warnings() -> None:
-    game = _odds_weather_game(odds=_available_odds(markets=("h2h", "totals"), stale=2))
-    issues = _odds_issues(game)
+    issues = _odds_issues(
+        _odds_weather_game(odds=_available_odds(markets=("h2h", "totals"), stale=2))
+    )
     assert {"spreads_market_missing", "stale_odds_markets_present"} <= _codes(issues)
     assert all(issue.severity is QualityIssueSeverity.WARNING for issue in issues)
 
@@ -388,7 +371,7 @@ def test_weather_unavailable_is_warning() -> None:
 
 
 def test_openweather_primary_and_weak_agreement_degrade_weather() -> None:
-    weather = _available_weather(primary=WeatherProvider.OPENWEATHER, agreement="weak")
+    weather = _available_weather(WeatherProvider.OPENWEATHER, "weak")
     issues = _weather_issues(_odds_weather_game(weather=weather))
     by_code = {issue.code: issue for issue in issues}
     assert by_code["nws_primary_unavailable"].severity is QualityIssueSeverity.WARNING
@@ -396,7 +379,9 @@ def test_openweather_primary_and_weak_agreement_degrade_weather() -> None:
 
 
 def test_unknown_field_relative_wind_is_informational_only() -> None:
-    issues = _weather_issues(_odds_weather_game(weather=_available_weather()))
+    issues = _weather_issues(
+        _odds_weather_game(weather=_available_weather(WeatherProvider.NWS, "strong"))
+    )
     wind_issue = next(
         issue for issue in issues if issue.code == "field_relative_wind_unavailable"
     )
