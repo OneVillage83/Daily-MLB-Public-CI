@@ -12,8 +12,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import Settings, settings  # noqa: E402
+from app.daily_slate.handler import DailySlatePhaseHandler  # noqa: E402
 from app.database import Database  # noqa: E402
 from app.redaction import redact_text  # noqa: E402
+from app.run_controller.contracts import PipelinePhaseKey  # noqa: E402
 from app.run_controller.repository import (  # noqa: E402
     DuplicatePipelineRunError,
     PipelineRunNotFoundError,
@@ -50,7 +52,12 @@ def _safe_configuration_metadata(configured_settings: Settings) -> dict[str, Any
     return {
         "execution": {
             "mode": "manual",
-            "network_enabled": False,
+            "network_enabled": True,
+        },
+        "daily_slate": {
+            "authoritative_provider": "mlb",
+            "endpoint_category": "daily_slate_schedule",
+            "source_version": "statsapi-v1",
         },
         "odds": {
             "enabled": bool(configured_settings.odds_api_key),
@@ -69,6 +76,10 @@ def _safe_configuration_metadata(configured_settings: Settings) -> dict[str, Any
     }
 
 
+def _daily_slate_user_agent(configured_settings: Settings) -> str:
+    return f"Daily-MLB/{configured_settings.app_version}"
+
+
 def build_controller(
     database_path: Path,
     *,
@@ -78,15 +89,24 @@ def build_controller(
         database_path,
         busy_timeout_ms=configured_settings.sqlite_busy_timeout_ms,
     )
+    secret_values = configured_settings.credential_values()
     repository = PipelineRunRepository(
         database,
-        secret_values=configured_settings.credential_values(),
+        secret_values=secret_values,
         repository_root=ROOT,
+    )
+    daily_slate_handler = DailySlatePhaseHandler(
+        database,
+        artifact_root=configured_settings.artifact_dir,
+        request_timeout_seconds=configured_settings.request_timeout_seconds,
+        user_agent=_daily_slate_user_agent(configured_settings),
+        secret_values=secret_values,
     )
     return ManualRunController(
         repository,
         timezone_name=configured_settings.report_timezone,
         configuration_metadata=_safe_configuration_metadata(configured_settings),
+        handlers={PipelinePhaseKey.DAILY_SLATE: daily_slate_handler},
     )
 
 
@@ -106,8 +126,8 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
     parser = argparse.ArgumentParser(
         prog="run_controller",
         description=(
-            "Initialize, inspect, and manually resume Daily MLB pipeline runs "
-            "without provider acquisition"
+            "Initialize, inspect, and manually resume Daily MLB pipeline runs; "
+            "DAILY_SLATE uses authoritative MLB schedule acquisition"
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -128,7 +148,10 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
 
     resume = commands.add_parser(
         "resume",
-        help="resume persisted work; currently blocks without DailySlateV1",
+        help=(
+            "resume persisted work; DAILY_SLATE can execute and the controller "
+            "blocks safely at the next unimplemented phase"
+        ),
     )
     _add_common_database_argument(resume, configured_settings)
     resume.add_argument("--run-id", required=True)
@@ -204,7 +227,10 @@ def main(
         _print_summary(summary, json_output=args.json_output)
         return EXIT_SUCCESS
     except DuplicatePipelineRunError as exc:
-        print(f"CONFLICT: {redact_text(exc, configured_settings.credential_values())}", file=sys.stderr)
+        print(
+            f"CONFLICT: {redact_text(exc, configured_settings.credential_values())}",
+            file=sys.stderr,
+        )
         return EXIT_CONFLICT
     except (ManualRunExecutionBlocked, ManualRunRecoveryRequired) as exc:
         print(
@@ -215,7 +241,12 @@ def main(
     except ManualRunExecutionError as exc:
         print(f"EXECUTION FAILED: {exc}", file=sys.stderr)
         return EXIT_EXECUTION_FAILED
-    except (PipelineRunNotFoundError, ManualRunExecutionConflict, ValueError, TypeError) as exc:
+    except (
+        PipelineRunNotFoundError,
+        ManualRunExecutionConflict,
+        ValueError,
+        TypeError,
+    ) as exc:
         print(
             f"ERROR: {redact_text(exc, configured_settings.credential_values())}",
             file=sys.stderr,
