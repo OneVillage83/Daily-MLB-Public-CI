@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import InitVar, dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -83,6 +83,10 @@ def _aware_utc(value: object, name: str) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _optional_aware_utc(value: object, name: str) -> datetime | None:
+    return None if value is None else _aware_utc(value, name)
+
+
 def _iso_aware(value: object, name: str) -> datetime:
     text = _required_text(value, name)
     try:
@@ -94,7 +98,9 @@ def _iso_aware(value: object, name: str) -> datetime:
 
 def _sha256(value: object, name: str) -> str:
     text = _required_text(value, name)
-    if len(text) != 64 or any(character not in "0123456789abcdef" for character in text):
+    if len(text) != 64 or any(
+        character not in "0123456789abcdef" for character in text
+    ):
         raise OddsWeatherContractError(
             f"{name} must be 64 lowercase hexadecimal characters"
         )
@@ -155,7 +161,7 @@ def _mapping(value: object, name: str) -> Mapping[str, Any]:
 
 @dataclass(frozen=True, slots=True)
 class OddsProviderEventV1:
-    """Retained, structurally validated Odds API event evidence for fixture-first assembly."""
+    """Retained, structurally validated Odds API event evidence."""
 
     provider_event_id: str
     retrieved_at: datetime
@@ -209,14 +215,19 @@ class OddsProviderEventV1:
             frozen_history.append(item)
         object.__setattr__(self, "history_rows", tuple(frozen_history))
         serialized = self.as_dict()
-        if redact_value(serialized) != serialized:
+        if (
+            redact_value(serialized, preserve_field_names=("key",))
+            != serialized
+        ):
             raise OddsWeatherContractError(
                 "OddsProviderEventV1 contains credential-bearing material"
             )
 
     @property
     def commence_time(self) -> datetime:
-        return _iso_aware(self.event.get("commence_time"), "provider event commence_time")
+        return _iso_aware(
+            self.event.get("commence_time"), "provider event commence_time"
+        )
 
     @property
     def home_team_id(self) -> str:
@@ -277,7 +288,12 @@ class WeatherForecastEvidenceV1:
             _aware_utc(self.retrieved_at, "weather retrieved_at"),
         )
         checksums = tuple(
-            sorted({_sha256(value, "weather raw_capture_checksum") for value in self.raw_capture_checksums})
+            sorted(
+                {
+                    _sha256(value, "weather raw_capture_checksum")
+                    for value in self.raw_capture_checksums
+                }
+            )
         )
         if not checksums:
             raise OddsWeatherContractError(
@@ -298,14 +314,21 @@ class WeatherForecastEvidenceV1:
             maximum=MAX_WEATHER_FORECAST_OFFSET_MINUTES,
         )
         _finite_optional(frozen.get("temperature_f"), "temperature_f")
-        _finite_optional(frozen.get("humidity_pct"), "humidity_pct", minimum=0.0, maximum=100.0)
+        _finite_optional(
+            frozen.get("humidity_pct"),
+            "humidity_pct",
+            minimum=0.0,
+            maximum=100.0,
+        )
         _finite_optional(
             frozen.get("precipitation_probability_pct"),
             "precipitation_probability_pct",
             minimum=0.0,
             maximum=100.0,
         )
-        _finite_optional(frozen.get("wind_speed_mph"), "wind_speed_mph", minimum=0.0)
+        _finite_optional(
+            frozen.get("wind_speed_mph"), "wind_speed_mph", minimum=0.0
+        )
         _finite_optional(
             frozen.get("wind_direction_deg"),
             "wind_direction_deg",
@@ -313,9 +336,18 @@ class WeatherForecastEvidenceV1:
             maximum=360.0,
             maximum_inclusive=False,
         )
-        _finite_optional(frozen.get("wind_gust_mph"), "wind_gust_mph", minimum=0.0)
-        _finite_optional(frozen.get("clouds_pct"), "clouds_pct", minimum=0.0, maximum=100.0)
-        _finite_optional(frozen.get("pressure_hpa"), "pressure_hpa", minimum=0.0)
+        _finite_optional(
+            frozen.get("wind_gust_mph"), "wind_gust_mph", minimum=0.0
+        )
+        _finite_optional(
+            frozen.get("clouds_pct"),
+            "clouds_pct",
+            minimum=0.0,
+            maximum=100.0,
+        )
+        _finite_optional(
+            frozen.get("pressure_hpa"), "pressure_hpa", minimum=0.0
+        )
         serialized = self.as_dict()
         if redact_value(serialized) != serialized:
             raise OddsWeatherContractError(
@@ -364,27 +396,37 @@ class VenueWeatherContextV1:
             "physical_venue_key",
             _optional_text(self.physical_venue_key, "physical_venue_key"),
         )
-        object.__setattr__(self, "venue_name", _optional_text(self.venue_name, "venue_name"))
+        object.__setattr__(
+            self, "venue_name", _optional_text(self.venue_name, "venue_name")
+        )
         object.__setattr__(
             self,
             "latitude",
-            _finite_optional(self.latitude, "latitude", minimum=-90.0, maximum=90.0),
+            _finite_optional(
+                self.latitude, "latitude", minimum=-90.0, maximum=90.0
+            ),
         )
         object.__setattr__(
             self,
             "longitude",
-            _finite_optional(self.longitude, "longitude", minimum=-180.0, maximum=180.0),
+            _finite_optional(
+                self.longitude, "longitude", minimum=-180.0, maximum=180.0
+            ),
         )
         object.__setattr__(
             self,
             "timezone_name",
             _optional_text(self.timezone_name, "timezone_name"),
         )
-        object.__setattr__(self, "roof_type", _required_text(self.roof_type, "roof_type"))
+        object.__setattr__(
+            self, "roof_type", _required_text(self.roof_type, "roof_type")
+        )
         object.__setattr__(
             self,
             "operational_roof_status",
-            _required_text(self.operational_roof_status, "operational_roof_status"),
+            _required_text(
+                self.operational_roof_status, "operational_roof_status"
+            ),
         )
         object.__setattr__(
             self,
@@ -420,19 +462,37 @@ class VenueWeatherContextV1:
             or not isinstance(self.catalog_version, int)
             or self.catalog_version <= 0
         ):
-            raise OddsWeatherContractError("catalog_version must be a positive integer")
+            raise OddsWeatherContractError(
+                "catalog_version must be a positive integer"
+            )
         object.__setattr__(
             self,
             "association_errors",
-            tuple(sorted({_required_text(value, "association_error") for value in self.association_errors})),
+            tuple(
+                sorted(
+                    {
+                        _required_text(value, "association_error")
+                        for value in self.association_errors
+                    }
+                )
+            ),
         )
         object.__setattr__(
             self,
             "coordinate_errors",
-            tuple(sorted({_required_text(value, "coordinate_error") for value in self.coordinate_errors})),
+            tuple(
+                sorted(
+                    {
+                        _required_text(value, "coordinate_error")
+                        for value in self.coordinate_errors
+                    }
+                )
+            ),
         )
         if self.contract_version != VENUE_WEATHER_CONTEXT_CONTRACT_VERSION:
-            raise OddsWeatherContractError("unsupported venue weather context contract")
+            raise OddsWeatherContractError(
+                "unsupported venue weather context contract"
+            )
 
     @property
     def checksum(self) -> str:
@@ -503,10 +563,15 @@ class OddsSnapshotV1:
         for name in ("normalized_market_count", "raw_snapshot_count"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise OddsWeatherContractError(f"{name} must be a non-negative integer")
+                raise OddsWeatherContractError(
+                    f"{name} must be a non-negative integer"
+                )
         if self.calculation_version != CALCULATION_VERSION:
             raise OddsWeatherContractError("unsupported odds calculation_version")
-        if self.odds_consensus_contract_version != ODDS_CONSENSUS_CONTRACT_VERSION:
+        if (
+            self.odds_consensus_contract_version
+            != ODDS_CONSENSUS_CONTRACT_VERSION
+        ):
             raise OddsWeatherContractError("unsupported odds consensus contract")
         frozen_freshness = _freeze_json(dict(self.freshness_counts))
         assert isinstance(frozen_freshness, Mapping)
@@ -526,12 +591,24 @@ class OddsSnapshotV1:
             frozen_summary = _freeze_json(dict(summary))
             assert isinstance(frozen_summary, Mapping)
             object.__setattr__(self, "summary", frozen_summary)
-            if frozen_summary.get("contract_version") != ODDS_CONSENSUS_CONTRACT_VERSION:
-                raise OddsWeatherContractError("odds summary contract_version mismatch")
+            if (
+                frozen_summary.get("contract_version")
+                != ODDS_CONSENSUS_CONTRACT_VERSION
+            ):
+                raise OddsWeatherContractError(
+                    "odds summary contract_version mismatch"
+                )
             if frozen_summary.get("calculation_version") != CALCULATION_VERSION:
-                raise OddsWeatherContractError("odds summary calculation_version mismatch")
-            if str(frozen_summary.get("event_id") or "") != self.provider_event_id:
-                raise OddsWeatherContractError("odds summary provider event id mismatch")
+                raise OddsWeatherContractError(
+                    "odds summary calculation_version mismatch"
+                )
+            if (
+                str(frozen_summary.get("event_id") or "")
+                != self.provider_event_id
+            ):
+                raise OddsWeatherContractError(
+                    "odds summary provider event id mismatch"
+                )
         else:
             if any(
                 value is not None
@@ -553,7 +630,11 @@ class OddsSnapshotV1:
 
     @property
     def summary_checksum(self) -> str | None:
-        return None if self.summary is None else canonical_sha256(_thaw_json(self.summary))
+        return (
+            None
+            if self.summary is None
+            else canonical_sha256(_thaw_json(self.summary))
+        )
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -566,7 +647,9 @@ class OddsSnapshotV1:
             "provider_event_id": self.provider_event_id,
             "raw_capture_checksum": self.raw_capture_checksum,
             "raw_snapshot_count": self.raw_snapshot_count,
-            "retrieved_at": None if self.retrieved_at is None else self.retrieved_at.isoformat(),
+            "retrieved_at": (
+                None if self.retrieved_at is None else self.retrieved_at.isoformat()
+            ),
             "summary": None if self.summary is None else _thaw_json(self.summary),
             "summary_checksum": self.summary_checksum,
         }
@@ -585,50 +668,76 @@ class WeatherSnapshotV1:
 
     def __post_init__(self) -> None:
         comparison = _freeze_json(dict(_mapping(self.comparison, "comparison")))
-        wind = _freeze_json(dict(_mapping(self.baseball_wind_impact, "baseball_wind_impact")))
+        wind = _freeze_json(
+            dict(_mapping(self.baseball_wind_impact, "baseball_wind_impact"))
+        )
         assert isinstance(comparison, Mapping)
         assert isinstance(wind, Mapping)
         object.__setattr__(self, "comparison", comparison)
         object.__setattr__(self, "baseball_wind_impact", wind)
         if self.nws is not None and self.nws.provider is not WeatherProvider.NWS:
             raise OddsWeatherContractError("nws field must contain NWS evidence")
-        if self.openweather is not None and self.openweather.provider is not WeatherProvider.OPENWEATHER:
+        if (
+            self.openweather is not None
+            and self.openweather.provider is not WeatherProvider.OPENWEATHER
+        ):
             raise OddsWeatherContractError(
                 "openweather field must contain OpenWeather evidence"
             )
         if self.status is WeatherStatus.AVAILABLE:
-            if self.venue_context is None or (self.nws is None and self.openweather is None):
+            if self.venue_context is None or (
+                self.nws is None and self.openweather is None
+            ):
                 raise OddsWeatherContractError(
                     "available weather requires venue context and at least one forecast"
                 )
             expected_primary = (
-                WeatherProvider.NWS if self.nws is not None else WeatherProvider.OPENWEATHER
+                WeatherProvider.NWS
+                if self.nws is not None
+                else WeatherProvider.OPENWEATHER
             )
             if self.primary_source is not expected_primary:
-                raise OddsWeatherContractError("weather primary source priority mismatch")
+                raise OddsWeatherContractError(
+                    "weather primary source priority mismatch"
+                )
         elif self.status is WeatherStatus.INDOOR_FIXED_ROOF:
             if self.venue_context is None:
-                raise OddsWeatherContractError("indoor weather requires venue context")
-            if self.primary_source is not None or self.nws is not None or self.openweather is not None:
+                raise OddsWeatherContractError(
+                    "indoor weather requires venue context"
+                )
+            if (
+                self.primary_source is not None
+                or self.nws is not None
+                or self.openweather is not None
+            ):
                 raise OddsWeatherContractError(
                     "fixed-roof indoor weather must not retain forecast evidence"
                 )
-        else:
-            if self.primary_source is not None or self.nws is not None or self.openweather is not None:
-                raise OddsWeatherContractError(
-                    "unavailable weather must not retain selected forecast evidence"
-                )
+        elif (
+            self.primary_source is not None
+            or self.nws is not None
+            or self.openweather is not None
+        ):
+            raise OddsWeatherContractError(
+                "unavailable weather must not retain selected forecast evidence"
+            )
 
     def as_dict(self) -> dict[str, object]:
         return {
             "baseball_wind_impact": _thaw_json(self.baseball_wind_impact),
             "comparison": _thaw_json(self.comparison),
             "nws": None if self.nws is None else self.nws.as_dict(),
-            "openweather": None if self.openweather is None else self.openweather.as_dict(),
-            "primary_source": None if self.primary_source is None else self.primary_source.value,
+            "openweather": (
+                None if self.openweather is None else self.openweather.as_dict()
+            ),
+            "primary_source": (
+                None if self.primary_source is None else self.primary_source.value
+            ),
             "relevance": self.relevance.value,
             "status": self.status.value,
-            "venue_context": None if self.venue_context is None else self.venue_context.as_dict(),
+            "venue_context": (
+                None if self.venue_context is None else self.venue_context.as_dict()
+            ),
         }
 
 
@@ -642,14 +751,20 @@ class OddsWeatherWarningV1:
     provider_event_id: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "code", _required_text(self.code, "warning code"))
-        object.__setattr__(self, "message", _required_text(self.message, "warning message"))
+        object.__setattr__(
+            self, "code", _required_text(self.code, "warning code")
+        )
+        object.__setattr__(
+            self, "message", _required_text(self.message, "warning message")
+        )
         object.__setattr__(
             self,
             "source_game_id",
             _optional_text(self.source_game_id, "warning source_game_id"),
         )
-        object.__setattr__(self, "provider", _optional_text(self.provider, "warning provider"))
+        object.__setattr__(
+            self, "provider", _optional_text(self.provider, "warning provider")
+        )
         object.__setattr__(
             self,
             "provider_event_id",
@@ -674,14 +789,18 @@ class OddsWeatherGameV1:
     source_game_id: str
     away_team_id: str
     home_team_id: str
-    scheduled_start_time: datetime
+    scheduled_start_time: datetime | None
     upstream_daily_slate_game_checksum: str
     upstream_baseball_intelligence_game_checksum: str
     odds: OddsSnapshotV1
     weather: WeatherSnapshotV1
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "edge_event_id", _required_text(self.edge_event_id, "edge_event_id"))
+        object.__setattr__(
+            self,
+            "edge_event_id",
+            _required_text(self.edge_event_id, "edge_event_id"),
+        )
         object.__setattr__(
             self,
             "daily_mlb_game_id",
@@ -692,14 +811,19 @@ class OddsWeatherGameV1:
             "source_game_id",
             _required_text(self.source_game_id, "source_game_id"),
         )
-        if self.away_team_id not in CANONICAL_TEAM_KEYS or self.home_team_id not in CANONICAL_TEAM_KEYS:
+        if (
+            self.away_team_id not in CANONICAL_TEAM_KEYS
+            or self.home_team_id not in CANONICAL_TEAM_KEYS
+        ):
             raise OddsWeatherContractError("game teams must be canonical MLB")
         if self.away_team_id == self.home_team_id:
             raise OddsWeatherContractError("home and away teams must differ")
         object.__setattr__(
             self,
             "scheduled_start_time",
-            _aware_utc(self.scheduled_start_time, "scheduled_start_time"),
+            _optional_aware_utc(
+                self.scheduled_start_time, "scheduled_start_time"
+            ),
         )
         object.__setattr__(
             self,
@@ -717,7 +841,10 @@ class OddsWeatherGameV1:
                 "upstream_baseball_intelligence_game_checksum",
             ),
         )
-        if self.odds.availability is OddsAvailability.AVAILABLE and self.odds.summary is not None:
+        if (
+            self.odds.availability is OddsAvailability.AVAILABLE
+            and self.odds.summary is not None
+        ):
             if self.odds.summary.get("home_team_key") != self.home_team_id:
                 raise OddsWeatherContractError("odds summary home team mismatch")
             if self.odds.summary.get("away_team_key") != self.away_team_id:
@@ -730,7 +857,11 @@ class OddsWeatherGameV1:
             "edge_event_id": self.edge_event_id,
             "home_team_id": self.home_team_id,
             "odds": self.odds.as_dict(),
-            "scheduled_start_time": self.scheduled_start_time.isoformat(),
+            "scheduled_start_time": (
+                None
+                if self.scheduled_start_time is None
+                else self.scheduled_start_time.isoformat()
+            ),
             "source_game_id": self.source_game_id,
             "upstream_baseball_intelligence_game_checksum": self.upstream_baseball_intelligence_game_checksum,
             "upstream_daily_slate_game_checksum": self.upstream_daily_slate_game_checksum,
@@ -762,12 +893,19 @@ class OddsWeatherV1:
 
     def __post_init__(self, secret_values: Iterable[str]) -> None:
         parse_requested_date(self.requested_date)
-        object.__setattr__(self, "as_of_time", _aware_utc(self.as_of_time, "as_of_time"))
-        object.__setattr__(self, "observed_at", _aware_utc(self.observed_at, "observed_at"))
+        object.__setattr__(
+            self, "as_of_time", _aware_utc(self.as_of_time, "as_of_time")
+        )
+        object.__setattr__(
+            self, "observed_at", _aware_utc(self.observed_at, "observed_at")
+        )
         object.__setattr__(
             self,
             "upstream_daily_slate_checksum",
-            _sha256(self.upstream_daily_slate_checksum, "upstream_daily_slate_checksum"),
+            _sha256(
+                self.upstream_daily_slate_checksum,
+                "upstream_daily_slate_checksum",
+            ),
         )
         object.__setattr__(
             self,
@@ -788,11 +926,24 @@ class OddsWeatherV1:
         object.__setattr__(self, "source_raw_capture_checksums", checksums)
         games = tuple(self.games)
         if len({game.source_game_id for game in games}) != len(games):
-            raise OddsWeatherContractError("OddsWeatherV1 contains duplicate games")
+            raise OddsWeatherContractError(
+                "OddsWeatherV1 contains duplicate games"
+            )
+        if not all(isinstance(game, OddsWeatherGameV1) for game in games):
+            raise OddsWeatherContractError(
+                "games must contain OddsWeatherGameV1 values"
+            )
         object.__setattr__(self, "games", games)
-        object.__setattr__(self, "warnings", tuple(self.warnings))
+        warnings = tuple(self.warnings)
+        if not all(isinstance(warning, OddsWeatherWarningV1) for warning in warnings):
+            raise OddsWeatherContractError(
+                "warnings must contain OddsWeatherWarningV1 values"
+            )
+        object.__setattr__(self, "warnings", warnings)
         if self.contract_version != ODDS_WEATHER_CONTRACT_VERSION:
-            raise OddsWeatherContractError("unsupported OddsWeatherV1 contract_version")
+            raise OddsWeatherContractError(
+                "unsupported OddsWeatherV1 contract_version"
+            )
         if self.sport != "MLB" or self.league != "MLB":
             raise OddsWeatherContractError("sport and league must both be MLB")
         payload = self._content_dict()
@@ -845,7 +996,3 @@ def thaw_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
     result = _thaw_json(value)
     assert isinstance(result, dict)
     return result
-
-
-def thaw_sequence(value: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    return [thaw_mapping(item) for item in value]
