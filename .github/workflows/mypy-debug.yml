@@ -10,11 +10,13 @@ jobs:
   mypy:
     runs-on: windows-latest
     steps:
-      - name: Mypy diagnostics only
+      - name: Focused DS1-B diagnostics only
         shell: pwsh
         run: |
           git clone --quiet --depth 1 --branch debug/ds1b-mypy https://github.com/OneVillage83/Daily-MLB-Public-CI.git source
           Set-Location source
           py -3.12 --version
           py -3.12 -m pip install --quiet --disable-pip-version-check --require-hashes -r requirements-dev.txt
+          py -3.12 -m pytest -q tests/test_daily_slate_acquisition.py tests/test_daily_slate_handler.py tests/test_run_controller_cli.py
+          py -3.12 -m ruff check app/daily_slate app/stats/contracts.py scripts/run_controller.py tests/test_daily_slate_acquisition.py tests/test_daily_slate_handler.py tests/test_run_controller_cli.py
           py -3.12 -m mypy
