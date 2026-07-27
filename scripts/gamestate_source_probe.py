@@ -95,6 +95,22 @@ def main() -> None:
             print(f"{side.upper()}_FIRST_ORDER_POSITION", position)
             print(f"{side.upper()}_FIRST_ORDER_GAME_STATUS", game_status)
 
+        pitchers = team.get("pitchers", [])
+        assert isinstance(pitchers, list)
+        if pitchers:
+            pitcher_key = f"ID{pitchers[0]}"
+            pitcher = players.get(pitcher_key, players_data.get(pitcher_key, {}))
+            assert isinstance(pitcher, dict)
+            pitcher_stats = pitcher.get("stats", {})
+            assert isinstance(pitcher_stats, dict)
+            pitching = pitcher_stats.get("pitching", {})
+            assert isinstance(pitching, dict)
+            print(f"{side.upper()}_FIRST_PITCHER_KEY", pitcher_key)
+            print(f"{side.upper()}_FIRST_PITCHER_PERSON", pitcher.get("person", {}))
+            print(f"{side.upper()}_FIRST_PITCHER_STATS_KEYS", sorted(pitching.keys()))
+            print(f"{side.upper()}_FIRST_PITCHER_GAMES_STARTED", pitching.get("gamesStarted"))
+            print(f"{side.upper()}_FIRST_PITCHER_GAMES_PITCHED", pitching.get("gamesPitched"))
+
     print("SOURCE_PROBE_OK")
 
 
