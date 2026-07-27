@@ -13,6 +13,11 @@ from app.odds_weather.contracts import (
     WeatherForecastEvidenceV1,
     WeatherProvider,
 )
+from app.odds_weather.history import (
+    OddsHistorySelectionError,
+    OddsHistorySource,
+    select_odds_history_at,
+)
 from app.raw_payloads import RawPayloadCapture, sanitized_checksum
 
 
@@ -26,14 +31,18 @@ class OddsCollectionAdapterResultV1:
     warnings: tuple[OddsWeatherWarningV1, ...]
 
 
+def _aware_utc(value: datetime, name: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise OddsWeatherAdapterError(f"{name} must be timezone-aware")
+    return value.astimezone(timezone.utc)
+
+
 def _capture_time(capture: RawPayloadCapture) -> datetime:
     try:
         parsed = datetime.fromisoformat(capture.retrieved_at.replace("Z", "+00:00"))
     except ValueError as exc:
         raise OddsWeatherAdapterError("raw capture retrieved_at is malformed") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise OddsWeatherAdapterError("raw capture retrieved_at must be timezone-aware")
-    return parsed.astimezone(timezone.utc)
+    return _aware_utc(parsed, "raw capture retrieved_at")
 
 
 def _require_capture(
@@ -53,17 +62,37 @@ def odds_collection_to_phase4(
     *,
     secret_values: Iterable[str] = (),
     history_rows_by_event: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+    history_source: OddsHistorySource | None = None,
+    history_observed_at: datetime | None = None,
 ) -> OddsCollectionAdapterResultV1:
-    """Convert the existing validated OddsCollector result into canonical phase-4 inputs."""
+    """Convert the validated OddsCollector result into canonical phase-4 inputs.
 
+    Callers may supply already-selected ``history_rows_by_event`` or a retained history
+    source. When a history source is supplied, rows are filtered at the explicit phase
+    cutoff (or the collector retrieval time by default) before line movement is computed.
+    """
+
+    if history_rows_by_event is not None and history_source is not None:
+        raise OddsWeatherAdapterError(
+            "provide either history_rows_by_event or history_source, not both"
+        )
+    if history_observed_at is not None and history_source is None:
+        raise OddsWeatherAdapterError(
+            "history_observed_at requires history_source"
+        )
     _require_capture(
         collection.capture,
         provider="the_odds_api",
         endpoint_category="mlb_odds",
     )
     retrieved_at = _capture_time(collection.capture)
+    history_cutoff = (
+        retrieved_at
+        if history_observed_at is None
+        else _aware_utc(history_observed_at, "history_observed_at")
+    )
     checksum = sanitized_checksum(collection.capture, secret_values=secret_values)
-    history = history_rows_by_event or {}
+    provided_history = history_rows_by_event or {}
     events: list[OddsProviderEventV1] = []
     for index, event in enumerate(collection.games):
         provider_event_id = str(event.get("id") or "").strip()
@@ -71,7 +100,21 @@ def odds_collection_to_phase4(
             raise OddsWeatherAdapterError(
                 f"validated OddsCollector game {index} lacks provider event id"
             )
-        rows = tuple(dict(row) for row in history.get(provider_event_id, ()))
+        if history_source is not None:
+            try:
+                rows = select_odds_history_at(
+                    history_source,
+                    provider_event_id=provider_event_id,
+                    observed_at=history_cutoff,
+                )
+            except OddsHistorySelectionError as exc:
+                raise OddsWeatherAdapterError(
+                    f"retained odds history selection failed for {provider_event_id}: {exc}"
+                ) from exc
+        else:
+            rows = tuple(
+                dict(row) for row in provided_history.get(provider_event_id, ())
+            )
         events.append(
             OddsProviderEventV1(
                 provider_event_id=provider_event_id,
