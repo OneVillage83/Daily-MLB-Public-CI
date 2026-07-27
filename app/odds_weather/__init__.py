@@ -1,3 +1,10 @@
+from app.odds_weather.adapters import (
+    OddsCollectionAdapterResultV1,
+    OddsWeatherAdapterError,
+    nws_forecast_to_phase4,
+    odds_collection_to_phase4,
+    openweather_forecast_to_phase4,
+)
 from app.odds_weather.artifact import (
     ODDS_WEATHER_ARTIFACT_RELPATH,
     OddsWeatherArtifactV1,
@@ -41,8 +48,10 @@ __all__ = [
     "VENUE_WEATHER_CONTEXT_CONTRACT_VERSION",
     "WEATHER_FORECAST_CONTRACT_VERSION",
     "OddsAvailability",
+    "OddsCollectionAdapterResultV1",
     "OddsProviderEventV1",
     "OddsSnapshotV1",
+    "OddsWeatherAdapterError",
     "OddsWeatherArtifactV1",
     "OddsWeatherAssemblyError",
     "OddsWeatherAssemblyResultV1",
@@ -58,6 +67,9 @@ __all__ = [
     "WeatherSnapshotV1",
     "WeatherStatus",
     "assemble_odds_weather",
+    "nws_forecast_to_phase4",
+    "odds_collection_to_phase4",
     "odds_weather_artifact_relpath",
+    "openweather_forecast_to_phase4",
     "write_odds_weather_artifact",
 ]
