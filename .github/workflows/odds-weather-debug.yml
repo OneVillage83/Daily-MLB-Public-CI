@@ -1,0 +1,22 @@
+name: odds-weather-debug
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  odds-weather:
+    runs-on: windows-latest
+    steps:
+      - name: Focused Odds + Weather diagnostics
+        shell: pwsh
+        run: |
+          git clone --quiet --depth 1 --branch debug/odds-weather-v1 https://github.com/OneVillage83/Daily-MLB-Public-CI.git source
+          Set-Location source
+          py -3.12 --version
+          py -3.12 -m pip install --quiet --disable-pip-version-check --require-hashes -r requirements-dev.txt
+          py -3.12 -m pytest -q tests/test_odds_weather_assembly.py tests/test_odds_weather_artifact.py
+          py -3.12 -m ruff check app/odds_weather tests/test_odds_weather_assembly.py tests/test_odds_weather_artifact.py
+          py -3.12 -m mypy
