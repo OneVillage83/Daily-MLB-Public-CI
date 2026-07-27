@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +12,7 @@ from app.daily_slate.acquisition import (
     DailySlateNormalizationResultV1,
     MlbScheduleEvidenceV1,
     acquire_mlb_schedule,
+    build_mlb_schedule_request,
     normalize_mlb_schedule,
     verified_mlb_player_identity_resolver,
 )
@@ -19,15 +20,24 @@ from app.daily_slate.artifact import write_daily_slate_artifact
 from app.daily_slate.repository import DailySlateRepository
 from app.database import Database
 from app.identifiers import validate_run_id
-from app.redaction import redact_value
+from app.redaction import redact_text, redact_value
 from app.run_controller.contracts import PipelinePhaseKey, PipelinePhaseStatus
 from app.run_controller.service import PhaseExecutionContext, PhaseExecutionResult
-from app.stats.contracts import StatsTransport
+from app.stats.contracts import (
+    RawArtifact,
+    StatsRequest,
+    StatsResponse,
+    StatsTransport,
+    StatsTransportError,
+)
 from app.stats.raw_store import RawArtifactStore
 from app.stats.transport import HttpStatsTransport
 
 DAILY_SLATE_RAW_LINK_CONTRACT = "DSE_DAILY_SLATE_RAW_LINK_V1"
 DAILY_SLATE_RAW_PROVIDER_DIRECTORY = "provider_raw"
+_RAW_EVIDENCE_STATES = frozenset(
+    {"normalized", "acquisition_failed", "normalization_failed"}
+)
 
 
 def _utc_now() -> datetime:
@@ -53,50 +63,98 @@ def _relative_raw_path(path: Path, artifact_root: Path, field_name: str) -> str:
     return validate_artifact_relpath(relative.as_posix())
 
 
+def _capture_payload(
+    capture: RawArtifact,
+    *,
+    artifact_root: Path,
+    ordinal: int,
+) -> dict[str, object]:
+    return {
+        "capture_id": capture.capture_id,
+        "checksum_sha256": capture.checksum_sha256,
+        "content_type": capture.content_type,
+        "metadata_relpath": _relative_raw_path(
+            capture.metadata_path,
+            artifact_root,
+            "raw artifact metadata",
+        ),
+        "ordinal": ordinal,
+        "raw_artifact_relpath": _relative_raw_path(
+            capture.path,
+            artifact_root,
+            "raw artifact",
+        ),
+        "retrieved_at": capture.retrieved_at.isoformat(),
+        "size_bytes": capture.size_bytes,
+    }
+
+
 def write_daily_slate_raw_link(
     *,
-    evidence: MlbScheduleEvidenceV1,
+    request: StatsRequest,
+    captures: Iterable[RawArtifact],
+    http_attempts: int,
+    http_status: int | None,
+    response_headers: Mapping[str, str],
+    evidence_state: str,
     artifact_root: Path,
     run_id: str,
     requested_date: str,
     phase_attempt: int,
+    recorded_at: datetime,
+    error: Exception | None = None,
     secret_values: Iterable[str] = (),
 ) -> str:
     relpath = daily_slate_raw_link_relpath(run_id, phase_attempt)
     root = Path(artifact_root)
     root.mkdir(parents=True, exist_ok=True)
-    raw_relpath = _relative_raw_path(
-        evidence.response.capture.path,
-        root,
-        "raw artifact",
-    )
-    raw_metadata_relpath = _relative_raw_path(
-        evidence.response.capture.metadata_path,
-        root,
-        "raw artifact metadata",
+    if evidence_state not in _RAW_EVIDENCE_STATES:
+        raise ValueError("unsupported DailySlate raw evidence state")
+    if isinstance(http_attempts, bool) or http_attempts < 0:
+        raise ValueError("http_attempts must be a non-negative integer")
+    if recorded_at.tzinfo is None or recorded_at.utcoffset() is None:
+        raise ValueError("recorded_at must be timezone-aware")
+
+    retained = tuple(captures)
+    if any(capture.provider is not request.provider for capture in retained):
+        raise ValueError("raw capture provider does not match DailySlate request")
+    capture_payloads = [
+        _capture_payload(capture, artifact_root=root, ordinal=index)
+        for index, capture in enumerate(retained, start=1)
+    ]
+    configured_secrets = tuple(str(value) for value in secret_values if str(value))
+    error_payload = (
+        None
+        if error is None
+        else {
+            "error_type": type(error).__name__,
+            "message": redact_text(error, configured_secrets),
+        }
     )
     payload: dict[str, Any] = {
+        "captures": capture_payloads,
         "contract_version": DAILY_SLATE_RAW_LINK_CONTRACT,
-        "endpoint_category": evidence.request.endpoint_category,
-        "http_attempts": evidence.response.attempts,
-        "http_status": evidence.response.status_code,
-        "observed_at": evidence.observed_at.isoformat(),
+        "endpoint_category": request.endpoint_category,
+        "error": error_payload,
+        "evidence_state": evidence_state,
+        "final_raw_checksum_sha256": (
+            retained[-1].checksum_sha256 if retained else None
+        ),
+        "http_attempts": http_attempts,
+        "http_status": http_status,
+        "observed_at": retained[-1].retrieved_at.isoformat() if retained else None,
         "phase_attempt": phase_attempt,
-        "provider": evidence.response.capture.provider.value,
-        "raw_artifact_relpath": raw_relpath,
-        "raw_checksum_sha256": evidence.raw_checksum,
-        "raw_metadata_relpath": raw_metadata_relpath,
-        "raw_size_bytes": evidence.response.capture.size_bytes,
+        "provider": request.provider.value,
+        "recorded_at": recorded_at.astimezone(timezone.utc).isoformat(),
         "request": {
             "method": "GET",
-            "params": dict(evidence.request.params),
-            "url": evidence.request.url,
+            "params": dict(request.params),
+            "url": request.url,
         },
         "requested_date": requested_date,
-        "response_headers": dict(evidence.response.headers),
+        "response_headers": dict(response_headers),
         "run_id": run_id,
     }
-    configured_secrets = tuple(str(value) for value in secret_values if str(value))
     if redact_value(payload, configured_secrets) != payload:
         raise ValueError("DailySlate raw-link manifest contains credential-bearing material")
     content = json.dumps(
@@ -126,6 +184,52 @@ def write_daily_slate_raw_link(
         destination.unlink(missing_ok=True)
         raise
     return relpath
+
+
+class _RecordingStatsTransport:
+    def __init__(self, delegate: StatsTransport) -> None:
+        self.delegate = delegate
+        self.request: StatsRequest | None = None
+        self.response: StatsResponse | None = None
+        self.transport_error: StatsTransportError | None = None
+
+    def fetch(self, request: StatsRequest) -> StatsResponse:
+        self.request = request
+        try:
+            response = self.delegate.fetch(request)
+        except StatsTransportError as exc:
+            self.transport_error = exc
+            raise
+        self.response = response
+        return response
+
+    @property
+    def captures(self) -> tuple[RawArtifact, ...]:
+        if self.response is not None:
+            return self.response.attempt_captures or (self.response.capture,)
+        if self.transport_error is not None:
+            return self.transport_error.captures
+        return ()
+
+    @property
+    def attempts(self) -> int:
+        if self.response is not None:
+            return self.response.attempts
+        if self.transport_error is not None:
+            return self.transport_error.attempts
+        return 0
+
+    @property
+    def status_code(self) -> int | None:
+        if self.response is not None:
+            return self.response.status_code
+        if self.transport_error is not None:
+            return self.transport_error.status_code
+        return None
+
+    @property
+    def response_headers(self) -> Mapping[str, str]:
+        return {} if self.response is None else self.response.headers
 
 
 class DailySlatePhaseHandler:
@@ -180,34 +284,81 @@ class DailySlatePhaseHandler:
         )
         self.player_identity_resolver = verified_mlb_player_identity_resolver(database)
 
+    def _write_recorded_raw_link(
+        self,
+        context: PhaseExecutionContext,
+        recording: _RecordingStatsTransport,
+        *,
+        evidence_state: str,
+        error: Exception | None = None,
+    ) -> str:
+        request = recording.request or build_mlb_schedule_request(
+            context.requested_date,
+            timeout_seconds=self.request_timeout_seconds,
+            max_attempts=self.max_attempts,
+        )
+        return write_daily_slate_raw_link(
+            request=request,
+            captures=recording.captures,
+            http_attempts=recording.attempts,
+            http_status=recording.status_code,
+            response_headers=recording.response_headers,
+            evidence_state=evidence_state,
+            artifact_root=self.artifact_root,
+            run_id=context.run_id,
+            requested_date=context.requested_date,
+            phase_attempt=context.attempt_number,
+            recorded_at=self.clock(),
+            error=error,
+            secret_values=self.secret_values,
+        )
+
     def __call__(self, context: PhaseExecutionContext) -> PhaseExecutionResult:
         if context.phase_key is not PipelinePhaseKey.DAILY_SLATE:
             raise ValueError("DailySlatePhaseHandler may only execute DAILY_SLATE")
         if context.attempt_number < 1:
             raise ValueError("DAILY_SLATE phase attempt must be positive")
 
-        evidence = acquire_mlb_schedule(
-            transport=self.transport,
-            raw_store=self.raw_store,
-            requested_date=context.requested_date,
-            timeout_seconds=self.request_timeout_seconds,
-            max_attempts=self.max_attempts,
-        )
-        write_daily_slate_raw_link(
-            evidence=evidence,
-            artifact_root=self.artifact_root,
-            run_id=context.run_id,
-            requested_date=context.requested_date,
-            phase_attempt=context.attempt_number,
-            secret_values=self.secret_values,
-        )
-        normalized = normalize_mlb_schedule(
-            evidence.payload,
-            requested_date=context.requested_date,
-            as_of_time=context.as_of_time,
-            observed_at=evidence.observed_at,
-            upstream_checksum=evidence.raw_checksum,
-            player_identity_resolver=self.player_identity_resolver,
+        recording = _RecordingStatsTransport(self.transport)
+        try:
+            evidence = acquire_mlb_schedule(
+                transport=recording,
+                raw_store=self.raw_store,
+                requested_date=context.requested_date,
+                timeout_seconds=self.request_timeout_seconds,
+                max_attempts=self.max_attempts,
+            )
+        except Exception as exc:
+            self._write_recorded_raw_link(
+                context,
+                recording,
+                evidence_state="acquisition_failed",
+                error=exc,
+            )
+            raise
+
+        try:
+            normalized = normalize_mlb_schedule(
+                evidence.payload,
+                requested_date=context.requested_date,
+                as_of_time=context.as_of_time,
+                observed_at=evidence.observed_at,
+                upstream_checksum=evidence.raw_checksum,
+                player_identity_resolver=self.player_identity_resolver,
+            )
+        except Exception as exc:
+            self._write_recorded_raw_link(
+                context,
+                recording,
+                evidence_state="normalization_failed",
+                error=exc,
+            )
+            raise
+
+        self._write_recorded_raw_link(
+            context,
+            recording,
+            evidence_state="normalized",
         )
         return self._persist_result(context, evidence, normalized)
 
