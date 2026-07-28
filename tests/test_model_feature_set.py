@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import timedelta
+from typing import Any
 
 import pytest
 
@@ -149,7 +151,7 @@ def test_pitching_aggregation_recalculates_rates_from_summed_counts() -> None:
 
 
 def test_weighted_mean_uses_sample_counts_and_ignores_missing_values() -> None:
-    rows = [
+    rows: list[Mapping[str, Any]] = [
         {"metric": 10.0, "samples": 2},
         {"metric": 20.0, "samples": 1},
         {"metric": None, "samples": 100},
