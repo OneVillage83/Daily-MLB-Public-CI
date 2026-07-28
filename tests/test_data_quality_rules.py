@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from app.baseball_intelligence.contracts import (
@@ -297,7 +298,7 @@ def _available_weather(primary: WeatherProvider, agreement: str) -> WeatherSnaps
     )
 
 
-def _codes(issues: list[object]) -> set[str]:
+def _codes(issues: Sequence[object]) -> set[str]:
     return {str(getattr(issue, "code")) for issue in issues}
 
 
