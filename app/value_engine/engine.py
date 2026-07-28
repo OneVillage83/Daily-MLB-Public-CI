@@ -159,44 +159,44 @@ def _model_probabilities(
                 tail,
             )
     if market_key == "spreads" and line is not None:
-        projected = home_spread_projection(prediction.distribution, line)
+        spread_projection = home_spread_projection(prediction.distribution, line)
         if side_key == prediction.home_team_id:
             return (
                 ValueMarket.SPREAD,
                 ValueSide.HOME,
-                projected.home_cover_probability,
-                projected.away_cover_probability,
-                projected.push_probability,
-                projected.approximation_tail_bound,
+                spread_projection.home_cover_probability,
+                spread_projection.away_cover_probability,
+                spread_projection.push_probability,
+                spread_projection.approximation_tail_bound,
             )
         if side_key == prediction.away_team_id:
             return (
                 ValueMarket.SPREAD,
                 ValueSide.AWAY,
-                projected.away_cover_probability,
-                projected.home_cover_probability,
-                projected.push_probability,
-                projected.approximation_tail_bound,
+                spread_projection.away_cover_probability,
+                spread_projection.home_cover_probability,
+                spread_projection.push_probability,
+                spread_projection.approximation_tail_bound,
             )
     if market_key == "totals" and line is not None:
-        projected = total_line_projection(prediction.distribution, line)
+        total_projection = total_line_projection(prediction.distribution, line)
         if side_key == "Over":
             return (
                 ValueMarket.TOTAL,
                 ValueSide.OVER,
-                projected.over_probability,
-                projected.under_probability,
-                projected.push_probability,
-                projected.approximation_tail_bound,
+                total_projection.over_probability,
+                total_projection.under_probability,
+                total_projection.push_probability,
+                total_projection.approximation_tail_bound,
             )
         if side_key == "Under":
             return (
                 ValueMarket.TOTAL,
                 ValueSide.UNDER,
-                projected.under_probability,
-                projected.over_probability,
-                projected.push_probability,
-                projected.approximation_tail_bound,
+                total_projection.under_probability,
+                total_projection.over_probability,
+                total_projection.push_probability,
+                total_projection.approximation_tail_bound,
             )
     raise ValueEngineContractError(
         f"unsupported normalized market side {market_key}/{side_key}/{line}"
