@@ -10,8 +10,10 @@ from app.data_quality.contracts import DataQualityDisposition
 from app.matchup_packet.assembly import assemble_matchup_packet
 from app.model_feature_set.builder import (
     ModelFeatureSetBuildError,
+    _bullpen_workload_metrics,
     _hitting_rates,
     _pitching_rates,
+    _starter_history_metrics,
     _weighted_mean,
     build_model_feature_set,
 )
@@ -45,7 +47,7 @@ def _packet_from_chain(
 
 
 def test_schema_is_frozen_to_expected_width_and_checksum() -> None:
-    assert len(MODEL_FEATURE_NAMES_V1) == EXPECTED_MODEL_FEATURE_COUNT_V1 == 535
+    assert len(MODEL_FEATURE_NAMES_V1) == EXPECTED_MODEL_FEATURE_COUNT_V1 == 613
     assert MODEL_FEATURE_SCHEMA_CHECKSUM == EXPECTED_MODEL_FEATURE_SCHEMA_CHECKSUM_V1
     assert len(MODEL_FEATURE_NAMES_V1) == len(set(MODEL_FEATURE_NAMES_V1))
 
@@ -88,13 +90,15 @@ def test_structural_features_and_missingness_are_explicit() -> None:
     assert len(feature_set.games) == 1
     game = feature_set.games[0]
     features = game.feature_map()
-    assert len(game.feature_values) == 535
+    assert len(game.feature_values) == 613
     assert features["schedule.game_number"] == 1.0
     assert features["schedule.doubleheader.single"] == 1.0
     assert features["away.starter_certainty.unavailable"] == 1.0
     assert features["home.starter_certainty.unavailable"] == 1.0
     assert features["away.lineup_availability.unavailable"] == 1.0
     assert features["home.lineup_availability.unavailable"] == 1.0
+    assert features["away.bullpen.workload.available_player_count"] == 0.0
+    assert features["home.bullpen.workload.available_player_count"] == 0.0
     assert features["weather.status.unavailable"] == 1.0
     assert features["weather.temperature_f"] is None
     assert "weather.temperature_f" in game.missing_feature_names
@@ -157,6 +161,80 @@ def test_weighted_mean_uses_sample_counts_and_ignores_missing_values() -> None:
         {"metric": None, "samples": 100},
     ]
     assert _weighted_mean(rows, "metric", "samples") == pytest.approx(40 / 3)
+
+
+def test_starter_history_uses_previous_start_and_three_start_totals() -> None:
+    payload: Mapping[str, Any] = {
+        "pitcher_appearance_history_source": "statcast_final_game_appearances",
+        "previous_start": {
+            "pitches": 96,
+            "batters_faced": 24,
+            "hits": 5,
+            "home_runs": 1,
+            "walks": 2,
+            "strikeouts": 7,
+            "outs_recorded": 18,
+        },
+        "previous_three_starts": [
+            {"pitches": 96, "batters_faced": 24, "hits": 5, "home_runs": 1, "walks": 2, "strikeouts": 7, "outs_recorded": 18},
+            {"pitches": 88, "batters_faced": 22, "hits": 4, "home_runs": 0, "walks": 1, "strikeouts": 6, "outs_recorded": 18},
+            {"pitches": 102, "batters_faced": 27, "hits": 7, "home_runs": 2, "walks": 3, "strikeouts": 8, "outs_recorded": 17},
+        ],
+    }
+    result = _starter_history_metrics(payload)
+    assert result["previous_start.pitches"] == 96.0
+    assert result["previous_three_starts.start_count"] == 3.0
+    assert result["previous_three_starts.pitches_sum"] == 286.0
+    assert result["previous_three_starts.pitches_mean"] == pytest.approx(286 / 3)
+    assert result["previous_three_starts.strikeouts_sum"] == 21.0
+
+
+def test_unavailable_starter_history_stays_missing() -> None:
+    assert _starter_history_metrics(
+        {
+            "pitcher_appearance_history_source": "unavailable",
+            "previous_start": None,
+            "previous_three_starts": [],
+        }
+    ) == {}
+
+
+def test_bullpen_workload_aggregates_only_retained_history_sources() -> None:
+    payloads: list[Mapping[str, Any]] = [
+        {
+            "pitcher_workload": {
+                "source": "statcast_final_game_appearances",
+                "days_since_previous_appearance": 1,
+                "days_since_previous_start": 20,
+                "recent": {
+                    "previous_1_days": {"appearance_count": 1, "start_count": 0, "relief_appearance_count": 1, "pitch_count": 24},
+                    "previous_3_days": {"appearance_count": 2, "start_count": 0, "relief_appearance_count": 2, "pitch_count": 39},
+                    "previous_7_days": {"appearance_count": 3, "start_count": 0, "relief_appearance_count": 3, "pitch_count": 58},
+                },
+            }
+        },
+        {
+            "pitcher_workload": {
+                "source": "statcast_final_game_appearances",
+                "days_since_previous_appearance": 2,
+                "days_since_previous_start": None,
+                "recent": {
+                    "previous_1_days": {"appearance_count": 0, "start_count": 0, "relief_appearance_count": 0, "pitch_count": 0},
+                    "previous_3_days": {"appearance_count": 1, "start_count": 0, "relief_appearance_count": 1, "pitch_count": 18},
+                    "previous_7_days": {"appearance_count": 2, "start_count": 0, "relief_appearance_count": 2, "pitch_count": 34},
+                },
+            }
+        },
+        {"pitcher_workload": {"source": "unavailable", "recent": {}}},
+    ]
+    result = _bullpen_workload_metrics(payloads)
+    assert result["available_player_count"] == 2.0
+    assert result["days_since_previous_appearance_min"] == 1.0
+    assert result["days_since_previous_appearance_mean"] == 1.5
+    assert result["days_since_previous_start_min"] == 20.0
+    assert result["previous_1_days.pitch_count_sum"] == 24.0
+    assert result["previous_3_days.pitch_count_sum"] == 57.0
+    assert result["previous_7_days.relief_appearance_count_sum"] == 5.0
 
 
 def test_game_contract_rejects_wrong_vector_width() -> None:
