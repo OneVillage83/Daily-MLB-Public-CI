@@ -17,6 +17,6 @@ jobs:
           Set-Location source
           py -3.12 --version
           py -3.12 -m pip install --quiet --disable-pip-version-check --require-hashes -r requirements-dev.txt
-          py -3.12 -m pytest -q tests/test_model_feature_set.py tests/test_model_feature_set_artifact.py
-          py -3.12 -m ruff check app/model_feature_set tests/test_model_feature_set.py tests/test_model_feature_set_artifact.py
+          py -3.12 -m pytest -q tests/test_model_feature_set.py tests/test_model_feature_set_artifact.py tests/test_model_feature_set_v3_integration.py
+          py -3.12 -m ruff check app/model_feature_set tests/test_model_feature_set.py tests/test_model_feature_set_artifact.py tests/test_model_feature_set_v3_integration.py
           py -3.12 -m mypy
