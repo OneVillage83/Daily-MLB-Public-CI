@@ -286,12 +286,18 @@ def _bullpen_workload_metrics(
             "relief_appearance_count",
             "pitch_count",
         ):
-            values = [_finite(row.get(source_field)) for row in recent_rows]
-            if any(value is None for value in values):
-                continue
-            result[f"previous_{days}_days.{source_field}_sum"] = sum(
-                value for value in values if value is not None
-            )
+            numeric_values: list[float] = []
+            complete = True
+            for row in recent_rows:
+                value = _finite(row.get(source_field))
+                if value is None:
+                    complete = False
+                    break
+                numeric_values.append(value)
+            if complete:
+                result[f"previous_{days}_days.{source_field}_sum"] = sum(
+                    numeric_values
+                )
     return result
 
 
