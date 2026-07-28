@@ -6,7 +6,13 @@ from dataclasses import InitVar, dataclass
 from datetime import datetime, timezone
 
 from app.data_quality.contracts import DataQualityDisposition
-from app.daily_slate.contracts import canonical_json_bytes, canonical_sha256
+from app.daily_slate.contracts import (
+    canonical_authoritative_game_id,
+    canonical_json_bytes,
+    canonical_sha256,
+    daily_mlb_game_id,
+    edge_event_id,
+)
 from app.identifiers import parse_requested_date
 from app.model_feature_set.schema import (
     MODEL_FEATURE_NAMES_V1,
@@ -31,15 +37,23 @@ def _required_text(value: object, name: str) -> str:
 
 
 def _aware_utc(value: object, name: str) -> datetime:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise ModelFeatureSetContractError(f"{name} must be timezone-aware")
     return value.astimezone(timezone.utc)
 
 
 def _sha256(value: object, name: str) -> str:
     text = _required_text(value, name)
-    if len(text) != 64 or any(character not in "0123456789abcdef" for character in text):
-        raise ModelFeatureSetContractError(f"{name} must be 64 lowercase hexadecimal characters")
+    if len(text) != 64 or any(
+        character not in "0123456789abcdef" for character in text
+    ):
+        raise ModelFeatureSetContractError(
+            f"{name} must be 64 lowercase hexadecimal characters"
+        )
     return text
 
 
@@ -59,30 +73,60 @@ class ModelFeatureGameV1:
     schema_checksum: str = MODEL_FEATURE_SCHEMA_CHECKSUM
 
     def __post_init__(self) -> None:
-        for name in ("edge_event_id", "daily_mlb_game_id", "source_game_id"):
-            object.__setattr__(self, name, _required_text(getattr(self, name), name))
-        if self.away_team_id not in CANONICAL_TEAM_KEYS or self.home_team_id not in CANONICAL_TEAM_KEYS:
+        source_game_id = canonical_authoritative_game_id(self.source_game_id)
+        object.__setattr__(self, "source_game_id", source_game_id)
+        if self.edge_event_id != edge_event_id(source_game_id):
+            raise ModelFeatureSetContractError("edge_event_id identity mismatch")
+        if self.daily_mlb_game_id != daily_mlb_game_id(source_game_id):
+            raise ModelFeatureSetContractError("daily_mlb_game_id identity mismatch")
+        if (
+            self.away_team_id not in CANONICAL_TEAM_KEYS
+            or self.home_team_id not in CANONICAL_TEAM_KEYS
+        ):
             raise ModelFeatureSetContractError("game teams must be canonical MLB IDs")
         if self.away_team_id == self.home_team_id:
             raise ModelFeatureSetContractError("home and away teams must differ")
-        object.__setattr__(self, "upstream_matchup_packet_game_checksum", _sha256(self.upstream_matchup_packet_game_checksum, "upstream_matchup_packet_game_checksum"))
+        object.__setattr__(
+            self,
+            "upstream_matchup_packet_game_checksum",
+            _sha256(
+                self.upstream_matchup_packet_game_checksum,
+                "upstream_matchup_packet_game_checksum",
+            ),
+        )
         if self.market_reference_checksum is not None:
-            object.__setattr__(self, "market_reference_checksum", _sha256(self.market_reference_checksum, "market_reference_checksum"))
+            object.__setattr__(
+                self,
+                "market_reference_checksum",
+                _sha256(self.market_reference_checksum, "market_reference_checksum"),
+            )
         if self.schema_version != MODEL_FEATURE_SCHEMA_VERSION:
             raise ModelFeatureSetContractError("unsupported model feature schema version")
         if self.schema_checksum != MODEL_FEATURE_SCHEMA_CHECKSUM:
             raise ModelFeatureSetContractError("model feature schema checksum mismatch")
-        object.__setattr__(self, "quality_issue_codes", tuple(sorted({_required_text(value, "quality issue code") for value in self.quality_issue_codes})))
+        codes = tuple(
+            sorted(
+                {
+                    _required_text(value, "quality issue code")
+                    for value in self.quality_issue_codes
+                }
+            )
+        )
+        object.__setattr__(self, "quality_issue_codes", codes)
         values = tuple(self.feature_values)
         if len(values) != len(MODEL_FEATURE_NAMES_V1):
-            raise ModelFeatureSetContractError("feature_values length must exactly match frozen feature schema")
+            raise ModelFeatureSetContractError(
+                "feature_values length must exactly match frozen feature schema"
+            )
         normalized: list[float | None] = []
         for value in values:
             if value is None:
                 normalized.append(None)
                 continue
             if isinstance(value, bool) or not isinstance(value, int | float):
-                raise ModelFeatureSetContractError("feature_values must contain only finite numbers or null")
+                raise ModelFeatureSetContractError(
+                    "feature_values must contain only finite numbers or null"
+                )
             numeric = float(value)
             if not math.isfinite(numeric):
                 raise ModelFeatureSetContractError("feature_values must be finite")
@@ -91,14 +135,24 @@ class ModelFeatureGameV1:
 
     @property
     def missing_feature_names(self) -> tuple[str, ...]:
-        return tuple(name for name, value in zip(MODEL_FEATURE_NAMES_V1, self.feature_values, strict=True) if value is None)
+        return tuple(
+            name
+            for name, value in zip(
+                MODEL_FEATURE_NAMES_V1,
+                self.feature_values,
+                strict=True,
+            )
+            if value is None
+        )
 
     @property
     def available_feature_count(self) -> int:
         return len(self.feature_values) - len(self.missing_feature_names)
 
     def feature_map(self) -> dict[str, float | None]:
-        return dict(zip(MODEL_FEATURE_NAMES_V1, self.feature_values, strict=True))
+        return dict(
+            zip(MODEL_FEATURE_NAMES_V1, self.feature_values, strict=True)
+        )
 
     def _content_dict(self) -> dict[str, object]:
         return {
@@ -142,27 +196,53 @@ class ModelFeatureSetV1:
 
     def __post_init__(self, secret_values: Iterable[str]) -> None:
         parse_requested_date(self.requested_date)
-        object.__setattr__(self, "as_of_time", _aware_utc(self.as_of_time, "as_of_time"))
-        object.__setattr__(self, "observed_at", _aware_utc(self.observed_at, "observed_at"))
-        object.__setattr__(self, "upstream_matchup_packet_checksum", _sha256(self.upstream_matchup_packet_checksum, "upstream_matchup_packet_checksum"))
+        object.__setattr__(
+            self,
+            "as_of_time",
+            _aware_utc(self.as_of_time, "as_of_time"),
+        )
+        object.__setattr__(
+            self,
+            "observed_at",
+            _aware_utc(self.observed_at, "observed_at"),
+        )
+        object.__setattr__(
+            self,
+            "upstream_matchup_packet_checksum",
+            _sha256(
+                self.upstream_matchup_packet_checksum,
+                "upstream_matchup_packet_checksum",
+            ),
+        )
         if self.schema_version != MODEL_FEATURE_SCHEMA_VERSION:
             raise ModelFeatureSetContractError("unsupported model feature schema version")
         if self.schema_checksum != MODEL_FEATURE_SCHEMA_CHECKSUM:
             raise ModelFeatureSetContractError("model feature schema checksum mismatch")
         if self.contract_version != MODEL_FEATURE_SET_CONTRACT_VERSION:
-            raise ModelFeatureSetContractError("unsupported ModelFeatureSet contract version")
+            raise ModelFeatureSetContractError(
+                "unsupported ModelFeatureSet contract version"
+            )
         if self.sport != "MLB" or self.league != "MLB":
             raise ModelFeatureSetContractError("sport and league must both be MLB")
         games = tuple(self.games)
         if not all(isinstance(game, ModelFeatureGameV1) for game in games):
-            raise ModelFeatureSetContractError("games must contain ModelFeatureGameV1 values")
+            raise ModelFeatureSetContractError(
+                "games must contain ModelFeatureGameV1 values"
+            )
         if len({game.source_game_id for game in games}) != len(games):
-            raise ModelFeatureSetContractError("ModelFeatureSetV1 contains duplicate games")
+            raise ModelFeatureSetContractError(
+                "ModelFeatureSetV1 contains duplicate games"
+            )
         object.__setattr__(self, "games", games)
         payload = self._content_dict()
         configured = tuple(str(value) for value in secret_values if str(value))
-        if redact_value(payload, configured, preserve_field_names=("key",)) != payload:
-            raise ModelFeatureSetContractError("ModelFeatureSetV1 contains credential-bearing material")
+        if (
+            redact_value(payload, configured, preserve_field_names=("key",))
+            != payload
+        ):
+            raise ModelFeatureSetContractError(
+                "ModelFeatureSetV1 contains credential-bearing material"
+            )
 
     def _content_dict(self) -> dict[str, object]:
         return {
