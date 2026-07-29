@@ -29,7 +29,9 @@ def _empty_packet() -> MatchupPacketV1:
 
 def test_artifact_is_content_addressed_and_exact_canonical_bytes(tmp_path: Path) -> None:
     packet = _empty_packet()
+
     artifact = write_matchup_packet_artifact(packet, tmp_path)
+
     assert artifact.relpath == matchup_packet_artifact_relpath(packet)
     assert artifact.relpath == (
         f"matchup_packet/snapshots/{packet.checksum}/matchup_packet_v1.json"
@@ -42,8 +44,10 @@ def test_artifact_is_content_addressed_and_exact_canonical_bytes(tmp_path: Path)
 
 def test_rewriting_same_content_addressed_packet_is_idempotent(tmp_path: Path) -> None:
     packet = _empty_packet()
+
     first = write_matchup_packet_artifact(packet, tmp_path)
     second = write_matchup_packet_artifact(packet, tmp_path)
+
     assert first == second
     assert (tmp_path / first.relpath).read_bytes() == packet.canonical_json_bytes()
 

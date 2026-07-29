@@ -92,8 +92,7 @@ def _warning(
 
 
 def _material_errors_for_fields(
-    stadium: Mapping[str, Any],
-    fields: frozenset[str],
+    stadium: Mapping[str, Any], fields: frozenset[str]
 ) -> tuple[str, ...]:
     return tuple(
         sorted(
@@ -104,20 +103,17 @@ def _material_errors_for_fields(
     )
 
 
-def _venue_context(slate_game: DailySlateGameV1) -> VenueWeatherContextV1 | None:
+def _venue_context(
+    slate_game: DailySlateGameV1,
+) -> VenueWeatherContextV1 | None:
     stadium = stadium_for_team(slate_game.home_team_id)
     if stadium is None:
         return None
-
     association_errors = list(
         _material_errors_for_fields(stadium, _ASSOCIATION_FIELDS)
     )
     if str(stadium.get("team_key") or "") != slate_game.home_team_id:
         association_errors.append("venue_metadata_invalid:active_club_team_key")
-
-    physical_key = str(stadium.get("physical_venue_key") or "")
-    if slate_game.venue_id is not None and slate_game.venue_id != physical_key:
-        association_errors.append("venue_metadata_invalid:physical_venue_identity")
 
     if slate_game.source_venue_name:
         resolution = resolve_venue_alias(
@@ -126,9 +122,7 @@ def _venue_context(slate_game: DailySlateGameV1) -> VenueWeatherContextV1 | None
         )
         if resolution.get("status") not in {"current", "historical_same_venue"}:
             association_errors.append("venue_metadata_invalid:daily_slate_venue_alias")
-        elif resolution.get("physical_venue_key") != stadium.get(
-            "physical_venue_key"
-        ):
+        elif resolution.get("physical_venue_key") != stadium.get("physical_venue_key"):
             association_errors.append("venue_metadata_invalid:physical_venue_identity")
 
     coordinate_errors = list(
@@ -151,7 +145,11 @@ def _venue_context(slate_game: DailySlateGameV1) -> VenueWeatherContextV1 | None
     bearing = stadium.get("outfield_bearing_degrees")
     return VenueWeatherContextV1(
         team_id=slate_game.home_team_id,
-        physical_venue_key=physical_key or None,
+        physical_venue_key=(
+            str(stadium["physical_venue_key"])
+            if stadium.get("physical_venue_key")
+            else None
+        ),
         venue_name=(
             str(stadium.get("current_display_name") or stadium.get("venue"))
             if stadium.get("current_display_name") or stadium.get("venue")
@@ -217,16 +215,14 @@ def _latest_odds_revisions(
         by_event[event.provider_event_id].append(event)
 
     selected: list[OddsProviderEventV1] = []
-    for _provider_event_id, event_revisions in sorted(by_event.items()):
-        latest_time = max(revision.retrieved_at for revision in event_revisions)
+    for provider_event_id, candidates in sorted(by_event.items()):
+        latest_time = max(candidate.retrieved_at for candidate in candidates)
         latest = [
-            revision
-            for revision in event_revisions
-            if revision.retrieved_at == latest_time
+            candidate for candidate in candidates if candidate.retrieved_at == latest_time
         ]
         if len(latest) > 1 and any(
-            not _same_odds_revision(latest[0], revision)
-            for revision in latest[1:]
+            not _same_odds_revision(latest[0], candidate)
+            for candidate in latest[1:]
         ):
             raise OddsWeatherAssemblyError(
                 "conflicting odds revisions share one provider event/retrieval time"
@@ -234,9 +230,9 @@ def _latest_odds_revisions(
         selected.append(
             min(
                 latest,
-                key=lambda revision: (
-                    revision.raw_capture_checksum,
-                    canonical_sha256(revision.as_dict()),
+                key=lambda candidate: (
+                    candidate.raw_capture_checksum,
+                    canonical_sha256(candidate.as_dict()),
                 ),
             )
         )
@@ -254,10 +250,7 @@ def _match_odds_events(
         raise OddsWeatherAssemblyError(
             "odds event match tolerance must be greater than zero"
         )
-
-    assigned: dict[str, list[tuple[OddsProviderEventV1, float]]] = defaultdict(
-        list
-    )
+    assigned: dict[str, list[tuple[OddsProviderEventV1, float]]] = defaultdict(list)
     for event in odds_events:
         game_candidates: list[tuple[DailySlateGameV1, float]] = []
         for game in games:
@@ -267,16 +260,10 @@ def _match_odds_events(
                 or game.scheduled_start_time is None
             ):
                 continue
-            scheduled = _aware_utc(
-                game.scheduled_start_time,
-                "scheduled_start_time",
-            )
-            offset = abs(
-                (event.commence_time - scheduled).total_seconds()
-            ) / 60.0
+            scheduled = _aware_utc(game.scheduled_start_time, "scheduled_start_time")
+            offset = abs((event.commence_time - scheduled).total_seconds()) / 60.0
             if offset <= tolerance_minutes:
                 game_candidates.append((game, offset))
-
         if not game_candidates:
             warnings.append(
                 _warning(
@@ -288,7 +275,6 @@ def _match_odds_events(
                 )
             )
             continue
-
         minimum = min(offset for _game, offset in game_candidates)
         nearest_games = [
             (game, offset)
@@ -347,8 +333,7 @@ def _latest_weather_revisions(
     warnings: list[OddsWeatherWarningV1],
 ) -> dict[tuple[str, WeatherProvider], WeatherForecastEvidenceV1]:
     grouped: dict[
-        tuple[str, WeatherProvider],
-        list[WeatherForecastEvidenceV1],
+        tuple[str, WeatherProvider], list[WeatherForecastEvidenceV1]
     ] = defaultdict(list)
     for evidence in weather_evidence:
         if not isinstance(evidence, WeatherForecastEvidenceV1):
@@ -380,26 +365,25 @@ def _latest_weather_revisions(
         grouped[(evidence.source_game_id, evidence.provider)].append(evidence)
 
     result: dict[tuple[str, WeatherProvider], WeatherForecastEvidenceV1] = {}
-    for key, revisions in sorted(
-        grouped.items(),
-        key=lambda item: (item[0][0], item[0][1].value),
+    for key, candidates in sorted(
+        grouped.items(), key=lambda item: (item[0][0], item[0][1].value)
     ):
-        latest_time = max(revision.retrieved_at for revision in revisions)
+        latest_time = max(candidate.retrieved_at for candidate in candidates)
         latest = [
-            revision for revision in revisions if revision.retrieved_at == latest_time
+            candidate for candidate in candidates if candidate.retrieved_at == latest_time
         ]
         if len(latest) > 1 and any(
-            not _same_weather_revision(latest[0], revision)
-            for revision in latest[1:]
+            not _same_weather_revision(latest[0], candidate)
+            for candidate in latest[1:]
         ):
             raise OddsWeatherAssemblyError(
                 "conflicting weather revisions share one game/provider/retrieval time"
             )
         result[key] = min(
             latest,
-            key=lambda revision: (
-                revision.raw_capture_checksums,
-                canonical_sha256(revision.as_dict()),
+            key=lambda candidate: (
+                candidate.raw_capture_checksums,
+                canonical_sha256(candidate.as_dict()),
             ),
         )
     return result
@@ -410,18 +394,13 @@ def _validate_weather_first_pitch(
     scheduled_start_time: datetime,
 ) -> None:
     scheduled = _aware_utc(scheduled_start_time, "scheduled_start_time")
-    computed = abs(
-        (evidence.forecast_time - scheduled).total_seconds()
-    ) / 60.0
+    computed = abs((evidence.forecast_time - scheduled).total_seconds()) / 60.0
     if computed > MAX_WEATHER_FORECAST_OFFSET_MINUTES + 1e-9:
         raise OddsWeatherAssemblyError(
             "weather forecast does not cover first pitch within 60 minutes"
         )
     reported = evidence.forecast.get("forecast_offset_minutes")
-    if (
-        isinstance(reported, int | float)
-        and abs(float(reported) - computed) > 0.05
-    ):
+    if isinstance(reported, int | float) and abs(float(reported) - computed) > 0.05:
         raise OddsWeatherAssemblyError(
             "weather forecast offset disagrees with authoritative first pitch"
         )
@@ -441,8 +420,7 @@ def _build_weather_snapshot(
     *,
     slate_game: DailySlateGameV1,
     revisions: Mapping[
-        tuple[str, WeatherProvider],
-        WeatherForecastEvidenceV1,
+        tuple[str, WeatherProvider], WeatherForecastEvidenceV1
     ],
     warnings: list[OddsWeatherWarningV1],
 ) -> WeatherSnapshotV1:
@@ -467,9 +445,7 @@ def _build_weather_snapshot(
             baseball_wind_impact=_unavailable_wind("stadium_metadata_missing"),
         )
 
-    roof_verified = (
-        context.roof_verification_state == VerificationState.VERIFIED.value
-    )
+    roof_verified = context.roof_verification_state == VerificationState.VERIFIED.value
     fixed_indoor = (
         not context.association_errors
         and context.roof_type == "fixed"
@@ -546,9 +522,7 @@ def _build_weather_snapshot(
             nws=None,
             openweather=None,
             comparison={"agreement": "unavailable"},
-            baseball_wind_impact=_unavailable_wind(
-                "missing_scheduled_start_time"
-            ),
+            baseball_wind_impact=_unavailable_wind("missing_scheduled_start_time"),
         )
 
     nws = revisions.get((slate_game.source_game_id, WeatherProvider.NWS))
@@ -557,11 +531,7 @@ def _build_weather_snapshot(
     )
     for evidence in (nws, openweather):
         if evidence is not None:
-            _validate_weather_first_pitch(
-                evidence,
-                slate_game.scheduled_start_time,
-            )
-
+            _validate_weather_first_pitch(evidence, slate_game.scheduled_start_time)
     if nws is None and openweather is None:
         warnings.append(
             _warning(
@@ -603,10 +573,11 @@ def _build_weather_snapshot(
             "status", VerificationState.UNKNOWN.value
         )
     )
+    bearing = verified_outfield_bearing(stadium)
     wind = wind_impact(
         primary.forecast.get("wind_direction_deg"),
         primary.forecast.get("wind_speed_mph"),
-        verified_outfield_bearing(stadium),
+        bearing,
         bearing_verification_state=bearing_verification,
     )
     relevance = WeatherRelevance.DIRECT
@@ -620,9 +591,7 @@ def _build_weather_snapshot(
         relevance=relevance,
         venue_context=context,
         primary_source=(
-            WeatherProvider.NWS
-            if nws is not None
-            else WeatherProvider.OPENWEATHER
+            WeatherProvider.NWS if nws is not None else WeatherProvider.OPENWEATHER
         ),
         nws=nws,
         openweather=openweather,
@@ -642,27 +611,38 @@ def _build_odds_snapshot(
     consensus_thresholds: ConsensusThresholds,
     warnings: list[OddsWeatherWarningV1],
 ) -> OddsSnapshotV1:
+    if slate_game.scheduled_start_time is None:
+        warnings.append(
+            _warning(
+                "odds_unavailable_missing_start_time",
+                OddsWeatherWarningDomain.ODDS_MATCHING,
+                "Odds cannot be aligned because DailySlate has no scheduled first-pitch time",
+                source_game_id=slate_game.source_game_id,
+                provider="the_odds_api",
+            )
+        )
+        return OddsSnapshotV1(
+            availability=OddsAvailability.UNAVAILABLE,
+            provider_event_id=None,
+            retrieved_at=None,
+            raw_capture_checksum=None,
+            event_match_offset_minutes=None,
+            summary=None,
+            normalized_market_count=0,
+            raw_snapshot_count=0,
+            freshness_counts={},
+        )
+
     if selected is None:
-        if slate_game.scheduled_start_time is None:
-            warnings.append(
-                _warning(
-                    "odds_unavailable_missing_start_time",
-                    OddsWeatherWarningDomain.ODDS_MATCHING,
-                    "Odds cannot be canonically matched because DailySlate has no scheduled start time",
-                    source_game_id=slate_game.source_game_id,
-                    provider="the_odds_api",
-                )
+        warnings.append(
+            _warning(
+                "odds_event_missing",
+                OddsWeatherWarningDomain.ODDS_MATCHING,
+                "No provider odds event matched this canonical DailySlate game",
+                source_game_id=slate_game.source_game_id,
+                provider="the_odds_api",
             )
-        else:
-            warnings.append(
-                _warning(
-                    "odds_event_missing",
-                    OddsWeatherWarningDomain.ODDS_MATCHING,
-                    "No provider odds event matched this canonical DailySlate game",
-                    source_game_id=slate_game.source_game_id,
-                    provider="the_odds_api",
-                )
-            )
+        )
         return OddsSnapshotV1(
             availability=OddsAvailability.UNAVAILABLE,
             provider_event_id=None,
@@ -722,31 +702,15 @@ def _validate_upstream_game(
     intelligence_game: BaseballIntelligenceGameV1,
 ) -> None:
     comparisons = (
-        (
-            "edge_event_id",
-            slate_game.edge_event_id,
-            intelligence_game.edge_event_id,
-        ),
+        ("edge_event_id", slate_game.edge_event_id, intelligence_game.edge_event_id),
         (
             "daily_mlb_game_id",
             slate_game.daily_mlb_game_id,
             intelligence_game.daily_mlb_game_id,
         ),
-        (
-            "source_game_id",
-            slate_game.source_game_id,
-            intelligence_game.source_game_id,
-        ),
-        (
-            "away_team_id",
-            slate_game.away_team_id,
-            intelligence_game.away_team_id,
-        ),
-        (
-            "home_team_id",
-            slate_game.home_team_id,
-            intelligence_game.home_team_id,
-        ),
+        ("source_game_id", slate_game.source_game_id, intelligence_game.source_game_id),
+        ("away_team_id", slate_game.away_team_id, intelligence_game.away_team_id),
+        ("home_team_id", slate_game.home_team_id, intelligence_game.home_team_id),
     )
     mismatches = [name for name, left, right in comparisons if left != right]
     if mismatches:
@@ -780,7 +744,6 @@ def assemble_odds_weather(
         raise OddsWeatherAssemblyError(
             "DailySlate and Baseball Intelligence as_of_time values disagree"
         )
-
     slate_ids = tuple(game.source_game_id for game in slate.games)
     intelligence_ids = tuple(
         game.source_game_id for game in baseball_intelligence.games
@@ -790,14 +753,20 @@ def assemble_odds_weather(
             "DailySlate and Baseball Intelligence game ordering/set must match exactly"
         )
     for slate_game, intelligence_game in zip(
-        slate.games,
-        baseball_intelligence.games,
-        strict=True,
+        slate.games, baseball_intelligence.games, strict=True
     ):
         _validate_upstream_game(slate_game, intelligence_game)
 
     odds_inventory = tuple(odds_events)
     weather_inventory = tuple(weather_evidence)
+    source_warning_inventory = tuple(source_warnings)
+    if any(
+        not isinstance(warning, OddsWeatherWarningV1)
+        for warning in source_warning_inventory
+    ):
+        raise OddsWeatherAssemblyError(
+            "source_warnings must contain OddsWeatherWarningV1 values"
+        )
     upstream_latest = max(slate.observed_at, baseball_intelligence.observed_at)
     if observed_at is None:
         evidence_times = [
@@ -812,14 +781,7 @@ def assemble_odds_weather(
                 "phase observation time cannot precede upstream canonical evidence"
             )
 
-    warnings: list[OddsWeatherWarningV1] = []
-    for warning in source_warnings:
-        if not isinstance(warning, OddsWeatherWarningV1):
-            raise OddsWeatherAssemblyError(
-                "source_warnings must contain OddsWeatherWarningV1 values"
-            )
-        warnings.append(warning)
-
+    warnings: list[OddsWeatherWarningV1] = list(source_warning_inventory)
     selected_odds_revisions = _latest_odds_revisions(
         odds_inventory,
         observed_at=selected_observed_at,
@@ -843,9 +805,7 @@ def assemble_odds_weather(
     games: list[OddsWeatherGameV1] = []
     raw_checksums: set[str] = set()
     for slate_game, intelligence_game in zip(
-        slate.games,
-        baseball_intelligence.games,
-        strict=True,
+        slate.games, baseball_intelligence.games, strict=True
     ):
         odds = _build_odds_snapshot(
             slate_game=slate_game,

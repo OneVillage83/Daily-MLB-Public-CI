@@ -25,7 +25,9 @@ OBSERVED = datetime(2026, 7, 27, 14, 15, tzinfo=timezone.utc)
 START = datetime(2026, 7, 27, 23, 10, tzinfo=timezone.utc)
 
 
-def _issue(severity: QualityIssueSeverity = QualityIssueSeverity.INFO) -> QualityIssueV1:
+def _issue(
+    severity: QualityIssueSeverity = QualityIssueSeverity.INFO,
+) -> QualityIssueV1:
     return QualityIssueV1(
         code=f"fixture_{severity.value}",
         domain=QualityDomain.GAME_STATE,
@@ -136,7 +138,9 @@ def test_artifact_is_content_addressed_and_exact_canonical_bytes(tmp_path: Path)
     snapshot = _snapshot(games=(_game(),))
     artifact = write_data_quality_artifact(snapshot, tmp_path)
     assert artifact.relpath == data_quality_artifact_relpath(snapshot)
-    assert artifact.relpath == f"data_quality/snapshots/{snapshot.checksum}/data_quality_v1.json"
+    assert artifact.relpath == (
+        f"data_quality/snapshots/{snapshot.checksum}/data_quality_v1.json"
+    )
     content = (tmp_path / artifact.relpath).read_bytes()
     assert content == snapshot.canonical_json_bytes()
     assert artifact.checksum == hashlib.sha256(content).hexdigest()
@@ -160,6 +164,7 @@ def test_artifact_rejects_configured_secret_material(tmp_path: Path) -> None:
     snapshot = _snapshot(
         games=(
             _game(
+                disposition=DataQualityDisposition.READY,
                 issues=(
                     QualityIssueV1(
                         code="fixture_note",

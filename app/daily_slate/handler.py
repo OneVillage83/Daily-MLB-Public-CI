@@ -167,12 +167,14 @@ def write_daily_slate_raw_link(
     destination = resolve_contained_path(root, relpath)
     destination.parent.mkdir(parents=True, exist_ok=True)
     descriptor: int | None = None
+    created = False
     try:
         descriptor = os.open(
             destination,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
             0o600,
         )
+        created = True
         with os.fdopen(descriptor, "wb") as handle:
             descriptor = None
             handle.write(content)
@@ -181,7 +183,8 @@ def write_daily_slate_raw_link(
     except BaseException:
         if descriptor is not None:
             os.close(descriptor)
-        destination.unlink(missing_ok=True)
+        if created:
+            destination.unlink(missing_ok=True)
         raise
     return relpath
 
