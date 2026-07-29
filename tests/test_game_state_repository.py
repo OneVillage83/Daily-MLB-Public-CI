@@ -24,6 +24,7 @@ from app.game_state import (
     GamedayPersonnelV1,
     GameStateArtifactIntegrityError,
     GameStateGameV1,
+    GameStateIntegrityError,
     GameStatePersistenceConflict,
     GameStateProvenanceV1,
     GameStateRawLinkOutcome,
@@ -242,3 +243,38 @@ def test_zero_game_state_seals_and_database_immutability_holds(tmp_path: Path) -
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute("DELETE FROM game_state_snapshots WHERE snapshot_id=?", (persisted.snapshot_id,))
     assert repo.database.integrity_check()["ok"] is True
+
+
+def test_retrieval_rejects_tampered_child_identity_columns(tmp_path: Path) -> None:
+    slate = _slate(_slate_game())
+    repo, _, _ = _setup(tmp_path, slate)
+    state = _state(slate)
+    link = _raw_link(
+        repo,
+        state,
+        GameStateRawLinkOutcome.NORMALIZED,
+        normalized_checksum=state.checksum,
+    )
+    repo.persist_attempt_evidence(
+        run_id=RUN_ID,
+        phase_attempt=1,
+        requested_date=slate.requested_date,
+        upstream_daily_slate_checksum=slate.checksum,
+        outcome="normalized",
+        normalized_snapshot_checksum=state.checksum,
+        raw_link_relpath=link,
+    )
+    persisted = repo.persist_game_state(
+        run_id=RUN_ID,
+        phase_attempt=1,
+        state=state,
+        artifact=write_game_state_artifact(state, repo.artifact_root),
+    )
+    with repo.database.connect(write=True) as connection:
+        connection.execute("DROP TRIGGER game_state_games_reject_update")
+        connection.execute(
+            "UPDATE game_state_games SET away_team_id='TAMPERED' WHERE snapshot_id=?",
+            (persisted.snapshot_id,),
+        )
+    with pytest.raises(GameStateIntegrityError, match="child columns"):
+        repo.get_game_state_snapshot(persisted.snapshot_id)

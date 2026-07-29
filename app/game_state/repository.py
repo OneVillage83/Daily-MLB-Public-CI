@@ -444,7 +444,12 @@ class GameStateRepository:
             raise GameStateIntegrityError("GameState snapshot canonical evidence does not match checksum")
         if state.requested_date != str(row["requested_date"]) or state.as_of_time != _aware(row["as_of_time"], "as_of_time") or state.observed_at != _aware(row["observed_at"], "observed_at"):
             raise GameStateIntegrityError("GameState snapshot timestamp lineage does not reconcile")
-        rows = connection.execute("SELECT ordinal, canonical_json, row_checksum FROM game_state_games WHERE snapshot_id=? ORDER BY ordinal", (snapshot_id,)).fetchall()
+        rows = connection.execute(
+            """SELECT ordinal, edge_event_id, daily_mlb_game_id, source_game_id,
+                      away_team_id, home_team_id, observed_at, canonical_json, row_checksum
+               FROM game_state_games WHERE snapshot_id=? ORDER BY ordinal""",
+            (snapshot_id,),
+        ).fetchall()
         if len(rows) != int(row["game_count"]) or len(state.games) != int(row["game_count"]):
             raise GameStateIntegrityError("GameState snapshot child count does not reconcile")
         for ordinal, child in enumerate(rows, start=1):
@@ -453,9 +458,48 @@ class GameStateRepository:
             game = _game(_mapping(json.loads(str(child["canonical_json"])), "GameState game"))
             if game.checksum != str(child["row_checksum"]) or game != state.games[ordinal - 1]:
                 raise GameStateIntegrityError("GameState child canonical evidence does not reconcile")
+            if (
+                str(child["edge_event_id"]),
+                str(child["daily_mlb_game_id"]),
+                str(child["source_game_id"]),
+                str(child["away_team_id"]),
+                str(child["home_team_id"]),
+                _aware(child["observed_at"], "GameState game observed_at"),
+            ) != (
+                game.edge_event_id,
+                game.daily_mlb_game_id,
+                game.source_game_id,
+                game.away_team_id,
+                game.home_team_id,
+                game.observed_at,
+            ):
+                raise GameStateIntegrityError("GameState child columns do not match canonical evidence")
         slate_row = connection.execute("SELECT snapshot_id, snapshot_checksum, game_count FROM daily_slate_snapshots WHERE snapshot_id=? AND sealed_at IS NOT NULL", (row["upstream_daily_slate_snapshot_id"],)).fetchone()
         if slate_row is None or str(slate_row["snapshot_checksum"]) != state.upstream_daily_slate_checksum or int(slate_row["game_count"]) != len(state.games):
             raise GameStateIntegrityError("GameState DailySlate lineage does not reconcile")
+        slate_games = connection.execute(
+            """SELECT ordinal, edge_event_id, daily_mlb_game_id, source_game_id,
+                      away_team_id, home_team_id
+               FROM daily_slate_games WHERE snapshot_id=? ORDER BY ordinal""",
+            (row["upstream_daily_slate_snapshot_id"],),
+        ).fetchall()
+        if len(slate_games) != len(state.games):
+            raise GameStateIntegrityError("GameState DailySlate game count does not reconcile")
+        for game, slate_game in zip(state.games, slate_games, strict=True):
+            if (
+                game.edge_event_id,
+                game.daily_mlb_game_id,
+                game.source_game_id,
+                game.away_team_id,
+                game.home_team_id,
+            ) != (
+                str(slate_game["edge_event_id"]),
+                str(slate_game["daily_mlb_game_id"]),
+                str(slate_game["source_game_id"]),
+                str(slate_game["away_team_id"]),
+                str(slate_game["home_team_id"]),
+            ):
+                raise GameStateIntegrityError("GameState game identities do not reconcile with DailySlate")
         attempt = connection.execute("SELECT outcome, normalized_snapshot_checksum FROM game_state_attempt_evidence WHERE run_id=? AND phase_attempt=?", (row["run_id"], row["phase_attempt"])).fetchone()
         if attempt is None or str(attempt["outcome"]) != "normalized" or str(attempt["normalized_snapshot_checksum"]) != state.checksum:
             raise GameStateIntegrityError("GameState attempt evidence does not reconcile")
