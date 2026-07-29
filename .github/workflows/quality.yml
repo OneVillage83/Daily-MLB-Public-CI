@@ -79,7 +79,7 @@ jobs:
         run: python -m pip install --require-hashes -r requirements-dev.txt
       - name: Focused GameState schema v9 migration validation
         run: >-
-          python -m pytest -q
+          python -m pytest
           tests/test_game_state_migration_v9.py
           tests/test_migrations.py
           tests/test_database.py
@@ -90,6 +90,7 @@ jobs:
           tests/test_docker_release_contract.py
           tests/stats/test_migration_v5.py
           tests/stats/test_fielding_grain_v6.py
+          -q
       - name: GameState schema v9 migration lint
         run: >-
           python -m ruff check
