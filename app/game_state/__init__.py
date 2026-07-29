@@ -46,6 +46,22 @@ from app.game_state.raw_link import (
     game_state_raw_link_relpath,
     write_game_state_raw_link,
 )
+from app.game_state.artifact import (
+    GameStateArtifactIntegrityError,
+    GameStateArtifactV1,
+    game_state_artifact_relpath,
+    verify_game_state_artifact,
+    write_game_state_artifact,
+)
+from app.game_state.repository import (
+    GameStateAttemptEvidenceV1,
+    GameStateIntegrityError,
+    GameStateNotFoundError,
+    GameStatePersistenceConflict,
+    GameStateRepository,
+    GameStateRepositoryError,
+    PersistedGameStateV1,
+)
 
 __all__ = [
     "GAME_STATE_CONTRACT_VERSION",
@@ -59,11 +75,19 @@ __all__ = [
     "MLB_GAME_FEED_URL_TEMPLATE",
     "GamedayPersonnelV1",
     "GameStateAcquisitionError",
+    "GameStateArtifactIntegrityError",
+    "GameStateArtifactV1",
     "GameStateBatchAcquisitionError",
     "GameStateContractError",
     "GameStateGameV1",
     "GameStateNormalizationError",
     "GameStateNormalizationResultV1",
+    "GameStateAttemptEvidenceV1",
+    "GameStateIntegrityError",
+    "GameStateNotFoundError",
+    "GameStatePersistenceConflict",
+    "GameStateRepository",
+    "GameStateRepositoryError",
     "GameStatePlayerV1",
     "GameStateProvenanceV1",
     "GameStateRawLinkOutcome",
@@ -75,6 +99,7 @@ __all__ = [
     "LineupStateV1",
     "MlbGameFeedEvidenceV1",
     "MlbGameStateEvidenceSetV1",
+    "PersistedGameStateV1",
     "PlayerIdentityResolution",
     "PlayerIdentityResolver",
     "StarterCertainty",
@@ -84,8 +109,11 @@ __all__ = [
     "acquire_mlb_game_state_feeds",
     "build_mlb_game_feed_request",
     "game_state_raw_link_relpath",
+    "game_state_artifact_relpath",
     "mlb_game_feed_fixture_key",
     "normalize_mlb_game_feed",
     "normalize_mlb_game_state",
     "write_game_state_raw_link",
+    "verify_game_state_artifact",
+    "write_game_state_artifact",
 ]
