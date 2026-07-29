@@ -16,8 +16,10 @@ from app.daily_slate.acquisition import (
 )
 from app.daily_slate.artifact import (
     DAILY_SLATE_ARTIFACT_RELPATH,
+    DailySlateArtifactIntegrityError,
     DailySlateArtifactV1,
     daily_slate_artifact_relpath,
+    verify_daily_slate_artifact,
     write_daily_slate_artifact,
 )
 from app.daily_slate.contracts import (
@@ -69,6 +71,7 @@ __all__ = [
     "MLB_SCHEDULE_SOURCE_VERSION",
     "MLB_SCHEDULE_URL",
     "DailySlateAcquisitionError",
+    "DailySlateArtifactIntegrityError",
     "DailySlateArtifactV1",
     "DailySlateContractError",
     "DailySlateDoubleheaderStatus",
@@ -102,6 +105,7 @@ __all__ = [
     "resolve_canonical_team_id",
     "resolve_canonical_venue_id",
     "verified_mlb_player_identity_resolver",
+    "verify_daily_slate_artifact",
     "write_daily_slate_artifact",
     "write_daily_slate_raw_link",
 ]

@@ -51,6 +51,10 @@ def test_real_frozen_v3_lineup_payload_reaches_fixed_model_schema() -> None:
     feature_set = build_model_feature_set(packet)
     features = feature_set.games[0].feature_map()
 
+    # The BIA fixture has two expected away hitters. Each frozen V3 feature
+    # contains a season-to-date batting aggregate with PA=20, AB=18, H=6,
+    # HR=1, BB=2, and SO=4. ModelFeatureSet must aggregate the canonical
+    # counts and then recompute rates, not average player rates blindly.
     assert features["away.lineup.season_to_date.available_player_count"] == 2.0
     assert features["away.lineup.season_to_date.hitting.pa"] == 40.0
     assert features["away.lineup.season_to_date.hitting.avg"] == pytest.approx(12 / 36)
@@ -59,6 +63,12 @@ def test_real_frozen_v3_lineup_payload_reaches_fixed_model_schema() -> None:
     assert features["away.lineup.season_to_date.hitting.ops"] == pytest.approx(0.9)
     assert features["away.lineup.season_to_date.hitting.k_rate"] == pytest.approx(8 / 40)
     assert features["away.lineup.season_to_date.hitting.bb_rate"] == pytest.approx(4 / 40)
+
+    # The same frozen fixture intentionally contains no pitching aggregates.
+    # Starter pitching values therefore stay missing instead of being imputed.
     assert features["away.starter.season_to_date.pitching.era"] is None
     assert "away.starter.season_to_date.pitching.era" in feature_set.games[0].missing_feature_names
+
+    # Odds are unavailable in this fixture. No sportsbook value can leak into
+    # the predictive vector, and the non-predictive market lineage is null.
     assert feature_set.games[0].market_reference_checksum is None

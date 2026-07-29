@@ -216,13 +216,7 @@ def _quality_snapshot(
 def _one_game_chain(
     *,
     disposition: DataQualityDisposition = DataQualityDisposition.READY,
-) -> tuple[
-    DailySlateV1,
-    GameStateV1,
-    BaseballIntelligenceAssemblyV1,
-    OddsWeatherV1,
-    DataQualityV1,
-]:
+) -> tuple[DailySlateV1, GameStateV1, BaseballIntelligenceAssemblyV1, OddsWeatherV1, DataQualityV1]:
     slate_game = _slate_game()
     slate = _slate(slate_game)
     state_game = _state_game(slate_game)
@@ -259,13 +253,7 @@ def _one_game_chain(
     return slate, state, bia, ow, quality
 
 
-def _zero_game_chain() -> tuple[
-    DailySlateV1,
-    GameStateV1,
-    BaseballIntelligenceAssemblyV1,
-    OddsWeatherV1,
-    DataQualityV1,
-]:
+def _zero_game_chain() -> tuple[DailySlateV1, GameStateV1, BaseballIntelligenceAssemblyV1, OddsWeatherV1, DataQualityV1]:
     slate = _slate()
     state = _state(slate)
     bia = BaseballIntelligenceAssemblyV1(
@@ -294,6 +282,7 @@ def _zero_game_chain() -> tuple[
 
 def test_zero_game_packet_is_valid_deterministic_and_retains_lineage() -> None:
     slate, state, bia, ow, quality = _zero_game_chain()
+
     first = assemble_matchup_packet(
         slate=slate,
         game_state=state,
@@ -308,6 +297,7 @@ def test_zero_game_packet_is_valid_deterministic_and_retains_lineage() -> None:
         odds_weather=ow,
         data_quality=quality,
     )
+
     assert first.games == ()
     assert first.upstream_data_quality_checksum == quality.checksum
     assert first.checksum == second.checksum
@@ -316,6 +306,7 @@ def test_zero_game_packet_is_valid_deterministic_and_retains_lineage() -> None:
 
 def test_ready_game_packages_exact_phase_rows() -> None:
     slate, state, bia, ow, quality = _one_game_chain()
+
     packet = assemble_matchup_packet(
         slate=slate,
         game_state=state,
@@ -323,6 +314,7 @@ def test_ready_game_packages_exact_phase_rows() -> None:
         odds_weather=ow,
         data_quality=quality,
     )
+
     assert len(packet.games) == 1
     game = packet.games[0]
     assert game.schedule is slate.games[0]
@@ -332,12 +324,15 @@ def test_ready_game_packages_exact_phase_rows() -> None:
     assert game.data_quality is quality.games[0]
     assert game.quality_disposition is DataQualityDisposition.READY
     assert packet.ready_game_count == 1
+    assert packet.degraded_game_count == 0
+    assert packet.insufficient_game_count == 0
 
 
 def test_degraded_game_is_preserved_without_quality_recomputation() -> None:
     slate, state, bia, ow, quality = _one_game_chain(
         disposition=DataQualityDisposition.DEGRADED
     )
+
     packet = assemble_matchup_packet(
         slate=slate,
         game_state=state,
@@ -345,9 +340,11 @@ def test_degraded_game_is_preserved_without_quality_recomputation() -> None:
         odds_weather=ow,
         data_quality=quality,
     )
+
     assert len(packet.games) == 1
-    assert packet.games[0].quality_disposition is DataQualityDisposition.DEGRADED
-    assert packet.games[0].data_quality.issues == quality.games[0].issues
+    game = packet.games[0]
+    assert game.quality_disposition is DataQualityDisposition.DEGRADED
+    assert game.data_quality.issues == quality.games[0].issues
     assert packet.degraded_game_count == 1
 
 
@@ -355,6 +352,7 @@ def test_insufficient_game_is_preserved_not_filtered() -> None:
     slate, state, bia, ow, quality = _one_game_chain(
         disposition=DataQualityDisposition.INSUFFICIENT
     )
+
     packet = assemble_matchup_packet(
         slate=slate,
         game_state=state,
@@ -362,6 +360,7 @@ def test_insufficient_game_is_preserved_not_filtered() -> None:
         odds_weather=ow,
         data_quality=quality,
     )
+
     assert len(packet.games) == 1
     assert packet.games[0].quality_disposition is DataQualityDisposition.INSUFFICIENT
     assert packet.insufficient_game_count == 1
@@ -445,6 +444,7 @@ def test_per_game_daily_slate_checksum_break_fails_closed() -> None:
         daily_slate_checksum="f" * 64,
     )
     mismatched = _quality_snapshot(slate, state, bia, ow, bad_game)
+
     with pytest.raises(MatchupPacketAssemblyError, match="lineage contract"):
         assemble_matchup_packet(
             slate=slate,
@@ -467,6 +467,7 @@ def test_per_game_team_identity_mismatch_fails_closed() -> None:
         away_team_id="NYY",
     )
     mismatched = _quality_snapshot(slate, state, bia, ow, bad_game)
+
     with pytest.raises(MatchupPacketAssemblyError, match="lineage contract"):
         assemble_matchup_packet(
             slate=slate,
@@ -489,6 +490,7 @@ def test_data_quality_start_time_mismatch_fails_closed() -> None:
         scheduled_start_time=START + timedelta(minutes=5),
     )
     mismatched = _quality_snapshot(slate, state, bia, ow, bad_game)
+
     with pytest.raises(MatchupPacketAssemblyError, match="lineage contract"):
         assemble_matchup_packet(
             slate=slate,

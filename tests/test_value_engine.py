@@ -60,16 +60,8 @@ def _market_event(*, home_h2h: int = -115) -> dict[str, object]:
                         "key": "spreads",
                         "last_update": timestamp,
                         "outcomes": [
-                            {
-                                "name": "Los Angeles Dodgers",
-                                "price": 130,
-                                "point": -1.0,
-                            },
-                            {
-                                "name": "San Francisco Giants",
-                                "price": -150,
-                                "point": 1.0,
-                            },
+                            {"name": "Los Angeles Dodgers", "price": 130, "point": -1.0},
+                            {"name": "San Francisco Giants", "price": -150, "point": 1.0},
                         ],
                     },
                     {
@@ -91,10 +83,7 @@ def _market_event(*, home_h2h: int = -115) -> dict[str, object]:
                         "key": "h2h",
                         "last_update": timestamp,
                         "outcomes": [
-                            {
-                                "name": "Los Angeles Dodgers",
-                                "price": home_h2h,
-                            },
+                            {"name": "Los Angeles Dodgers", "price": home_h2h},
                             {"name": "San Francisco Giants", "price": 105},
                         ],
                     },
@@ -102,16 +91,8 @@ def _market_event(*, home_h2h: int = -115) -> dict[str, object]:
                         "key": "spreads",
                         "last_update": timestamp,
                         "outcomes": [
-                            {
-                                "name": "Los Angeles Dodgers",
-                                "price": 135,
-                                "point": -1.0,
-                            },
-                            {
-                                "name": "San Francisco Giants",
-                                "price": -155,
-                                "point": 1.0,
-                            },
+                            {"name": "Los Angeles Dodgers", "price": 135, "point": -1.0},
+                            {"name": "San Francisco Giants", "price": -155, "point": 1.0},
                         ],
                     },
                     {
@@ -192,6 +173,7 @@ def test_push_aware_expected_value_uses_win_and_loss_only() -> None:
     assert result.conditional_model_probability == pytest.approx(5 / 9)
     assert result.expected_value_per_unit == pytest.approx(0.15)
     assert result.expected_roi_percent == pytest.approx(15.0)
+    assert result.raw_probability_edge == pytest.approx((5 / 9) - (100 / 210))
 
 
 def test_value_engine_evaluates_all_sides_and_lines() -> None:
@@ -200,12 +182,11 @@ def test_value_engine_evaluates_all_sides_and_lines() -> None:
         predictions=predictions,
         matchup_packet=packet,
     )
+    assert len(result.games) == 1
     game = result.games[0]
     assert game.upstream_prediction_game_checksum == predictions.games[0].checksum
     assert game.upstream_matchup_packet_game_checksum == packet.games[0].checksum
-    assert game.odds_summary_checksum == (
-        packet.games[0].odds_weather.odds.summary_checksum
-    )
+    assert game.odds_summary_checksum == packet.games[0].odds_weather.odds.summary_checksum
     assert len(game.values) == 6
     assert {item.market for item in game.values} == {
         ValueMarket.MONEYLINE,
@@ -218,10 +199,7 @@ def test_value_engine_evaluates_all_sides_and_lines() -> None:
         ValueSide.OVER,
         ValueSide.UNDER,
     }
-    assert all(
-        item.calculation_state is ValueCalculationState.COMPLETE
-        for item in game.values
-    )
+    assert all(item.calculation_state is ValueCalculationState.COMPLETE for item in game.values)
 
 
 def test_moneyline_uses_prediction_probability_and_exact_best_price() -> None:
@@ -239,6 +217,10 @@ def test_moneyline_uses_prediction_probability_and_exact_best_price() -> None:
     assert home.american_price == -115.0
     assert home.best_price_books == ("book_b",)
     assert home.raw_implied_probability == pytest.approx(115 / 215)
+    assert home.expected_value_per_unit == pytest.approx(
+        prediction.home_win_probability * (100 / 115)
+        - prediction.away_win_probability
+    )
 
 
 def test_integer_spread_and_total_preserve_push_probability() -> None:
@@ -258,6 +240,10 @@ def test_integer_spread_and_total_preserve_push_probability() -> None:
     assert spread_home.model_push_probability > 0.0
     assert total_over.market_line == 9.0
     assert total_over.model_push_probability > 0.0
+    assert spread_home.conditional_model_probability == pytest.approx(
+        spread_home.model_win_probability
+        / (spread_home.model_win_probability + spread_home.model_loss_probability)
+    )
 
 
 def test_positive_value_does_not_override_reference_model_ineligibility() -> None:
@@ -328,11 +314,9 @@ def test_insufficient_prediction_remains_represented_and_ineligible() -> None:
         quality_disposition=DataQualityDisposition.INSUFFICIENT,
         quality_issue_codes=("fixture_insufficient",),
     )
-    changed_predictions = replace(predictions, games=(prediction,))
-    result = evaluate_value_engine(
-        predictions=changed_predictions,
-        matchup_packet=packet,
-    )
+    predictions = replace(predictions, games=(prediction,))
+    result = evaluate_value_engine(predictions=predictions, matchup_packet=packet)
+    assert len(result.games) == 1
     assert result.games[0].quality_disposition is DataQualityDisposition.INSUFFICIENT
     assert all(
         ValueIneligibilityReason.DATA_QUALITY_INSUFFICIENT
@@ -355,7 +339,7 @@ def test_market_reference_mismatch_fails_closed() -> None:
         )
 
 
-def test_zero_game_inputs_produce_deterministic_value_snapshot() -> None:
+def test_zero_game_inputs_produce_deterministic_zero_game_value_snapshot() -> None:
     slate, state, intelligence, odds_weather, quality = _zero_game_chain()
     packet = assemble_matchup_packet(
         slate=slate,

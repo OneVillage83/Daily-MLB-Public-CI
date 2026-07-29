@@ -10,6 +10,7 @@ import pytest
 
 from app.daily_slate import (
     DAILY_SLATE_ARTIFACT_RELPATH,
+    DailySlateArtifactIntegrityError,
     DailySlateContractError,
     DailySlateDoubleheaderStatus,
     DailySlateGameStatus,
@@ -23,6 +24,7 @@ from app.daily_slate import (
     edge_event_id,
     resolve_canonical_team_id,
     resolve_canonical_venue_id,
+    verify_daily_slate_artifact,
     write_daily_slate_artifact,
 )
 from app.stadiums import stadium_for_team
@@ -414,6 +416,23 @@ def test_artifact_is_canonical_contained_and_byte_checksum_matches(
     assert path.read_bytes() == slate.canonical_json_bytes()
     assert artifact.checksum == hashlib.sha256(path.read_bytes()).hexdigest()
     assert artifact.byte_count == len(path.read_bytes())
+    assert verify_daily_slate_artifact(slate, artifact, tmp_path) == path
+
+
+def test_artifact_verification_fails_closed_for_tampering_and_missing_file(
+    tmp_path: Path,
+) -> None:
+    slate = _slate(_game("100"))
+    artifact = write_daily_slate_artifact(slate, tmp_path)
+    path = tmp_path / artifact.relpath
+
+    path.write_bytes(b"tampered")
+    with pytest.raises(DailySlateArtifactIntegrityError, match="do not match"):
+        verify_daily_slate_artifact(slate, artifact, tmp_path)
+
+    path.unlink()
+    with pytest.raises(DailySlateArtifactIntegrityError, match="missing"):
+        verify_daily_slate_artifact(slate, artifact, tmp_path)
 
 
 def test_artifact_path_is_content_addressed_across_attempts(tmp_path: Path) -> None:

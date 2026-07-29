@@ -524,7 +524,7 @@ def test_equivalent_duplicate_feature_snapshots_select_deterministically() -> No
         completeness_state=original.completeness_state,
         input_checksum="c" * 64,
         feature_checksum=original.feature_checksum,
-        features=original.as_dict()["features"],  # type: ignore[arg-type]
+        features=original.features,
         created_at=original.created_at,
     )
     features.append(duplicate)
