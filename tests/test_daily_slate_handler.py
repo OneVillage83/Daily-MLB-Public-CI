@@ -175,7 +175,7 @@ def test_daily_slate_executes_then_controller_blocks_safely_at_game_state(
     controller, slate_repository, artifact_root, raw_body, _ = _build(tmp_path)
     created = controller.start("2026-07-27")
 
-    assert created.run.database_schema_version == CURRENT_SCHEMA_VERSION == 8
+    assert created.run.database_schema_version == CURRENT_SCHEMA_VERSION == 9
     assert created.run.status is PipelineRunStatus.PENDING
 
     with pytest.raises(ManualRunExecutionBlocked) as blocked:

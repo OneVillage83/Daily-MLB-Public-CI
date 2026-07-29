@@ -12,8 +12,8 @@ from typing import Any
 from app.identifiers import parse_requested_date, validate_run_id
 from app.migrations import (
     CURRENT_SCHEMA_VERSION,
-    FORMAL_SCHEMA_V8_FINGERPRINT,
-    MIGRATION_V8_CHECKSUM,
+    FORMAL_SCHEMA_V9_FINGERPRINT,
+    MIGRATION_V9_CHECKSUM,
     MigrationResult,
     ensure_schema,
     schema_fingerprint,
@@ -1641,8 +1641,8 @@ class Database:
             "applied_at": migration["applied_at"] if migration else None,
             "user_version": user_version,
             "fingerprint": observed_fingerprint,
-            "expected_checksum": MIGRATION_V8_CHECKSUM,
-            "expected_fingerprint": FORMAL_SCHEMA_V8_FINGERPRINT,
+            "expected_checksum": MIGRATION_V9_CHECKSUM,
+            "expected_fingerprint": FORMAL_SCHEMA_V9_FINGERPRINT,
         }
 
     def integrity_check(self) -> dict[str, Any]:
