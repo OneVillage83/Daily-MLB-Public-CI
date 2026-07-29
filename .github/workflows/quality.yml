@@ -26,6 +26,8 @@ jobs:
         run: python scripts/scan_repository_secrets.py --skip-env
       - name: Install locked development dependencies
         run: python -m pip install --require-hashes -r requirements-dev.txt
+      - name: Full static type validation (GameState repository diagnostic)
+        run: python -m mypy --no-incremental
       - name: Tests
         run: python -m pytest -q
       - name: Ruff
@@ -77,6 +79,26 @@ jobs:
           cache: pip
       - name: Install locked development dependencies
         run: python -m pip install --require-hashes -r requirements-dev.txt
+      - name: Focused GameState repository persistence validation
+        run: >-
+          python -m pytest
+          tests/test_game_state_repository.py
+          tests/test_game_state_contracts.py
+          tests/test_game_state_artifact.py
+          tests/test_game_state_raw_link.py
+          tests/test_game_state_migration_v9.py
+          tests/test_daily_slate_persistence.py
+          tests/test_daily_slate_handler.py
+          tests/test_run_controller_persistence.py
+          tests/test_run_controller_service.py
+          tests/test_artifacts.py
+          tests/test_redaction.py
+          -q
+      - name: GameState repository lint
+        run: >-
+          python -m ruff check
+          app/game_state
+          tests/test_game_state_repository.py
       - name: Symlink containment and raw-evidence tests
         run: >-
           python -m pytest -q
