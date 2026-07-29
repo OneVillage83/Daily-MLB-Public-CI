@@ -77,6 +77,36 @@ jobs:
           cache: pip
       - name: Install locked development dependencies
         run: python -m pip install --require-hashes -r requirements-dev.txt
+      - name: Focused GameState schema v9 migration validation
+        run: >-
+          python -m pytest -q
+          tests/test_game_state_migration_v9.py
+          tests/test_migrations.py
+          tests/test_database.py
+          tests/test_daily_slate_persistence.py
+          tests/test_daily_slate_handler.py
+          tests/test_run_controller_persistence.py
+          tests/test_run_controller_service.py
+          tests/test_docker_release_contract.py
+          tests/stats/test_migration_v5.py
+          tests/stats/test_fielding_grain_v6.py
+      - name: GameState schema v9 migration lint
+        run: >-
+          python -m ruff check
+          app/database.py
+          app/migrations.py
+          tests/test_game_state_migration_v9.py
+          tests/test_migrations.py
+          tests/test_database.py
+          tests/test_daily_slate_persistence.py
+          tests/test_daily_slate_handler.py
+          tests/test_run_controller_persistence.py
+          tests/test_run_controller_service.py
+          tests/test_docker_release_contract.py
+          tests/stats/test_migration_v5.py
+          tests/stats/test_fielding_grain_v6.py
+      - name: Full static type validation
+        run: python -m mypy --no-incremental
       - name: Symlink containment and raw-evidence tests
         run: >-
           python -m pytest -q
