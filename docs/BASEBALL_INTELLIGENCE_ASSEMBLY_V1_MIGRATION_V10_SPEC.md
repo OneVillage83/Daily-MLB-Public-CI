@@ -40,7 +40,9 @@ are `assembled`, `selection_failed`, or `assembly_failed`; only `assembled`
 may carry an assembly checksum. Failed attempts intentionally have no BIA
 snapshot but remain reconstructable from their immutable manifest.
 
-An assembled snapshot is content addressed as `bia:<assembly_checksum>`. It
+An assembled snapshot is content addressed as `bia:<assembly_checksum>`; SQL
+enforces exact `snapshot_id = 'bia:' || assembly_checksum`, rather than only a
+prefix/length shape. It
 retains both upstream chains, contract/feature versions, artifact metadata,
 canonical JSON, counts, source run/checksum arrays, warnings, and a one-way
 seal. Artifact containment and exact file-byte verification are mandatory
@@ -50,18 +52,25 @@ the atomic path/checksum/byte-count metadata group.
 ## Child rows and selection evidence
 
 Games reconcile ordinal, IDs, teams, and DailySlate/GameState row checksums.
-Players reconcile a GameState player record and exact team side. Available
-players require canonical identity plus a `complete` or `degraded` V3 player
-feature representative; unavailable players have no feature lineage.
+Players reconcile exact GameState away/home canonical and source-team identity
+through the sealed GameState game canonical JSON. `player_identity_id` and
+`canonical_player_id` are SQL-enforced as a both-or-neither pair. Available
+players require that resolved pair plus a `complete` or `degraded` V3 player
+feature representative; unavailable players have no feature lineage but may
+retain a resolved identity pair when no usable feature exists.
 `blocked` never appears in selected rows. Equivalent rows retain all accepted
 checksum-equivalent feature snapshot/run IDs without duplicating payloads.
 They must match the representative checksum and immutable V3 player row.
 `player_identity_id` remains application-verified because GameState's source
 identity domain is not a safe direct foreign-key target.
 
-At sealing, the database verifies counts, contiguous game ordinals, upstream
-game coverage, player/equivalent counts, one representative per available
-player, and no equivalents for unavailable players. Exact top-level set
+At sealing, the database verifies counts, contiguous game/player/equivalent
+ordinals, upstream game coverage, per-game player/available-feature counts,
+one representative per available player matching its parent representative
+snapshot/run/checksum, and no equivalents for unavailable players. Full
+GameState player-record checksum reconstruction remains a mandatory repository
+verification because v9 intentionally has no relational player child table.
+Exact top-level set
 equality for source-run/checksum inventories is additionally a mandatory
 repository seal/reconstruction verification because SQLite cannot safely
 express that JSON-set comparison as a durable simple constraint.

@@ -3662,7 +3662,7 @@ FORMAL_SCHEMA_V10_STATEMENTS = (
     "CREATE INDEX idx_bia_attempt_evidence_lookup ON baseball_intelligence_attempt_evidence(run_id, requested_date, outcome, phase_attempt)",
     """
     CREATE TABLE baseball_intelligence_snapshots (
-        snapshot_id TEXT PRIMARY KEY CHECK (snapshot_id GLOB 'bia:[0-9a-f]*' AND length(snapshot_id)=68),
+        snapshot_id TEXT PRIMARY KEY CHECK (snapshot_id='bia:' || assembly_checksum),
         run_id TEXT NOT NULL,
         phase_key TEXT NOT NULL DEFAULT 'baseball_intelligence_assembly' CHECK (phase_key='baseball_intelligence_assembly'),
         phase_attempt INTEGER NOT NULL CHECK (phase_attempt>=1),
@@ -3729,7 +3729,8 @@ FORMAL_SCHEMA_V10_STATEMENTS = (
         FOREIGN KEY(representative_feature_snapshot_id) REFERENCES stats_feature_snapshots(feature_snapshot_id) ON DELETE RESTRICT,
         FOREIGN KEY(representative_stats_run_id) REFERENCES stats_ingestion_runs(stats_run_id) ON DELETE RESTRICT,
         FOREIGN KEY(canonical_player_id) REFERENCES stats_canonical_players(canonical_player_id) ON DELETE RESTRICT,
-        CHECK ((availability='available' AND canonical_player_id IS NOT NULL AND representative_feature_snapshot_id IS NOT NULL AND representative_stats_run_id IS NOT NULL AND representative_feature_checksum IS NOT NULL AND representative_completeness_state IS NOT NULL) OR (availability='unavailable' AND canonical_player_id IS NULL AND representative_feature_snapshot_id IS NULL AND representative_stats_run_id IS NULL AND representative_feature_checksum IS NULL AND representative_completeness_state IS NULL))
+        CHECK ((player_identity_id IS NULL)=(canonical_player_id IS NULL)),
+        CHECK ((availability='available' AND player_identity_id IS NOT NULL AND canonical_player_id IS NOT NULL AND representative_feature_snapshot_id IS NOT NULL AND representative_stats_run_id IS NOT NULL AND representative_feature_checksum IS NOT NULL AND representative_completeness_state IN ('complete','degraded')) OR (availability='unavailable' AND representative_feature_snapshot_id IS NULL AND representative_stats_run_id IS NULL AND representative_feature_checksum IS NULL AND representative_completeness_state IS NULL))
     )
     """,
     "CREATE INDEX idx_bia_players_canonical ON baseball_intelligence_players(canonical_player_id, snapshot_id) WHERE canonical_player_id IS NOT NULL",
@@ -3777,7 +3778,7 @@ FORMAL_SCHEMA_V10_STATEMENTS = (
           AND attempt.upstream_daily_slate_snapshot_id=NEW.upstream_daily_slate_snapshot_id AND attempt.upstream_daily_slate_checksum=NEW.upstream_daily_slate_checksum
           AND attempt.upstream_game_state_snapshot_id=NEW.upstream_game_state_snapshot_id AND attempt.upstream_game_state_checksum=NEW.upstream_game_state_checksum
           AND phase.status='running' AND phase.attempt_count=NEW.phase_attempt
-          AND slate.sealed_at IS NOT NULL AND state.sealed_at IS NOT NULL AND state.upstream_daily_slate_snapshot_id=slate.snapshot_id AND state.upstream_daily_slate_checksum=slate.snapshot_checksum
+          AND slate.sealed_at IS NOT NULL AND state.sealed_at IS NOT NULL AND NEW.as_of_time=slate.as_of_time AND NEW.as_of_time=state.as_of_time AND state.upstream_daily_slate_snapshot_id=slate.snapshot_id AND state.upstream_daily_slate_checksum=slate.snapshot_checksum
           AND NEW.sealed_at IS NULL
       ) THEN RAISE(ABORT,'BIA snapshot requires matching assembled attempt and sealed upstream chain') END;
     END
@@ -3802,7 +3803,7 @@ FORMAL_SCHEMA_V10_STATEMENTS = (
     """
     CREATE TRIGGER baseball_intelligence_players_validate_unsealed
     BEFORE INSERT ON baseball_intelligence_players BEGIN
-      SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM baseball_intelligence_games game JOIN baseball_intelligence_snapshots snap ON snap.snapshot_id=game.snapshot_id WHERE game.snapshot_id=NEW.snapshot_id AND game.edge_event_id=NEW.edge_event_id AND snap.sealed_at IS NULL AND ((NEW.team_side='away' AND NEW.team_id=game.away_team_id) OR (NEW.team_side='home' AND NEW.team_id=game.home_team_id))) THEN RAISE(ABORT,'BIA player requires matching unsealed game team') END;
+      SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM baseball_intelligence_games game JOIN baseball_intelligence_snapshots snap ON snap.snapshot_id=game.snapshot_id JOIN game_state_games state ON state.snapshot_id=snap.upstream_game_state_snapshot_id AND state.edge_event_id=game.edge_event_id WHERE game.snapshot_id=NEW.snapshot_id AND game.edge_event_id=NEW.edge_event_id AND snap.sealed_at IS NULL AND ((NEW.team_side='away' AND NEW.team_id=game.away_team_id AND NEW.source_team_id=json_extract(state.canonical_json,'$.away.source_team_id')) OR (NEW.team_side='home' AND NEW.team_id=game.home_team_id AND NEW.source_team_id=json_extract(state.canonical_json,'$.home.source_team_id')))) THEN RAISE(ABORT,'BIA player requires matching unsealed GameState team lineage') END;
       SELECT CASE WHEN NEW.availability='available' AND NOT EXISTS (SELECT 1 FROM stats_feature_snapshots feature WHERE feature.feature_snapshot_id=NEW.representative_feature_snapshot_id AND feature.stats_run_id=NEW.representative_stats_run_id AND feature.entity_kind='player' AND feature.feature_version='DSE_MLB_STATS_FEATURES_V3' AND feature.canonical_player_id=NEW.canonical_player_id AND feature.feature_checksum=NEW.representative_feature_checksum AND feature.completeness_state=NEW.representative_completeness_state) THEN RAISE(ABORT,'BIA available player requires exact usable representative feature') END;
     END
     """,
@@ -3828,8 +3829,12 @@ FORMAL_SCHEMA_V10_STATEMENTS = (
         OR (SELECT count(*) FROM baseball_intelligence_players WHERE snapshot_id=OLD.snapshot_id)!=OLD.player_count
         OR (SELECT count(*) FROM baseball_intelligence_players WHERE snapshot_id=OLD.snapshot_id AND availability='available')!=OLD.available_feature_count
         OR (SELECT count(*) FROM baseball_intelligence_feature_equivalents WHERE snapshot_id=OLD.snapshot_id)!=OLD.equivalent_feature_row_count
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_games game WHERE game.snapshot_id=OLD.snapshot_id AND game.player_count!=(SELECT count(*) FROM baseball_intelligence_players player WHERE player.snapshot_id=game.snapshot_id AND player.edge_event_id=game.edge_event_id))
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_games game WHERE game.snapshot_id=OLD.snapshot_id AND game.available_feature_count!=(SELECT count(*) FROM baseball_intelligence_players player WHERE player.snapshot_id=game.snapshot_id AND player.edge_event_id=game.edge_event_id AND player.availability='available'))
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_players p WHERE p.snapshot_id=OLD.snapshot_id AND ((SELECT min(ordinal) FROM baseball_intelligence_players peer WHERE peer.snapshot_id=p.snapshot_id AND peer.edge_event_id=p.edge_event_id AND peer.team_id=p.team_id)!=1 OR (SELECT max(ordinal) FROM baseball_intelligence_players peer WHERE peer.snapshot_id=p.snapshot_id AND peer.edge_event_id=p.edge_event_id AND peer.team_id=p.team_id)!=(SELECT count(*) FROM baseball_intelligence_players peer WHERE peer.snapshot_id=p.snapshot_id AND peer.edge_event_id=p.edge_event_id AND peer.team_id=p.team_id)))
         OR EXISTS (SELECT 1 FROM baseball_intelligence_players p WHERE p.snapshot_id=OLD.snapshot_id AND ((p.availability='available' AND (SELECT count(*) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id)=0) OR (p.availability='unavailable' AND EXISTS (SELECT 1 FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id))))
-        OR EXISTS (SELECT 1 FROM baseball_intelligence_players p WHERE p.snapshot_id=OLD.snapshot_id AND p.availability='available' AND (SELECT count(*) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id AND e.is_representative=1)!=1)
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_players p WHERE p.snapshot_id=OLD.snapshot_id AND p.availability='available' AND ((SELECT count(*) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id AND e.is_representative=1)!=1 OR NOT EXISTS (SELECT 1 FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id AND e.is_representative=1 AND e.feature_snapshot_id=p.representative_feature_snapshot_id AND e.stats_run_id=p.representative_stats_run_id AND e.feature_checksum=p.representative_feature_checksum)))
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_players p WHERE p.snapshot_id=OLD.snapshot_id AND p.availability='available' AND ((SELECT min(ordinal) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id)!=1 OR (SELECT max(ordinal) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id)!=(SELECT count(*) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id)))
       THEN RAISE(ABORT,'BIA snapshot cannot seal incomplete immutable evidence') END;
     END
     """,

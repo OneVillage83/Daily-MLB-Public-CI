@@ -27,6 +27,7 @@ from app.migrations import (
     FORMAL_SCHEMA_V9_FINGERPRINT,
     FORMAL_SCHEMA_V9_STATEMENTS,
     FORMAL_SCHEMA_V10_FINGERPRINT,
+    FORMAL_SCHEMA_V10_STATEMENTS,
     MIGRATION_HISTORY,
     MIGRATION_V10_CHECKSUM,
     MIGRATION_V10_NAME,
@@ -70,7 +71,8 @@ def _install_formal_v9(path: Path) -> None:
 def test_v10_constants_pin_historical_identities() -> None:
     assert CURRENT_SCHEMA_VERSION == 10
     assert MIGRATION_V10_NAME == "baseball_intelligence_assembly_v1_temporal_persistence"
-    assert len(MIGRATION_V10_CHECKSUM) == 64
+    assert MIGRATION_V10_CHECKSUM == "877bdccccb64814a0844adb57279a87d477c79a0e8659ebc3a3dfc08d3bb071b"
+    assert FORMAL_SCHEMA_V10_FINGERPRINT == "13a8ed8e477c23954c94a7b6a697c6dae74efd5d3806f0187b1fa2abeb5933c6"
     assert MIGRATION_HISTORY[-1] == (10, MIGRATION_V10_NAME, MIGRATION_V10_CHECKSUM)
     assert (
         FORMAL_SCHEMA_V1_FINGERPRINT,
@@ -93,6 +95,22 @@ def test_v10_constants_pin_historical_identities() -> None:
         "0438698c19d3afd6ed2bbfd42393f2bf5e1c3897e7588e754eee94d8c0173fc0",
         "c54cdd8b10591e7247f7c1a4d4f1b2bbe385c1ac7fbcb09be8bccd70228130bd",
     )
+
+
+def test_v10_contract_guards_pin_identity_availability_and_sealing_rules() -> None:
+    statements = "\n".join(FORMAL_SCHEMA_V10_STATEMENTS)
+
+    assert "snapshot_id='bia:' || assembly_checksum" in statements
+    assert "CHECK ((player_identity_id IS NULL)=(canonical_player_id IS NULL))" in statements
+    assert "availability='unavailable' AND representative_feature_snapshot_id IS NULL" in statements
+    assert "json_extract(state.canonical_json,'$.away.source_team_id')" in statements
+    assert "json_extract(state.canonical_json,'$.home.source_team_id')" in statements
+    assert "NEW.as_of_time=slate.as_of_time AND NEW.as_of_time=state.as_of_time" in statements
+    assert "game.player_count!=(SELECT count(*) FROM baseball_intelligence_players" in statements
+    assert "game.available_feature_count!=(SELECT count(*) FROM baseball_intelligence_players" in statements
+    assert "e.feature_snapshot_id=p.representative_feature_snapshot_id" in statements
+    assert "e.stats_run_id=p.representative_stats_run_id" in statements
+    assert "e.feature_checksum=p.representative_feature_checksum" in statements
 
 
 def test_v9_upgrade_creates_verified_v10_backup_and_tables(tmp_path: Path) -> None:
