@@ -1,4 +1,4 @@
-# Baseball Intelligence Assembly V1 — Pre-Persistence Handoff
+# Baseball Intelligence Assembly V1 — Repository/Selector Handoff
 
 **Historical foundation branch/PR:** `rc/baseball-intelligence-assembly-v1-direct-20260727` / private draft PR #11 (historical evidence only)
 **Accepted reconciliation branch:** `rc/baseball-intelligence-foundation-reconciliation-20260729`
@@ -16,8 +16,11 @@ Implemented:
 - `app/baseball_intelligence/assembly.py`
 - `app/baseball_intelligence/artifact.py`
 - `app/baseball_intelligence/__init__.py`
-- focused assembly tests
-- focused artifact tests
+- focused assembly and artifact tests
+- schema-v10 immutable temporal persistence surface
+- DB-backed retained-V3 candidate selector
+- immutable Phase 3 attempt-manifest writer/verifier
+- `BaseballIntelligenceRepository` persistence, sealing, retrieval, and offline verification
 
 The assembly consumes only:
 
@@ -26,6 +29,10 @@ The assembly consumes only:
 3. retained Baseball Intelligence V3 player feature snapshots
 
 It does not call external providers and does not consume provider JSON directly.
+
+Schema v10 is frozen. The repository creates no tables lazily and does not
+change migration identities. The controller remains registered only for
+`DAILY_SLATE` and `GAME_STATE`.
 
 ## Frozen boundary carried forward
 
@@ -200,6 +207,41 @@ baseball_intelligence/
 
 Artifact bytes exactly equal canonical assembly JSON bytes.
 
+The repository verifies this content-addressed artifact before persistence and
+again on every offline read. Missing, altered, unsafe, or semantically wrong
+paths fail closed.
+
+## Candidate selector and repository
+
+`BaseballIntelligenceFeatureSelector` is read-only. It loads every retained V3
+player candidate for the exact requested date and exact resolved GameState
+canonical-player set, in deterministic canonical-player/snapshot/run/input
+order. It deliberately retains complete, degraded, blocked, and late-created
+candidates; the frozen assembler remains the sole owner of completeness, PIT,
+warnings, and representative-selection policy.
+
+`BaseballIntelligenceRepository` verifies the sealed DailySlate → GameState
+chain and both artifacts, derives relevant canonical player IDs from all
+retained GameState role buckets, invokes the selector and existing assembler,
+then atomically persists and seals the exact schema-v10 rows. It preserves
+resolved identities even where feature intelligence is unavailable. Reads
+reconstruct the real assembly contract, verify the artifact and immutable
+attempt manifest, validate relational child rows/counts, and fail closed on
+any disagreement.
+
+Attempt manifests use:
+
+```text
+baseball_intelligence/attempts/<run_id>/attempt_<NNNN>.json
+```
+
+They are canonical, credential-free, immutable evidence containing exact
+upstream lineage, selection boundary, outcome, warnings, and candidate
+inventory identities/checksums—but never feature payload duplication. Failed
+`selection_failed` and `assembly_failed` attempts retain one manifest and one
+attempt-evidence row without a BIA snapshot. Exact replay verifies existing
+immutable evidence; conflicting replay fails closed.
+
 The writer uses the shared same-directory atomic byte writer. It creates a
 short temporary name and replaces the unchanged content-addressed destination
 atomically, avoiding the prior Windows long-temporary-path failure without
@@ -234,17 +276,12 @@ No production BIA handler is registered in this checkpoint.
 
 Do not register the production phase-3 handler yet.
 
-BIA1-B remains blocked on the formal upstream persistence chain:
+BIA1-B remains blocked on phase execution integration:
 
-1. DB-backed V3 feature selector for exact player/date/version evidence
-2. formal Baseball Intelligence Assembly persistence (expected schema v10)
-3. production `BASEBALL_INTELLIGENCE_ASSEMBLY` handler
-4. controller proof advancing from phase 3 to `ODDS_WEATHER`
+1. production `BASEBALL_INTELLIGENCE_ASSEMBLY` handler
+2. controller registration and proof advancing from phase 3 to `ODDS_WEATHER`
 
 Do not fabricate phase 3 or phase 4 success before those persistence/handler gates exist.
 
-## Codex/local reconciliation note
-
-The sanitized public BIA test file contains one test-only mypy narrowing annotation on the checksum-equivalent duplicate-feature fixture. When Codex/local access returns, reconcile that trivial test-only difference back into the private branch before running the complete local gate.
-
-No architecture or production behavior differs between the private and public BIA implementation because of that annotation.
+No Phase 3 production handler is registered in this checkpoint. Do not claim
+Phase 3 execution success until the subsequent handler/controller checkpoint.
