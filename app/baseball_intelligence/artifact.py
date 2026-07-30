@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from uuid import uuid4
 
 from app.artifacts import resolve_contained_path, validate_artifact_relpath
 from app.baseball_intelligence.contracts import (
@@ -12,6 +10,7 @@ from app.baseball_intelligence.contracts import (
     BaseballIntelligenceContractError,
 )
 from app.redaction import redact_value
+from app.exporter import write_bytes
 
 BASEBALL_INTELLIGENCE_ARTIFACT_RELPATH = (
     "baseball_intelligence/snapshots/{assembly_checksum}/"
@@ -54,13 +53,10 @@ def write_baseball_intelligence_artifact(
         )
     content = assembly.canonical_json_bytes()
     destination = resolve_contained_path(artifact_root, safe_relpath)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
-    try:
-        temporary.write_bytes(content)
-        os.replace(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
+    # The shared writer uses a short same-directory tempfile then os.replace.
+    # That preserves atomic replacement without extending the content-addressed
+    # destination filename beyond Windows' long-path limits.
+    write_bytes(destination, content)
     return BaseballIntelligenceArtifactV1(
         relpath=safe_relpath,
         checksum=hashlib.sha256(content).hexdigest(),

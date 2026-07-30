@@ -16,6 +16,7 @@ from app.baseball_intelligence.contracts import (
     BaseballFeatureSnapshotV1,
     BaseballIntelligenceContractError,
     BaseballIntelligenceRole,
+    FeatureCompletenessState,
     IntelligenceAvailability,
 )
 from app.daily_slate.contracts import (
@@ -542,6 +543,12 @@ def test_equivalent_duplicate_feature_snapshots_select_deterministically() -> No
     )
     assert player.feature is not None
     assert player.feature.feature_snapshot_id == "feature:000000000000"
+    assert player.equivalent_feature_snapshot_ids == tuple(
+        sorted((original.feature_snapshot_id, "feature:000000000000"))
+    )
+    assert player.equivalent_stats_run_ids == tuple(
+        sorted((original.stats_run_id, "stats_equivalent_rerun"))
+    )
     assert "stats_equivalent_rerun" in result.assembly.source_stats_run_ids
 
 
@@ -589,7 +596,39 @@ def test_future_feature_knowledge_cutoff_fails_closed() -> None:
         )
 
 
-def test_assembly_observation_cannot_precede_relevant_feature_creation() -> None:
+def test_feature_knowledge_cutoff_equal_to_run_as_of_time_is_accepted() -> None:
+    slate, state = _one_game_state()
+    features = list(_features_for_state(state))
+    original = next(
+        feature for feature in features if feature.entity_id == "player:canonical:700001"
+    )
+    features[features.index(original)] = _v3_feature(
+        original.entity_id,
+        feature_snapshot_id=original.feature_snapshot_id,
+        stats_run_id=original.stats_run_id,
+        knowledge_cutoff=slate.as_of_time,
+        created_at=slate.as_of_time,
+    )
+    result = assemble_baseball_intelligence(
+        slate=slate,
+        game_state=state,
+        feature_snapshots=features,
+        observed_at=state.observed_at,
+    )
+    assert result.assembly.observed_at == state.observed_at
+
+
+def test_assembly_observed_at_cannot_precede_sealed_upstream_observation() -> None:
+    slate, state = _one_game_state()
+    with pytest.raises(BaseballIntelligenceAssemblyError, match="cannot precede"):
+        assemble_baseball_intelligence(
+            slate=slate,
+            game_state=state,
+            observed_at=slate.observed_at,
+        )
+
+
+def test_feature_created_after_fixed_selection_boundary_is_excluded_with_warning() -> None:
     slate, state = _one_game_state()
     features = [
         feature
@@ -603,12 +642,102 @@ def test_assembly_observation_cannot_precede_relevant_feature_creation() -> None
         )
     )
 
-    with pytest.raises(BaseballIntelligenceAssemblyError, match="cannot precede"):
-        assemble_baseball_intelligence(
-            slate=slate,
-            game_state=state,
-            feature_snapshots=features,
-            observed_at=datetime(2026, 7, 27, 15, 0, tzinfo=timezone.utc),
+    result = assemble_baseball_intelligence(
+        slate=slate,
+        game_state=state,
+        feature_snapshots=features,
+        observed_at=datetime(2026, 7, 27, 15, 0, tzinfo=timezone.utc),
+    )
+    player = next(
+        player
+        for player in result.assembly.games[0].away.players
+        if player.source_player_id == "700001"
+    )
+    assert player.availability is IntelligenceAvailability.UNAVAILABLE
+    assert BaseballIntelligenceWarningCode.FEATURE_AFTER_SELECTION_BOUNDARY in {
+        warning.code for warning in result.warnings
+    }
+
+
+def test_degraded_feature_remains_available_with_original_completeness_state() -> None:
+    slate, state = _one_game_state()
+    features = list(_features_for_state(state))
+    original = next(
+        feature for feature in features if feature.entity_id == "player:canonical:700001"
+    )
+    features[features.index(original)] = BaseballFeatureSnapshotV1(
+        feature_snapshot_id=original.feature_snapshot_id,
+        stats_run_id=original.stats_run_id,
+        feature_version=original.feature_version,
+        entity_kind=original.entity_kind,
+        entity_id=original.entity_id,
+        feature_as_of=original.feature_as_of,
+        completeness_state=FeatureCompletenessState.DEGRADED,
+        input_checksum=original.input_checksum,
+        feature_checksum=original.feature_checksum,
+        features=original.features,
+        created_at=original.created_at,
+    )
+    result = assemble_baseball_intelligence(
+        slate=slate, game_state=state, feature_snapshots=features
+    )
+    player = next(
+        player
+        for player in result.assembly.games[0].away.players
+        if player.source_player_id == "700001"
+    )
+    assert player.feature is not None
+    assert player.feature.completeness_state is FeatureCompletenessState.DEGRADED
+
+
+def test_blocked_feature_is_excluded_from_available_intelligence() -> None:
+    slate, state = _one_game_state()
+    features = list(_features_for_state(state))
+    original = next(
+        feature for feature in features if feature.entity_id == "player:canonical:700001"
+    )
+    features[features.index(original)] = BaseballFeatureSnapshotV1(
+        feature_snapshot_id=original.feature_snapshot_id,
+        stats_run_id=original.stats_run_id,
+        feature_version=original.feature_version,
+        entity_kind=original.entity_kind,
+        entity_id=original.entity_id,
+        feature_as_of=original.feature_as_of,
+        completeness_state=FeatureCompletenessState.BLOCKED,
+        input_checksum=original.input_checksum,
+        feature_checksum=original.feature_checksum,
+        features=original.features,
+        created_at=original.created_at,
+    )
+    result = assemble_baseball_intelligence(
+        slate=slate, game_state=state, feature_snapshots=features
+    )
+    player = next(
+        player
+        for player in result.assembly.games[0].away.players
+        if player.source_player_id == "700001"
+    )
+    assert player.availability is IntelligenceAvailability.UNAVAILABLE
+    assert BaseballIntelligenceWarningCode.BLOCKED_FEATURE_EXCLUDED in {
+        warning.code for warning in result.warnings
+    }
+
+
+def test_unknown_feature_completeness_state_is_rejected() -> None:
+    feature = _v3_feature("player:canonical:700001")
+    with pytest.raises(BaseballIntelligenceContractError, match="completeness_state"):
+        BaseballFeatureSnapshotV1(
+            feature_snapshot_id=feature.feature_snapshot_id,
+            stats_run_id=feature.stats_run_id,
+            feature_version=feature.feature_version,
+            entity_kind=feature.entity_kind,
+            entity_id=feature.entity_id,
+            feature_as_of=feature.feature_as_of,
+            completeness_state="unknown",
+            input_checksum=feature.input_checksum,
+            feature_checksum=feature.feature_checksum,
+            features=feature.features,
+            created_at=feature.created_at,
         )
 
 

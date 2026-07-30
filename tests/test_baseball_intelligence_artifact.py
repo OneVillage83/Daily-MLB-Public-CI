@@ -52,6 +52,38 @@ def test_rewriting_same_content_addressed_assembly_is_idempotent(tmp_path: Path)
     assert (tmp_path / first.relpath).read_bytes() == assembly.canonical_json_bytes()
 
 
+def test_short_atomic_temporary_name_supports_long_windows_validation_root(
+    tmp_path: Path,
+) -> None:
+    assembly = _empty_assembly()
+    # The final semantic path remains content-addressed; only the same-directory
+    # temporary name is short enough not to push Windows over its path limit.
+    # This keeps the semantic destination below the Windows limit while the
+    # former destination-derived temporary filename would exceed it.
+    long_root = tmp_path / ("validation_root_" + "x" * 12)
+
+    artifact = write_baseball_intelligence_artifact(assembly, long_root)
+
+    destination = long_root / artifact.relpath
+    assert destination.read_bytes() == assembly.canonical_json_bytes()
+    assert not list(destination.parent.glob("*.part"))
+
+
+def test_interrupted_atomic_write_cleans_short_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assembly = _empty_assembly()
+
+    def fail_replace(_source: Path, _destination: Path) -> None:
+        raise OSError("fixture replacement failure")
+
+    monkeypatch.setattr("app.exporter.os.replace", fail_replace)
+    with pytest.raises(OSError, match="replacement failure"):
+        write_baseball_intelligence_artifact(assembly, tmp_path)
+
+    assert not list(tmp_path.rglob("*.part"))
+
+
 def test_artifact_relpath_cannot_escape_root(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         write_baseball_intelligence_artifact(

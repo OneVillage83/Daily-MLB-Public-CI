@@ -12,6 +12,7 @@ from app.baseball_intelligence.contracts import (
     BaseballIntelligenceContractError,
     BaseballIntelligenceGameV1,
     BaseballIntelligenceRole,
+    FeatureCompletenessState,
     IntelligenceAvailability,
     PlayerIntelligenceV1,
     TeamBaseballIntelligenceV1,
@@ -38,6 +39,8 @@ class BaseballIntelligenceWarningCode(StrEnum):
     LINEUP_FEATURE_INCOMPLETE = "lineup_feature_incomplete"
     BULLPEN_FEATURE_INCOMPLETE = "bullpen_feature_incomplete"
     BENCH_FEATURE_INCOMPLETE = "bench_feature_incomplete"
+    BLOCKED_FEATURE_EXCLUDED = "blocked_feature_excluded"
+    FEATURE_AFTER_SELECTION_BOUNDARY = "feature_after_selection_boundary"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,14 +72,26 @@ class BaseballIntelligenceAssemblyResultV1:
         return [warning.as_dict() for warning in self.warnings]
 
 
+@dataclass(frozen=True, slots=True)
+class _FeatureSelection:
+    representative: BaseballFeatureSnapshotV1 | None
+    equivalent_feature_snapshot_ids: tuple[str, ...]
+    equivalent_stats_run_ids: tuple[str, ...]
+    blocked_excluded: bool
+    after_boundary_excluded: bool
+
+
 def _select_feature(
     candidates: Iterable[BaseballFeatureSnapshotV1],
     *,
     entity_id: str,
     requested_date: str,
-    assembly_observed_at: datetime,
-) -> BaseballFeatureSnapshotV1 | None:
+    assembly_as_of_time: datetime,
+    selection_observed_at: datetime,
+) -> _FeatureSelection | None:
     accepted: list[BaseballFeatureSnapshotV1] = []
+    blocked_excluded = False
+    after_boundary_excluded = False
     for feature in candidates:
         if feature.entity_kind != "player" or feature.entity_id != entity_id:
             raise BaseballIntelligenceAssemblyError(
@@ -89,30 +104,49 @@ def _select_feature(
         if feature.feature_as_of != requested_date:
             continue
         knowledge_cutoff = feature.knowledge_cutoff
-        if knowledge_cutoff is not None and knowledge_cutoff > assembly_observed_at:
+        if knowledge_cutoff is not None and knowledge_cutoff > assembly_as_of_time:
             raise BaseballIntelligenceAssemblyError(
-                "feature knowledge cutoff is later than assembly observation time"
+                "feature knowledge cutoff is later than assembly as_of_time"
             )
-        if feature.created_at > assembly_observed_at:
-            raise BaseballIntelligenceAssemblyError(
-                "feature snapshot was created after assembly observation time"
-            )
+        if feature.created_at > selection_observed_at:
+            after_boundary_excluded = True
+            continue
+        if feature.completeness_state is FeatureCompletenessState.BLOCKED:
+            blocked_excluded = True
+            continue
         accepted.append(feature)
     if not accepted:
-        return None
+        if not blocked_excluded and not after_boundary_excluded:
+            return None
+        return _FeatureSelection(
+            representative=None,
+            equivalent_feature_snapshot_ids=(),
+            equivalent_stats_run_ids=(),
+            blocked_excluded=blocked_excluded,
+            after_boundary_excluded=after_boundary_excluded,
+        )
 
     feature_checksums = {feature.feature_checksum for feature in accepted}
     if len(feature_checksums) != 1:
         raise BaseballIntelligenceAssemblyError(
             "conflicting retained V3 feature evidence exists for one player/date"
         )
-    return min(
+    representative = min(
         accepted,
         key=lambda feature: (
             feature.feature_snapshot_id,
             feature.stats_run_id,
             feature.input_checksum,
         ),
+    )
+    return _FeatureSelection(
+        representative=representative,
+        equivalent_feature_snapshot_ids=tuple(
+            sorted(feature.feature_snapshot_id for feature in accepted)
+        ),
+        equivalent_stats_run_ids=tuple(sorted({feature.stats_run_id for feature in accepted})),
+        blocked_excluded=blocked_excluded,
+        after_boundary_excluded=after_boundary_excluded,
     )
 
 
@@ -178,12 +212,15 @@ def _player_intelligence(
     roles: set[BaseballIntelligenceRole],
     player_features: Mapping[str, tuple[BaseballFeatureSnapshotV1, ...]],
     requested_date: str,
-    assembly_observed_at: datetime,
+    assembly_as_of_time: datetime,
+    selection_observed_at: datetime,
     source_game_id: str,
     team_id: str,
     warnings: list[BaseballIntelligenceWarningV1],
 ) -> PlayerIntelligenceV1:
     feature: BaseballFeatureSnapshotV1 | None = None
+    equivalent_feature_snapshot_ids: tuple[str, ...] = ()
+    equivalent_stats_run_ids: tuple[str, ...] = ()
     if game_state_player.canonical_player_id is None:
         warnings.append(
             BaseballIntelligenceWarningV1(
@@ -195,13 +232,14 @@ def _player_intelligence(
             )
         )
     else:
-        feature = _select_feature(
+        selection = _select_feature(
             player_features.get(game_state_player.canonical_player_id, ()),
             entity_id=game_state_player.canonical_player_id,
             requested_date=requested_date,
-            assembly_observed_at=assembly_observed_at,
+            assembly_as_of_time=assembly_as_of_time,
+            selection_observed_at=selection_observed_at,
         )
-        if feature is None:
+        if selection is None or selection.representative is None:
             warnings.append(
                 BaseballIntelligenceWarningV1(
                     code=BaseballIntelligenceWarningCode.PLAYER_FEATURE_MISSING,
@@ -211,6 +249,50 @@ def _player_intelligence(
                     source_player_id=game_state_player.source_player_id,
                 )
             )
+            if selection is not None and selection.blocked_excluded:
+                warnings.append(
+                    BaseballIntelligenceWarningV1(
+                        code=BaseballIntelligenceWarningCode.BLOCKED_FEATURE_EXCLUDED,
+                        message="blocked V3 feature evidence was excluded from usable intelligence",
+                        source_game_id=source_game_id,
+                        team_id=team_id,
+                        source_player_id=game_state_player.source_player_id,
+                    )
+                )
+            if selection is not None and selection.after_boundary_excluded:
+                warnings.append(
+                    BaseballIntelligenceWarningV1(
+                        code=BaseballIntelligenceWarningCode.FEATURE_AFTER_SELECTION_BOUNDARY,
+                        message="V3 feature evidence created after the fixed selection boundary was excluded",
+                        source_game_id=source_game_id,
+                        team_id=team_id,
+                        source_player_id=game_state_player.source_player_id,
+                    )
+                )
+        else:
+            feature = selection.representative
+            equivalent_feature_snapshot_ids = selection.equivalent_feature_snapshot_ids
+            equivalent_stats_run_ids = selection.equivalent_stats_run_ids
+            if selection.blocked_excluded:
+                warnings.append(
+                    BaseballIntelligenceWarningV1(
+                        code=BaseballIntelligenceWarningCode.BLOCKED_FEATURE_EXCLUDED,
+                        message="blocked V3 feature evidence was excluded from usable intelligence",
+                        source_game_id=source_game_id,
+                        team_id=team_id,
+                        source_player_id=game_state_player.source_player_id,
+                    )
+                )
+            if selection.after_boundary_excluded:
+                warnings.append(
+                    BaseballIntelligenceWarningV1(
+                        code=BaseballIntelligenceWarningCode.FEATURE_AFTER_SELECTION_BOUNDARY,
+                        message="V3 feature evidence created after the fixed selection boundary was excluded",
+                        source_game_id=source_game_id,
+                        team_id=team_id,
+                        source_player_id=game_state_player.source_player_id,
+                    )
+                )
     return PlayerIntelligenceV1(
         source_player_id=game_state_player.source_player_id,
         full_name=game_state_player.full_name,
@@ -224,6 +306,8 @@ def _player_intelligence(
             else IntelligenceAvailability.UNAVAILABLE
         ),
         feature=feature,
+        equivalent_feature_snapshot_ids=equivalent_feature_snapshot_ids,
+        equivalent_stats_run_ids=equivalent_stats_run_ids,
     )
 
 
@@ -232,7 +316,8 @@ def _team_intelligence(
     team_state: TeamGameStateV1,
     player_features: Mapping[str, tuple[BaseballFeatureSnapshotV1, ...]],
     requested_date: str,
-    assembly_observed_at: datetime,
+    assembly_as_of_time: datetime,
+    selection_observed_at: datetime,
     source_game_id: str,
     warnings: list[BaseballIntelligenceWarningV1],
 ) -> TeamBaseballIntelligenceV1:
@@ -243,7 +328,8 @@ def _team_intelligence(
             roles=roles,
             player_features=player_features,
             requested_date=requested_date,
-            assembly_observed_at=assembly_observed_at,
+            assembly_as_of_time=assembly_as_of_time,
+            selection_observed_at=selection_observed_at,
             source_game_id=source_game_id,
             team_id=team_state.team_id,
             warnings=warnings,
@@ -400,17 +486,6 @@ def _validate_upstream_game_identity(
         )
 
 
-def _relevant_canonical_player_ids(game_state: GameStateV1) -> set[str]:
-    result: set[str] = set()
-    for game in game_state.games:
-        for team in (game.away, game.home):
-            registry = _team_player_registry(team)
-            for player, _ in registry.values():
-                if player.canonical_player_id is not None:
-                    result.add(player.canonical_player_id)
-    return result
-
-
 def _selected_features(
     games: Iterable[BaseballIntelligenceGameV1],
 ) -> tuple[BaseballFeatureSnapshotV1, ...]:
@@ -456,18 +531,8 @@ def assemble_baseball_intelligence(
 
     feature_inventory = tuple(feature_snapshots)
     player_features = _index_player_features(feature_inventory)
-    relevant_player_ids = _relevant_canonical_player_ids(game_state)
-    relevant_feature_times = [
-        feature.created_at
-        for feature in feature_inventory
-        if feature.entity_kind == "player"
-        and feature.entity_id in relevant_player_ids
-        and feature.feature_as_of == slate.requested_date
-    ]
-    latest_input_time = max(
-        [slate.observed_at, game_state.observed_at, *relevant_feature_times]
-    )
-    selected_observed_at = observed_at or latest_input_time
+    latest_upstream_observed_at = max(slate.observed_at, game_state.observed_at)
+    selected_observed_at = observed_at or latest_upstream_observed_at
     if (
         selected_observed_at.tzinfo is None
         or selected_observed_at.utcoffset() is None
@@ -476,7 +541,7 @@ def assemble_baseball_intelligence(
             "assembly observed_at must be timezone-aware"
         )
     selected_observed_at = selected_observed_at.astimezone(timezone.utc)
-    if selected_observed_at < latest_input_time:
+    if selected_observed_at < latest_upstream_observed_at:
         raise BaseballIntelligenceAssemblyError(
             "assembly observed_at cannot precede retained input evidence"
         )
@@ -491,7 +556,8 @@ def assemble_baseball_intelligence(
             team_state=state_game.away,
             player_features=player_features,
             requested_date=slate.requested_date,
-            assembly_observed_at=selected_observed_at,
+            assembly_as_of_time=slate.as_of_time,
+            selection_observed_at=selected_observed_at,
             source_game_id=state_game.source_game_id,
             warnings=warnings,
         )
@@ -499,7 +565,8 @@ def assemble_baseball_intelligence(
             team_state=state_game.home,
             player_features=player_features,
             requested_date=slate.requested_date,
-            assembly_observed_at=selected_observed_at,
+            assembly_as_of_time=slate.as_of_time,
+            selection_observed_at=selected_observed_at,
             source_game_id=state_game.source_game_id,
             warnings=warnings,
         )
@@ -520,6 +587,17 @@ def assemble_baseball_intelligence(
         )
 
     selected_features = _selected_features(games)
+    selected_stats_run_ids = tuple(
+        sorted(
+            {
+                stats_run_id
+                for game in games
+                for team in (game.away, game.home)
+                for player in team.players
+                for stats_run_id in player.equivalent_stats_run_ids
+            }
+        )
+    )
     try:
         assembly = BaseballIntelligenceAssemblyV1(
             requested_date=slate.requested_date,
@@ -527,9 +605,7 @@ def assemble_baseball_intelligence(
             observed_at=selected_observed_at,
             upstream_daily_slate_checksum=slate.checksum,
             upstream_game_state_checksum=game_state.checksum,
-            source_stats_run_ids=tuple(
-                feature.stats_run_id for feature in selected_features
-            ),
+            source_stats_run_ids=selected_stats_run_ids,
             source_feature_checksums=tuple(
                 feature.feature_checksum for feature in selected_features
             ),
