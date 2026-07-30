@@ -1,7 +1,7 @@
 # Baseball Intelligence Assembly V1 Design
 
 **Status:** BIA1-A fixture-first foundation reconciled on `rc/baseball-intelligence-foundation-reconciliation-20260729`; schema-v10 persistence is the next checkpoint.
-**Controller phase:** `BASEBALL_INTELLIGENCE_ASSEMBLY` (phase 3 of 15)  
+**Controller phase:** `BASEBALL_INTELLIGENCE_ASSEMBLY` (phase 3 of 15)
 **Upstream contracts:** frozen `DailySlateV1`; sealed GameStateV1 schema-v9 persistence/handler; frozen Baseball Intelligence V3 player features
 **Downstream:** `ODDS_WEATHER` → `DATA_QUALITY` → `MATCHUP_PACKET`
 
