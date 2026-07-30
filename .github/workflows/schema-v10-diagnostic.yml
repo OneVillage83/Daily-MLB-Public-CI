@@ -1,0 +1,41 @@
+name: schema-v10-diagnostic
+
+on:
+  push:
+    branches:
+      - diagnostic/schema-v10-ci-20260730
+  pull_request:
+    branches:
+      - rc/baseball-intelligence-schema-v10-20260729
+
+permissions:
+  contents: read
+
+jobs:
+  schema-v10-diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+      - name: Install locked development dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+      - name: Schema-v10 focused regression
+        run: >-
+          python -m pytest -q
+          tests/test_baseball_intelligence_migration_v10.py
+          tests/test_migrations.py
+          tests/test_game_state_migration_v9.py
+          tests/test_daily_slate_handler.py
+          tests/test_run_controller_persistence.py
+          tests/test_run_controller_service.py
+          tests/test_docker_release_contract.py
+          tests/test_baseball_intelligence_assembly.py
+          tests/test_baseball_intelligence_artifact.py
+          tests/test_daily_slate_persistence.py
+          tests/test_game_state_repository.py
+      - name: Ruff
+        run: python -m ruff check .
+      - name: Mypy
+        run: python -m mypy --no-incremental
