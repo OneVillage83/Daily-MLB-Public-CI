@@ -18,7 +18,7 @@ from app.migrations import (
     FORMAL_SCHEMA_V3_FINGERPRINT,
     FORMAL_SCHEMA_V3_STATEMENTS,
     FORMAL_SCHEMA_V4_STATEMENTS,
-    FORMAL_SCHEMA_V9_FINGERPRINT,
+    FORMAL_SCHEMA_V10_FINGERPRINT,
     LEGACY_SCHEMA_FINGERPRINT,
     LEGACY_SCHEMA_SQL,
     BackupVerificationError,
@@ -41,6 +41,8 @@ from app.migrations import (
     MIGRATION_V8_CHECKSUM,
     MIGRATION_V8_NAME,
     MIGRATION_V9_CHECKSUM,
+    MIGRATION_V10_CHECKSUM,
+    MIGRATION_V10_NAME,
     MIGRATION_V9_NAME,
     NewerSchemaVersionError,
     UnknownSchemaError,
@@ -182,7 +184,7 @@ def test_empty_database_installs_formal_schema_with_atomic_diagnostic(
 
     info = database.schema_info()
     assert info["version"] == CURRENT_SCHEMA_VERSION
-    assert info["fingerprint"] == FORMAL_SCHEMA_V9_FINGERPRINT
+    assert info["fingerprint"] == FORMAL_SCHEMA_V10_FINGERPRINT
     assert database.migration_result.source_kind == "empty"
     diagnostic_path = database.migration_result.diagnostic_path
     assert diagnostic_path is not None
@@ -199,7 +201,7 @@ def test_schema_fingerprint_is_deterministic(tmp_path: Path) -> None:
     second = Database(tmp_path / "second.db")
 
     assert first.schema_info()["fingerprint"] == second.schema_info()["fingerprint"]
-    assert first.schema_info()["fingerprint"] == FORMAL_SCHEMA_V9_FINGERPRINT
+    assert first.schema_info()["fingerprint"] == FORMAL_SCHEMA_V10_FINGERPRINT
 
 
 def test_formal_v1_database_upgrades_transactionally_to_current(tmp_path: Path) -> None:
@@ -249,7 +251,7 @@ def test_formal_v1_database_upgrades_transactionally_to_current(tmp_path: Path) 
 
     assert database.migration_result.version == CURRENT_SCHEMA_VERSION
     assert database.migration_result.source_kind == "formal_v1"
-    assert database.schema_info()["fingerprint"] == FORMAL_SCHEMA_V9_FINGERPRINT
+    assert database.schema_info()["fingerprint"] == FORMAL_SCHEMA_V10_FINGERPRINT
     with database.connect() as connection:
         history = connection.execute(
             "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
@@ -264,6 +266,7 @@ def test_formal_v1_database_upgrades_transactionally_to_current(tmp_path: Path) 
             (7, MIGRATION_V7_NAME, MIGRATION_V7_CHECKSUM),
             (8, MIGRATION_V8_NAME, MIGRATION_V8_CHECKSUM),
             (9, MIGRATION_V9_NAME, MIGRATION_V9_CHECKSUM),
+            (10, MIGRATION_V10_NAME, MIGRATION_V10_CHECKSUM),
         ]
         columns = {
             row[1] for row in connection.execute("PRAGMA table_info(odds_snapshots)")
@@ -547,7 +550,7 @@ def test_post_commit_sidecar_failure_does_not_roll_back_committed_schema(
 
     monkeypatch.setattr(migrations, "_write_atomic_diagnostic", real_writer)
     database = Database(path)
-    assert database.schema_info()["fingerprint"] == FORMAL_SCHEMA_V9_FINGERPRINT
+    assert database.schema_info()["fingerprint"] == FORMAL_SCHEMA_V10_FINGERPRINT
     with database.connect() as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM schema_migrations WHERE version=1"

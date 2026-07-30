@@ -14,7 +14,7 @@ from app.redaction import redact_text
 from app.fielding_grain_migration import FORMAL_SCHEMA_V6_STATEMENTS
 
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 MIGRATION_V1_NAME = "formal_phase1_schema"
 MIGRATION_V2_NAME = "phase1_odds_history_and_freshness"
 MIGRATION_V3_NAME = "release_candidate_evidence_ledger"
@@ -24,6 +24,7 @@ MIGRATION_V6_NAME = "retrosheet_fielding_source_row_grain"
 MIGRATION_V7_NAME = "manual_pipeline_run_controller"
 MIGRATION_V8_NAME = "daily_slate_v1_temporal_persistence"
 MIGRATION_V9_NAME = "game_state_v1_temporal_persistence"
+MIGRATION_V10_NAME = "baseball_intelligence_assembly_v1_temporal_persistence"
 
 DSE_MLB_ML_CANDIDATE_V1_GATE_CODES = (
     "prediction_valid",
@@ -3588,6 +3589,262 @@ FORMAL_SCHEMA_V9_STATEMENTS = (
 )
 
 
+_COLLECTOR_RUNS_V10_CREATE = (
+    _COLLECTOR_RUNS_V9_CREATE.replace("_collector_runs_v9", "_collector_runs_v10")
+    .replace(
+        "schema_version IN (1, 2, 3, 4, 5, 6, 7, 8, 9)",
+        "schema_version IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)",
+    )
+)
+_COLLECTOR_RUNS_V10_COPY = _COLLECTOR_RUNS_V9_COPY.replace(
+    "_collector_runs_v9", "_collector_runs_v10"
+)
+_PIPELINE_RUNS_V10_CREATE = (
+    _PIPELINE_RUNS_V9_CREATE.replace("_pipeline_runs_v9", "_pipeline_runs_v10")
+    .replace("database_schema_version IN (7, 8, 9)", "database_schema_version IN (7, 8, 9, 10)")
+)
+_PIPELINE_RUNS_V10_COPY = _PIPELINE_RUNS_V9_COPY.replace(
+    "_pipeline_runs_v9", "_pipeline_runs_v10"
+)
+
+
+FORMAL_SCHEMA_V10_STATEMENTS = (
+    "DROP TRIGGER publication_batches_validate_draft",
+    "DROP TRIGGER daily_slate_snapshots_validate_phase",
+    "DROP TRIGGER game_state_attempt_evidence_validate_phase_and_upstream",
+    "DROP TRIGGER game_state_attempt_evidence_reject_update",
+    "DROP TRIGGER game_state_attempt_evidence_reject_delete",
+    "DROP TRIGGER game_state_snapshots_validate_phase_and_upstream",
+    "DROP TRIGGER game_state_snapshots_reject_update",
+    "DROP TRIGGER game_state_snapshots_validate_seal",
+    "DROP TRIGGER game_state_snapshots_reject_delete",
+    "DROP TRIGGER game_state_games_validate_unsealed_snapshot",
+    "DROP TRIGGER game_state_games_reject_update",
+    "DROP TRIGGER game_state_games_reject_delete",
+    _COLLECTOR_RUNS_V10_CREATE,
+    _COLLECTOR_RUNS_V10_COPY,
+    "DROP TABLE collector_runs",
+    "ALTER TABLE _collector_runs_v10 RENAME TO collector_runs",
+    _PIPELINE_RUNS_V10_CREATE,
+    _PIPELINE_RUNS_V10_COPY,
+    "DROP TABLE pipeline_runs",
+    "ALTER TABLE _pipeline_runs_v10 RENAME TO pipeline_runs",
+    FORMAL_SCHEMA_V7_STATEMENTS[7],
+    FORMAL_SCHEMA_V7_STATEMENTS[8],
+    """
+    CREATE TABLE baseball_intelligence_attempt_evidence (
+        run_id TEXT NOT NULL,
+        phase_key TEXT NOT NULL DEFAULT 'baseball_intelligence_assembly'
+            CHECK (phase_key = 'baseball_intelligence_assembly'),
+        phase_attempt INTEGER NOT NULL CHECK (phase_attempt >= 1),
+        requested_date TEXT NOT NULL CHECK (requested_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        upstream_daily_slate_snapshot_id TEXT NOT NULL,
+        upstream_daily_slate_checksum TEXT NOT NULL CHECK (length(upstream_daily_slate_checksum)=64 AND upstream_daily_slate_checksum NOT GLOB '*[^0-9a-f]*'),
+        upstream_game_state_snapshot_id TEXT NOT NULL,
+        upstream_game_state_checksum TEXT NOT NULL CHECK (length(upstream_game_state_checksum)=64 AND upstream_game_state_checksum NOT GLOB '*[^0-9a-f]*'),
+        selection_observed_at TEXT NOT NULL CHECK (length(trim(selection_observed_at))>0),
+        outcome TEXT NOT NULL CHECK (outcome IN ('assembled','selection_failed','assembly_failed')),
+        assembly_checksum TEXT CHECK (assembly_checksum IS NULL OR (length(assembly_checksum)=64 AND assembly_checksum NOT GLOB '*[^0-9a-f]*')),
+        evidence_manifest_relpath TEXT NOT NULL CHECK (length(trim(evidence_manifest_relpath))>0),
+        evidence_manifest_checksum TEXT NOT NULL CHECK (length(evidence_manifest_checksum)=64 AND evidence_manifest_checksum NOT GLOB '*[^0-9a-f]*'),
+        evidence_manifest_byte_count INTEGER NOT NULL CHECK (evidence_manifest_byte_count>=0),
+        warnings_json TEXT NOT NULL CHECK (json_valid(warnings_json) AND json_type(warnings_json)='array'),
+        warning_count INTEGER NOT NULL CHECK (warning_count>=0 AND warning_count=json_array_length(warnings_json)),
+        created_at TEXT NOT NULL CHECK (length(trim(created_at))>0),
+        PRIMARY KEY(run_id, phase_attempt),
+        FOREIGN KEY(run_id) REFERENCES pipeline_runs(run_id) ON DELETE RESTRICT,
+        FOREIGN KEY(run_id, phase_key) REFERENCES pipeline_run_phases(run_id, phase_key) ON DELETE RESTRICT,
+        FOREIGN KEY(upstream_daily_slate_snapshot_id) REFERENCES daily_slate_snapshots(snapshot_id) ON DELETE RESTRICT,
+        FOREIGN KEY(upstream_game_state_snapshot_id) REFERENCES game_state_snapshots(snapshot_id) ON DELETE RESTRICT,
+        CHECK ((outcome='assembled' AND assembly_checksum IS NOT NULL) OR (outcome!='assembled' AND assembly_checksum IS NULL))
+    )
+    """,
+    "CREATE INDEX idx_bia_attempt_evidence_lookup ON baseball_intelligence_attempt_evidence(run_id, requested_date, outcome, phase_attempt)",
+    """
+    CREATE TABLE baseball_intelligence_snapshots (
+        snapshot_id TEXT PRIMARY KEY CHECK (snapshot_id='bia:' || assembly_checksum),
+        run_id TEXT NOT NULL,
+        phase_key TEXT NOT NULL DEFAULT 'baseball_intelligence_assembly' CHECK (phase_key='baseball_intelligence_assembly'),
+        phase_attempt INTEGER NOT NULL CHECK (phase_attempt>=1),
+        requested_date TEXT NOT NULL CHECK (requested_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        as_of_time TEXT NOT NULL CHECK (length(trim(as_of_time))>0),
+        observed_at TEXT NOT NULL CHECK (length(trim(observed_at))>0),
+        sport TEXT NOT NULL CHECK (sport='MLB'), league TEXT NOT NULL CHECK (league='MLB'),
+        contract_version TEXT NOT NULL CHECK (contract_version='DSE_BASEBALL_INTELLIGENCE_ASSEMBLY_V1'),
+        feature_version TEXT NOT NULL CHECK (feature_version='DSE_MLB_STATS_FEATURES_V3'),
+        upstream_daily_slate_snapshot_id TEXT NOT NULL,
+        upstream_daily_slate_checksum TEXT NOT NULL CHECK (length(upstream_daily_slate_checksum)=64 AND upstream_daily_slate_checksum NOT GLOB '*[^0-9a-f]*'),
+        upstream_game_state_snapshot_id TEXT NOT NULL,
+        upstream_game_state_checksum TEXT NOT NULL CHECK (length(upstream_game_state_checksum)=64 AND upstream_game_state_checksum NOT GLOB '*[^0-9a-f]*'),
+        assembly_checksum TEXT NOT NULL CHECK (length(assembly_checksum)=64 AND assembly_checksum NOT GLOB '*[^0-9a-f]*'),
+        artifact_relpath TEXT NOT NULL CHECK (length(trim(artifact_relpath))>0),
+        artifact_checksum TEXT NOT NULL CHECK (length(artifact_checksum)=64 AND artifact_checksum NOT GLOB '*[^0-9a-f]*'),
+        artifact_byte_count INTEGER NOT NULL CHECK (artifact_byte_count>=0),
+        source_stats_run_ids_json TEXT NOT NULL CHECK (json_valid(source_stats_run_ids_json) AND json_type(source_stats_run_ids_json)='array'),
+        source_feature_checksums_json TEXT NOT NULL CHECK (json_valid(source_feature_checksums_json) AND json_type(source_feature_checksums_json)='array'),
+        warnings_json TEXT NOT NULL CHECK (json_valid(warnings_json) AND json_type(warnings_json)='array'),
+        warning_count INTEGER NOT NULL CHECK (warning_count>=0 AND warning_count=json_array_length(warnings_json)),
+        canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json)),
+        game_count INTEGER NOT NULL CHECK (game_count>=0), player_count INTEGER NOT NULL CHECK (player_count>=0),
+        available_feature_count INTEGER NOT NULL CHECK (available_feature_count>=0), equivalent_feature_row_count INTEGER NOT NULL CHECK (equivalent_feature_row_count>=0),
+        sealed_at TEXT, created_at TEXT NOT NULL CHECK (length(trim(created_at))>0),
+        UNIQUE(run_id, phase_attempt),
+        FOREIGN KEY(run_id) REFERENCES pipeline_runs(run_id) ON DELETE RESTRICT,
+        FOREIGN KEY(run_id, phase_key) REFERENCES pipeline_run_phases(run_id, phase_key) ON DELETE RESTRICT,
+        FOREIGN KEY(run_id, phase_attempt) REFERENCES baseball_intelligence_attempt_evidence(run_id, phase_attempt) ON DELETE RESTRICT,
+        FOREIGN KEY(upstream_daily_slate_snapshot_id) REFERENCES daily_slate_snapshots(snapshot_id) ON DELETE RESTRICT,
+        FOREIGN KEY(upstream_game_state_snapshot_id) REFERENCES game_state_snapshots(snapshot_id) ON DELETE RESTRICT
+    )
+    """,
+    "CREATE INDEX idx_bia_snapshots_run ON baseball_intelligence_snapshots(run_id, phase_attempt, requested_date, snapshot_id)",
+    "CREATE INDEX idx_bia_snapshots_game_state ON baseball_intelligence_snapshots(upstream_game_state_snapshot_id, upstream_game_state_checksum, snapshot_id)",
+    """
+    CREATE TABLE baseball_intelligence_games (
+        snapshot_id TEXT NOT NULL, ordinal INTEGER NOT NULL CHECK (ordinal>=1),
+        edge_event_id TEXT NOT NULL CHECK (length(trim(edge_event_id))>0), daily_mlb_game_id TEXT NOT NULL CHECK (length(trim(daily_mlb_game_id))>0),
+        source_game_id TEXT NOT NULL CHECK (length(trim(source_game_id))>0), away_team_id TEXT NOT NULL CHECK (length(trim(away_team_id))>0), home_team_id TEXT NOT NULL CHECK (length(trim(home_team_id))>0),
+        venue_id TEXT, game_status TEXT NOT NULL CHECK (length(trim(game_status))>0),
+        upstream_daily_slate_game_checksum TEXT NOT NULL CHECK (length(upstream_daily_slate_game_checksum)=64 AND upstream_daily_slate_game_checksum NOT GLOB '*[^0-9a-f]*'),
+        upstream_game_state_game_checksum TEXT NOT NULL CHECK (length(upstream_game_state_game_checksum)=64 AND upstream_game_state_game_checksum NOT GLOB '*[^0-9a-f]*'),
+        player_count INTEGER NOT NULL CHECK (player_count>=0), available_feature_count INTEGER NOT NULL CHECK (available_feature_count>=0),
+        canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json)), row_checksum TEXT NOT NULL CHECK (length(row_checksum)=64 AND row_checksum NOT GLOB '*[^0-9a-f]*'),
+        PRIMARY KEY(snapshot_id, edge_event_id), UNIQUE(snapshot_id,ordinal), UNIQUE(snapshot_id,daily_mlb_game_id), UNIQUE(snapshot_id,source_game_id),
+        FOREIGN KEY(snapshot_id) REFERENCES baseball_intelligence_snapshots(snapshot_id) ON DELETE RESTRICT,
+        CHECK (away_team_id<>home_team_id)
+    )
+    """,
+    "CREATE INDEX idx_bia_games_identity ON baseball_intelligence_games(daily_mlb_game_id, snapshot_id)",
+    """
+    CREATE TABLE baseball_intelligence_players (
+        snapshot_id TEXT NOT NULL, edge_event_id TEXT NOT NULL, team_side TEXT NOT NULL CHECK (team_side IN ('away','home')),
+        team_id TEXT NOT NULL CHECK (length(trim(team_id))>0), source_team_id TEXT NOT NULL CHECK (length(trim(source_team_id))>0), source_player_id TEXT NOT NULL CHECK (length(trim(source_player_id))>0),
+        player_identity_id TEXT, canonical_player_id TEXT, availability TEXT NOT NULL CHECK (availability IN ('available','unavailable')),
+        representative_feature_snapshot_id TEXT, representative_stats_run_id TEXT, representative_feature_checksum TEXT,
+        representative_completeness_state TEXT CHECK (representative_completeness_state IS NULL OR representative_completeness_state IN ('complete','degraded')),
+        game_state_player_checksum TEXT NOT NULL CHECK (length(game_state_player_checksum)=64 AND game_state_player_checksum NOT GLOB '*[^0-9a-f]*'),
+        roles_json TEXT NOT NULL CHECK (json_valid(roles_json) AND json_type(roles_json)='array' AND json_array_length(roles_json)>0),
+        canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json)), row_checksum TEXT NOT NULL CHECK (length(row_checksum)=64 AND row_checksum NOT GLOB '*[^0-9a-f]*'), ordinal INTEGER NOT NULL CHECK (ordinal>=1),
+        PRIMARY KEY(snapshot_id,edge_event_id,team_id,source_player_id), UNIQUE(snapshot_id,edge_event_id,team_id,ordinal),
+        FOREIGN KEY(snapshot_id,edge_event_id) REFERENCES baseball_intelligence_games(snapshot_id,edge_event_id) ON DELETE RESTRICT,
+        FOREIGN KEY(representative_feature_snapshot_id) REFERENCES stats_feature_snapshots(feature_snapshot_id) ON DELETE RESTRICT,
+        FOREIGN KEY(representative_stats_run_id) REFERENCES stats_ingestion_runs(stats_run_id) ON DELETE RESTRICT,
+        FOREIGN KEY(canonical_player_id) REFERENCES stats_canonical_players(canonical_player_id) ON DELETE RESTRICT,
+        CHECK ((player_identity_id IS NULL)=(canonical_player_id IS NULL)),
+        CHECK ((availability='available' AND player_identity_id IS NOT NULL AND canonical_player_id IS NOT NULL AND representative_feature_snapshot_id IS NOT NULL AND representative_stats_run_id IS NOT NULL AND representative_feature_checksum IS NOT NULL AND representative_completeness_state IN ('complete','degraded')) OR (availability='unavailable' AND representative_feature_snapshot_id IS NULL AND representative_stats_run_id IS NULL AND representative_feature_checksum IS NULL AND representative_completeness_state IS NULL))
+    )
+    """,
+    "CREATE INDEX idx_bia_players_canonical ON baseball_intelligence_players(canonical_player_id, snapshot_id) WHERE canonical_player_id IS NOT NULL",
+    "CREATE INDEX idx_bia_players_representative ON baseball_intelligence_players(representative_feature_snapshot_id, representative_stats_run_id) WHERE representative_feature_snapshot_id IS NOT NULL",
+    """
+    CREATE TABLE baseball_intelligence_feature_equivalents (
+        snapshot_id TEXT NOT NULL, edge_event_id TEXT NOT NULL, team_id TEXT NOT NULL, source_player_id TEXT NOT NULL,
+        ordinal INTEGER NOT NULL CHECK (ordinal>=1), feature_snapshot_id TEXT NOT NULL, stats_run_id TEXT NOT NULL, canonical_player_id TEXT NOT NULL,
+        feature_checksum TEXT NOT NULL CHECK (length(feature_checksum)=64 AND feature_checksum NOT GLOB '*[^0-9a-f]*'),
+        completeness_state TEXT NOT NULL CHECK (completeness_state IN ('complete','degraded')), is_representative INTEGER NOT NULL CHECK (is_representative IN (0,1)),
+        PRIMARY KEY(snapshot_id,edge_event_id,team_id,source_player_id,feature_snapshot_id), UNIQUE(snapshot_id,edge_event_id,team_id,source_player_id,ordinal),
+        FOREIGN KEY(snapshot_id,edge_event_id,team_id,source_player_id) REFERENCES baseball_intelligence_players(snapshot_id,edge_event_id,team_id,source_player_id) ON DELETE RESTRICT,
+        FOREIGN KEY(feature_snapshot_id) REFERENCES stats_feature_snapshots(feature_snapshot_id) ON DELETE RESTRICT,
+        FOREIGN KEY(stats_run_id) REFERENCES stats_ingestion_runs(stats_run_id) ON DELETE RESTRICT,
+        FOREIGN KEY(canonical_player_id) REFERENCES stats_canonical_players(canonical_player_id) ON DELETE RESTRICT
+    )
+    """,
+    "CREATE INDEX idx_bia_equivalents_feature ON baseball_intelligence_feature_equivalents(feature_snapshot_id, stats_run_id, snapshot_id)",
+    """
+    CREATE TRIGGER baseball_intelligence_attempt_evidence_validate_phase
+    BEFORE INSERT ON baseball_intelligence_attempt_evidence BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM pipeline_runs run JOIN pipeline_run_phases phase ON phase.run_id=run.run_id AND phase.phase_key='baseball_intelligence_assembly'
+        JOIN daily_slate_snapshots slate ON slate.snapshot_id=NEW.upstream_daily_slate_snapshot_id
+        JOIN game_state_snapshots state ON state.snapshot_id=NEW.upstream_game_state_snapshot_id
+        WHERE run.run_id=NEW.run_id AND run.requested_date=NEW.requested_date AND phase.status='running' AND phase.attempt_count=NEW.phase_attempt
+          AND slate.run_id=NEW.run_id AND slate.requested_date=NEW.requested_date AND slate.sealed_at IS NOT NULL AND slate.snapshot_checksum=NEW.upstream_daily_slate_checksum
+          AND state.run_id=NEW.run_id AND state.requested_date=NEW.requested_date AND state.sealed_at IS NOT NULL AND state.snapshot_checksum=NEW.upstream_game_state_checksum
+          AND state.upstream_daily_slate_snapshot_id=slate.snapshot_id AND state.upstream_daily_slate_checksum=slate.snapshot_checksum
+      ) THEN RAISE(ABORT,'BIA attempt evidence requires matching active phase and sealed upstream chain') END;
+    END
+    """,
+    "CREATE TRIGGER baseball_intelligence_attempt_evidence_reject_update BEFORE UPDATE ON baseball_intelligence_attempt_evidence BEGIN SELECT RAISE(ABORT,'BIA attempt evidence is immutable'); END",
+    "CREATE TRIGGER baseball_intelligence_attempt_evidence_reject_delete BEFORE DELETE ON baseball_intelligence_attempt_evidence BEGIN SELECT RAISE(ABORT,'BIA attempt evidence is retained'); END",
+    """
+    CREATE TRIGGER baseball_intelligence_snapshots_validate_phase
+    BEFORE INSERT ON baseball_intelligence_snapshots BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM baseball_intelligence_attempt_evidence attempt
+        JOIN daily_slate_snapshots slate ON slate.snapshot_id=attempt.upstream_daily_slate_snapshot_id
+        JOIN game_state_snapshots state ON state.snapshot_id=attempt.upstream_game_state_snapshot_id
+        JOIN pipeline_run_phases phase ON phase.run_id=attempt.run_id AND phase.phase_key='baseball_intelligence_assembly'
+        WHERE attempt.run_id=NEW.run_id AND attempt.phase_attempt=NEW.phase_attempt AND attempt.outcome='assembled' AND attempt.assembly_checksum=NEW.assembly_checksum
+          AND attempt.requested_date=NEW.requested_date AND attempt.selection_observed_at=NEW.observed_at
+          AND attempt.upstream_daily_slate_snapshot_id=NEW.upstream_daily_slate_snapshot_id AND attempt.upstream_daily_slate_checksum=NEW.upstream_daily_slate_checksum
+          AND attempt.upstream_game_state_snapshot_id=NEW.upstream_game_state_snapshot_id AND attempt.upstream_game_state_checksum=NEW.upstream_game_state_checksum
+          AND phase.status='running' AND phase.attempt_count=NEW.phase_attempt
+          AND slate.sealed_at IS NOT NULL AND state.sealed_at IS NOT NULL AND NEW.as_of_time=slate.as_of_time AND NEW.as_of_time=state.as_of_time AND state.upstream_daily_slate_snapshot_id=slate.snapshot_id AND state.upstream_daily_slate_checksum=slate.snapshot_checksum
+          AND NEW.sealed_at IS NULL
+      ) THEN RAISE(ABORT,'BIA snapshot requires matching assembled attempt and sealed upstream chain') END;
+    END
+    """,
+    "CREATE TRIGGER baseball_intelligence_snapshots_reject_update BEFORE UPDATE OF snapshot_id,run_id,phase_key,phase_attempt,requested_date,as_of_time,observed_at,sport,league,contract_version,feature_version,upstream_daily_slate_snapshot_id,upstream_daily_slate_checksum,upstream_game_state_snapshot_id,upstream_game_state_checksum,assembly_checksum,artifact_relpath,artifact_checksum,artifact_byte_count,source_stats_run_ids_json,source_feature_checksums_json,warnings_json,warning_count,canonical_json,game_count,player_count,available_feature_count,equivalent_feature_row_count,created_at ON baseball_intelligence_snapshots BEGIN SELECT RAISE(ABORT,'BIA snapshots are immutable'); END",
+    """
+    CREATE TRIGGER baseball_intelligence_games_validate_upstream
+    BEFORE INSERT ON baseball_intelligence_games BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM baseball_intelligence_snapshots snap
+        JOIN daily_slate_games slate ON slate.snapshot_id=snap.upstream_daily_slate_snapshot_id AND slate.ordinal=NEW.ordinal
+        JOIN game_state_games state ON state.snapshot_id=snap.upstream_game_state_snapshot_id AND state.ordinal=NEW.ordinal
+        WHERE snap.snapshot_id=NEW.snapshot_id AND snap.sealed_at IS NULL AND NEW.ordinal<=snap.game_count
+          AND NEW.edge_event_id=slate.edge_event_id AND NEW.daily_mlb_game_id=slate.daily_mlb_game_id AND NEW.source_game_id=slate.source_game_id AND NEW.away_team_id=slate.away_team_id AND NEW.home_team_id=slate.home_team_id
+          AND NEW.edge_event_id=state.edge_event_id AND NEW.daily_mlb_game_id=state.daily_mlb_game_id AND NEW.source_game_id=state.source_game_id AND NEW.away_team_id=state.away_team_id AND NEW.home_team_id=state.home_team_id
+          AND NEW.upstream_daily_slate_game_checksum=slate.row_checksum AND NEW.upstream_game_state_game_checksum=state.row_checksum
+      ) THEN RAISE(ABORT,'BIA game requires exact unsealed DailySlate and GameState lineage') END;
+    END
+    """,
+    "CREATE TRIGGER baseball_intelligence_games_reject_update BEFORE UPDATE ON baseball_intelligence_games BEGIN SELECT RAISE(ABORT,'BIA game evidence is immutable'); END",
+    "CREATE TRIGGER baseball_intelligence_games_reject_delete BEFORE DELETE ON baseball_intelligence_games BEGIN SELECT RAISE(ABORT,'BIA game evidence is retained'); END",
+    """
+    CREATE TRIGGER baseball_intelligence_players_validate_unsealed
+    BEFORE INSERT ON baseball_intelligence_players BEGIN
+      SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM baseball_intelligence_games game JOIN baseball_intelligence_snapshots snap ON snap.snapshot_id=game.snapshot_id JOIN game_state_games state ON state.snapshot_id=snap.upstream_game_state_snapshot_id AND state.edge_event_id=game.edge_event_id WHERE game.snapshot_id=NEW.snapshot_id AND game.edge_event_id=NEW.edge_event_id AND snap.sealed_at IS NULL AND ((NEW.team_side='away' AND NEW.team_id=game.away_team_id AND NEW.source_team_id=json_extract(state.canonical_json,'$.away.source_team_id')) OR (NEW.team_side='home' AND NEW.team_id=game.home_team_id AND NEW.source_team_id=json_extract(state.canonical_json,'$.home.source_team_id')))) THEN RAISE(ABORT,'BIA player requires matching unsealed GameState team lineage') END;
+      SELECT CASE WHEN NEW.availability='available' AND NOT EXISTS (SELECT 1 FROM stats_feature_snapshots feature WHERE feature.feature_snapshot_id=NEW.representative_feature_snapshot_id AND feature.stats_run_id=NEW.representative_stats_run_id AND feature.entity_kind='player' AND feature.feature_version='DSE_MLB_STATS_FEATURES_V3' AND feature.canonical_player_id=NEW.canonical_player_id AND feature.feature_checksum=NEW.representative_feature_checksum AND feature.completeness_state=NEW.representative_completeness_state) THEN RAISE(ABORT,'BIA available player requires exact usable representative feature') END;
+    END
+    """,
+    "CREATE TRIGGER baseball_intelligence_players_reject_update BEFORE UPDATE ON baseball_intelligence_players BEGIN SELECT RAISE(ABORT,'BIA player evidence is immutable'); END",
+    "CREATE TRIGGER baseball_intelligence_players_reject_delete BEFORE DELETE ON baseball_intelligence_players BEGIN SELECT RAISE(ABORT,'BIA player evidence is retained'); END",
+    """
+    CREATE TRIGGER baseball_intelligence_equivalents_validate_unsealed
+    BEFORE INSERT ON baseball_intelligence_feature_equivalents BEGIN
+      SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM baseball_intelligence_players player JOIN baseball_intelligence_snapshots snap ON snap.snapshot_id=player.snapshot_id JOIN stats_feature_snapshots feature ON feature.feature_snapshot_id=NEW.feature_snapshot_id WHERE player.snapshot_id=NEW.snapshot_id AND player.edge_event_id=NEW.edge_event_id AND player.team_id=NEW.team_id AND player.source_player_id=NEW.source_player_id AND player.availability='available' AND snap.sealed_at IS NULL AND feature.stats_run_id=NEW.stats_run_id AND feature.entity_kind='player' AND feature.feature_version='DSE_MLB_STATS_FEATURES_V3' AND feature.feature_as_of=snap.requested_date AND feature.canonical_player_id=NEW.canonical_player_id AND feature.canonical_player_id=player.canonical_player_id AND feature.feature_checksum=NEW.feature_checksum AND feature.feature_checksum=player.representative_feature_checksum AND feature.completeness_state=NEW.completeness_state) THEN RAISE(ABORT,'BIA equivalent requires exact usable feature lineage') END;
+    END
+    """,
+    "CREATE TRIGGER baseball_intelligence_equivalents_reject_update BEFORE UPDATE ON baseball_intelligence_feature_equivalents BEGIN SELECT RAISE(ABORT,'BIA equivalent evidence is immutable'); END",
+    "CREATE TRIGGER baseball_intelligence_equivalents_reject_delete BEFORE DELETE ON baseball_intelligence_feature_equivalents BEGIN SELECT RAISE(ABORT,'BIA equivalent evidence is retained'); END",
+    """
+    CREATE TRIGGER baseball_intelligence_snapshots_validate_seal
+    BEFORE UPDATE OF sealed_at ON baseball_intelligence_snapshots BEGIN
+      SELECT CASE WHEN OLD.sealed_at IS NOT NULL OR NEW.sealed_at IS NULL OR length(trim(NEW.sealed_at))=0
+        OR json_type(OLD.canonical_json,'$.games')!='array'
+        OR (SELECT count(*) FROM baseball_intelligence_games WHERE snapshot_id=OLD.snapshot_id)!=OLD.game_count
+        OR json_array_length(OLD.canonical_json,'$.games')!=OLD.game_count
+        OR (SELECT game_count FROM daily_slate_snapshots WHERE snapshot_id=OLD.upstream_daily_slate_snapshot_id)!=OLD.game_count
+        OR (SELECT game_count FROM game_state_snapshots WHERE snapshot_id=OLD.upstream_game_state_snapshot_id)!=OLD.game_count
+        OR (SELECT count(*) FROM baseball_intelligence_players WHERE snapshot_id=OLD.snapshot_id)!=OLD.player_count
+        OR (SELECT count(*) FROM baseball_intelligence_players WHERE snapshot_id=OLD.snapshot_id AND availability='available')!=OLD.available_feature_count
+        OR (SELECT count(*) FROM baseball_intelligence_feature_equivalents WHERE snapshot_id=OLD.snapshot_id)!=OLD.equivalent_feature_row_count
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_games game WHERE game.snapshot_id=OLD.snapshot_id AND game.player_count!=(SELECT count(*) FROM baseball_intelligence_players player WHERE player.snapshot_id=game.snapshot_id AND player.edge_event_id=game.edge_event_id))
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_games game WHERE game.snapshot_id=OLD.snapshot_id AND game.available_feature_count!=(SELECT count(*) FROM baseball_intelligence_players player WHERE player.snapshot_id=game.snapshot_id AND player.edge_event_id=game.edge_event_id AND player.availability='available'))
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_players p WHERE p.snapshot_id=OLD.snapshot_id AND ((SELECT min(ordinal) FROM baseball_intelligence_players peer WHERE peer.snapshot_id=p.snapshot_id AND peer.edge_event_id=p.edge_event_id AND peer.team_id=p.team_id)!=1 OR (SELECT max(ordinal) FROM baseball_intelligence_players peer WHERE peer.snapshot_id=p.snapshot_id AND peer.edge_event_id=p.edge_event_id AND peer.team_id=p.team_id)!=(SELECT count(*) FROM baseball_intelligence_players peer WHERE peer.snapshot_id=p.snapshot_id AND peer.edge_event_id=p.edge_event_id AND peer.team_id=p.team_id)))
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_players p WHERE p.snapshot_id=OLD.snapshot_id AND ((p.availability='available' AND (SELECT count(*) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id)=0) OR (p.availability='unavailable' AND EXISTS (SELECT 1 FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id))))
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_players p WHERE p.snapshot_id=OLD.snapshot_id AND p.availability='available' AND ((SELECT count(*) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id AND e.is_representative=1)!=1 OR NOT EXISTS (SELECT 1 FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id AND e.is_representative=1 AND e.feature_snapshot_id=p.representative_feature_snapshot_id AND e.stats_run_id=p.representative_stats_run_id AND e.feature_checksum=p.representative_feature_checksum)))
+        OR EXISTS (SELECT 1 FROM baseball_intelligence_players p WHERE p.snapshot_id=OLD.snapshot_id AND p.availability='available' AND ((SELECT min(ordinal) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id)!=1 OR (SELECT max(ordinal) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id)!=(SELECT count(*) FROM baseball_intelligence_feature_equivalents e WHERE e.snapshot_id=p.snapshot_id AND e.edge_event_id=p.edge_event_id AND e.team_id=p.team_id AND e.source_player_id=p.source_player_id)))
+      THEN RAISE(ABORT,'BIA snapshot cannot seal incomplete immutable evidence') END;
+    END
+    """,
+    "CREATE TRIGGER baseball_intelligence_snapshots_reject_delete BEFORE DELETE ON baseball_intelligence_snapshots BEGIN SELECT RAISE(ABORT,'BIA snapshots are retained evidence'); END",
+    *FORMAL_SCHEMA_V9_STATEMENTS[-12:-2],
+    FORMAL_SCHEMA_V8_STATEMENTS[16],
+    FORMAL_SCHEMA_V7_STATEMENTS[5],
+)
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -3782,6 +4039,27 @@ MIGRATION_V9_CHECKSUM = hashlib.sha256(
         )
     ).encode("utf-8")
 ).hexdigest()
+FORMAL_SCHEMA_V10_FINGERPRINT = _fingerprint_for_migration_chain(
+    FORMAL_SCHEMA_V1_STATEMENTS,
+    FORMAL_SCHEMA_V2_STATEMENTS,
+    FORMAL_SCHEMA_V3_STATEMENTS,
+    FORMAL_SCHEMA_V4_STATEMENTS,
+    FORMAL_SCHEMA_V5_STATEMENTS,
+    FORMAL_SCHEMA_V6_STATEMENTS,
+    FORMAL_SCHEMA_V7_STATEMENTS,
+    FORMAL_SCHEMA_V8_STATEMENTS,
+    FORMAL_SCHEMA_V9_STATEMENTS,
+    FORMAL_SCHEMA_V10_STATEMENTS,
+)
+MIGRATION_V10_CHECKSUM = hashlib.sha256(
+    (
+        MIGRATION_V10_NAME
+        + "\nformal-v9-to-v10\n"
+        + "\n".join(
+            _canonical_sql(statement) for statement in FORMAL_SCHEMA_V10_STATEMENTS
+        )
+    ).encode("utf-8")
+).hexdigest()
 
 MIGRATION_HISTORY = (
     (1, MIGRATION_V1_NAME, MIGRATION_V1_CHECKSUM),
@@ -3793,6 +4071,7 @@ MIGRATION_HISTORY = (
     (7, MIGRATION_V7_NAME, MIGRATION_V7_CHECKSUM),
     (8, MIGRATION_V8_NAME, MIGRATION_V8_CHECKSUM),
     (9, MIGRATION_V9_NAME, MIGRATION_V9_CHECKSUM),
+    (10, MIGRATION_V10_NAME, MIGRATION_V10_CHECKSUM),
 )
 
 
@@ -3810,10 +4089,23 @@ def _v9_diagnostic_filename(started_at: str) -> str:
     return f"migration-v9-{safe_timestamp}-{uuid4().hex[:8]}.json"
 
 
+def _v10_diagnostic_filename(started_at: str) -> str:
+    safe_timestamp = started_at.replace(":", "").replace("+", "_")
+    return f"migration-v10-{safe_timestamp}-{uuid4().hex[:8]}.json"
+
+
 def _v9_backup_filename(database_path: Path, started_at: str) -> str:
     safe_timestamp = started_at.replace(":", "").replace("+", "_")
     return (
         f"{database_path.name}.pre-v9-{safe_timestamp}-"
+        f"{uuid4().hex[:8]}.sqlite3"
+    )
+
+
+def _v10_backup_filename(database_path: Path, started_at: str) -> str:
+    safe_timestamp = started_at.replace(":", "").replace("+", "_")
+    return (
+        f"{database_path.name}.pre-v10-{safe_timestamp}-"
         f"{uuid4().hex[:8]}.sqlite3"
     )
 
@@ -3938,6 +4230,18 @@ def _create_verified_v9_backup(
     return _verify_v9_backup(backup_path, FORMAL_SCHEMA_V8_FINGERPRINT)
 
 
+def _create_verified_v10_backup(
+    database_path: Path,
+    backup_path: Path,
+) -> dict[str, Any]:
+    _create_verified_backup(
+        database_path,
+        backup_path,
+        FORMAL_SCHEMA_V9_FINGERPRINT,
+    )
+    return _verify_v9_backup(backup_path, FORMAL_SCHEMA_V9_FINGERPRINT)
+
+
 def _v9_preflight_diagnostic(
     *,
     database_path: Path,
@@ -3969,6 +4273,37 @@ def _v9_preflight_diagnostic(
     }
 
 
+def _v10_preflight_diagnostic(
+    *,
+    database_path: Path,
+    backup_path: Path,
+    started_at: str,
+    source_integrity: list[str],
+    source_foreign_keys: list[tuple[Any, ...]],
+    backup_verification: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "backup_foreign_key_violations": backup_verification[
+            "foreign_key_violations"
+        ],
+        "backup_integrity_check": backup_verification["integrity_check"],
+        "backup_path": str(backup_path.resolve()),
+        "completed_at": None,
+        "database_path": str(database_path.resolve()),
+        "migration_checksum": MIGRATION_V10_CHECKSUM,
+        "migration_name": MIGRATION_V10_NAME,
+        "outcome": "pending",
+        "source_fingerprint": FORMAL_SCHEMA_V9_FINGERPRINT,
+        "source_foreign_key_violations": source_foreign_keys,
+        "source_integrity_check": source_integrity,
+        "source_version": 9,
+        "started_at": started_at,
+        "status": "preflight_verified",
+        "target_fingerprint": FORMAL_SCHEMA_V10_FINGERPRINT,
+        "target_version": 10,
+    }
+
+
 def _verify_v9_preflight_diagnostic(
     diagnostic_path: Path,
     expected: dict[str, Any],
@@ -3982,6 +4317,22 @@ def _verify_v9_preflight_diagnostic(
     if observed != expected:
         raise DiagnosticWriteError(
             "Schema v9 migration diagnostic is internally inconsistent"
+        )
+
+
+def _verify_v10_preflight_diagnostic(
+    diagnostic_path: Path,
+    expected: dict[str, Any],
+) -> None:
+    try:
+        observed = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DiagnosticWriteError(
+            "Schema v10 migration diagnostic is not readable"
+        ) from exc
+    if observed != expected:
+        raise DiagnosticWriteError(
+            "Schema v10 migration diagnostic is internally inconsistent"
         )
 
 
@@ -4004,6 +4355,7 @@ def _assert_target_schema(connection: sqlite3.Connection, version: int) -> None:
         7: FORMAL_SCHEMA_V7_FINGERPRINT,
         8: FORMAL_SCHEMA_V8_FINGERPRINT,
         9: FORMAL_SCHEMA_V9_FINGERPRINT,
+        10: FORMAL_SCHEMA_V10_FINGERPRINT,
     }.get(version)
     if expected_fingerprint is None:
         raise SchemaVerificationError(f"Unsupported target schema version {version}")
@@ -4882,6 +5234,116 @@ def _upgrade_formal_v8_schema(
     )
 
 
+def _upgrade_formal_v9_schema(
+    connection: sqlite3.Connection,
+    database_path: Path,
+    prior_result: MigrationResult | None = None,
+) -> MigrationResult:
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) != 9:
+        raise SchemaVerificationError(
+            "Formal v9 upgrade requires PRAGMA user_version=9"
+        )
+    validated = _validate_versioned_schema(connection)
+    if validated.version != 9:
+        raise SchemaVerificationError(
+            "Formal v9 upgrade requires exact migration history through v9"
+        )
+    source_integrity = [
+        str(row[0]) for row in connection.execute("PRAGMA integrity_check").fetchall()
+    ]
+    if source_integrity != ["ok"]:
+        raise SchemaVerificationError(
+            "Formal v9 source integrity_check must be ok before schema v10 upgrade"
+        )
+    source_foreign_keys = [
+        tuple(row) for row in connection.execute("PRAGMA foreign_key_check").fetchall()
+    ]
+    if source_foreign_keys:
+        raise SchemaVerificationError(
+            "Formal v9 source has foreign-key violations before schema v10 upgrade"
+        )
+
+    source_kind = prior_result.source_kind if prior_result else "formal_v9"
+    backup_path = prior_result.backup_path if prior_result else None
+    diagnostic_path = prior_result.diagnostic_path if prior_result else None
+    v10_diagnostic: dict[str, Any] | None = None
+    if source_kind == "formal_v9":
+        started_at = _utc_now()
+        migration_dir = _migration_directory(database_path)
+        backup_path = migration_dir / _v10_backup_filename(database_path, started_at)
+        backup_verification = _create_verified_v10_backup(database_path, backup_path)
+        diagnostic_path = migration_dir / _v10_diagnostic_filename(started_at)
+        v10_diagnostic = _v10_preflight_diagnostic(
+            database_path=database_path,
+            backup_path=backup_path,
+            started_at=started_at,
+            source_integrity=source_integrity,
+            source_foreign_keys=source_foreign_keys,
+            backup_verification=backup_verification,
+        )
+        _write_atomic_diagnostic(diagnostic_path, v10_diagnostic)
+        _verify_v10_preflight_diagnostic(diagnostic_path, v10_diagnostic)
+
+    connection.execute("PRAGMA foreign_keys=OFF")
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 0:
+        raise SchemaVerificationError(
+            "Unable to prepare transactional schema v10 upgrade"
+        )
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if schema_fingerprint(connection) != FORMAL_SCHEMA_V9_FINGERPRINT:
+            raise SchemaVerificationError("Formal v9 schema changed before migration lock")
+        _execute_statements(connection, FORMAL_SCHEMA_V10_STATEMENTS)
+        applied_at = _utc_now()
+        connection.execute(
+            "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (10, ?, ?, ?)",
+            (MIGRATION_V10_NAME, MIGRATION_V10_CHECKSUM, applied_at),
+        )
+        connection.execute("PRAGMA user_version=10")
+        _assert_target_schema(connection, 10)
+        connection.commit()
+    except Exception as exc:
+        if connection.in_transaction:
+            connection.rollback()
+        if v10_diagnostic is not None and diagnostic_path is not None:
+            v10_diagnostic.update(
+                {
+                    "completed_at": _utc_now(),
+                    "error": redact_text(str(exc)),
+                    "outcome": "migration_failed",
+                    "status": "completed",
+                }
+            )
+            _write_atomic_diagnostic(diagnostic_path, v10_diagnostic)
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+        raise SchemaVerificationError(
+            "Foreign-key enforcement could not be restored after schema v10 upgrade"
+        )
+    _assert_target_schema(connection, 10)
+    if v10_diagnostic is not None and diagnostic_path is not None:
+        v10_diagnostic.update(
+            {
+                "completed_at": _utc_now(),
+                "outcome": "migration_verified",
+                "status": "completed",
+            }
+        )
+        _write_atomic_diagnostic(diagnostic_path, v10_diagnostic)
+        _verify_v10_preflight_diagnostic(diagnostic_path, v10_diagnostic)
+    return MigrationResult(
+        version=10,
+        schema_fingerprint=FORMAL_SCHEMA_V10_FINGERPRINT,
+        migrated=True,
+        source_kind=source_kind,
+        backup_path=backup_path,
+        diagnostic_path=diagnostic_path,
+    )
+
+
 def _validate_versioned_schema(connection: sqlite3.Connection) -> MigrationResult:
     rows = connection.execute(
         "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
@@ -4917,6 +5379,7 @@ def _validate_versioned_schema(connection: sqlite3.Connection) -> MigrationResul
         7: FORMAL_SCHEMA_V7_FINGERPRINT,
         8: FORMAL_SCHEMA_V8_FINGERPRINT,
         9: FORMAL_SCHEMA_V9_FINGERPRINT,
+        10: FORMAL_SCHEMA_V10_FINGERPRINT,
     }
     return MigrationResult(
         version=newest,
@@ -4976,6 +5439,8 @@ def ensure_schema(database_path: Path) -> MigrationResult:
             result = _upgrade_formal_v7_schema(connection, result)
         if result.version == 8:
             result = _upgrade_formal_v8_schema(connection, path, result)
+        if result.version == 9:
+            result = _upgrade_formal_v9_schema(connection, path, result)
 
         journal_mode = str(connection.execute("PRAGMA journal_mode=WAL").fetchone()[0])
         if journal_mode.lower() != "wal":
