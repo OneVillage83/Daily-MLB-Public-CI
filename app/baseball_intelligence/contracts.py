@@ -47,6 +47,14 @@ class IntelligenceAvailability(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
+class FeatureCompletenessState(StrEnum):
+    """The only retained V3 feature completeness states BIA understands."""
+
+    COMPLETE = "complete"
+    DEGRADED = "degraded"
+    BLOCKED = "blocked"
+
+
 def _required_text(value: object, name: str) -> str:
     if not isinstance(value, str) or not value or value != value.strip():
         raise BaseballIntelligenceContractError(
@@ -161,7 +169,7 @@ class BaseballFeatureSnapshotV1:
     entity_kind: str
     entity_id: str
     feature_as_of: str
-    completeness_state: str
+    completeness_state: FeatureCompletenessState | str
     input_checksum: str
     feature_checksum: str
     features: Mapping[str, Any]
@@ -188,11 +196,13 @@ class BaseballFeatureSnapshotV1:
             )
         object.__setattr__(self, "entity_id", _required_text(self.entity_id, "entity_id"))
         parse_requested_date(self.feature_as_of)
-        object.__setattr__(
-            self,
-            "completeness_state",
-            _required_text(self.completeness_state, "completeness_state"),
-        )
+        try:
+            completeness_state = FeatureCompletenessState(self.completeness_state)
+        except (TypeError, ValueError) as exc:
+            raise BaseballIntelligenceContractError(
+                "feature completeness_state must be complete, degraded, or blocked"
+            ) from exc
+        object.__setattr__(self, "completeness_state", completeness_state)
         object.__setattr__(
             self,
             "input_checksum",
@@ -263,7 +273,9 @@ class BaseballFeatureSnapshotV1:
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "completeness_state": self.completeness_state,
+            "completeness_state": FeatureCompletenessState(
+                self.completeness_state
+            ).value,
             "created_at": self.created_at.isoformat(),
             "entity_id": self.entity_id,
             "entity_kind": self.entity_kind,
@@ -287,6 +299,8 @@ class PlayerIntelligenceV1:
     game_state_player_checksum: str
     availability: IntelligenceAvailability
     feature: BaseballFeatureSnapshotV1 | None = None
+    equivalent_feature_snapshot_ids: tuple[str, ...] = ()
+    equivalent_stats_run_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -339,9 +353,45 @@ class PlayerIntelligenceV1:
                 raise BaseballIntelligenceContractError(
                     "player feature entity does not match canonical_player_id"
                 )
+            if self.feature.completeness_state is FeatureCompletenessState.BLOCKED:
+                raise BaseballIntelligenceContractError(
+                    "blocked player feature cannot be available intelligence"
+                )
+            snapshot_ids = tuple(
+                sorted(
+                    {
+                        _required_text(value, "equivalent_feature_snapshot_id")
+                        for value in self.equivalent_feature_snapshot_ids
+                    }
+                    or {self.feature.feature_snapshot_id}
+                )
+            )
+            stats_run_ids = tuple(
+                sorted(
+                    {
+                        _required_text(value, "equivalent_stats_run_id")
+                        for value in self.equivalent_stats_run_ids
+                    }
+                    or {self.feature.stats_run_id}
+                )
+            )
+            if self.feature.feature_snapshot_id not in snapshot_ids:
+                raise BaseballIntelligenceContractError(
+                    "feature representative must appear in equivalent snapshot lineage"
+                )
+            if self.feature.stats_run_id not in stats_run_ids:
+                raise BaseballIntelligenceContractError(
+                    "feature representative must appear in equivalent stats-run lineage"
+                )
+            object.__setattr__(self, "equivalent_feature_snapshot_ids", snapshot_ids)
+            object.__setattr__(self, "equivalent_stats_run_ids", stats_run_ids)
         elif self.feature is not None:
             raise BaseballIntelligenceContractError(
                 "unavailable player intelligence must not contain a feature"
+            )
+        elif self.equivalent_feature_snapshot_ids or self.equivalent_stats_run_ids:
+            raise BaseballIntelligenceContractError(
+                "unavailable player intelligence must not contain feature lineage"
             )
 
     def as_dict(self) -> dict[str, object]:
@@ -349,6 +399,10 @@ class PlayerIntelligenceV1:
             "availability": self.availability.value,
             "canonical_player_id": self.canonical_player_id,
             "feature": None if self.feature is None else self.feature.as_dict(),
+            "equivalent_feature_snapshot_ids": list(
+                self.equivalent_feature_snapshot_ids
+            ),
+            "equivalent_stats_run_ids": list(self.equivalent_stats_run_ids),
             "full_name": self.full_name,
             "game_state_player_checksum": self.game_state_player_checksum,
             "player_identity_id": self.player_identity_id,
