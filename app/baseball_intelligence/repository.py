@@ -603,6 +603,35 @@ class BaseballIntelligenceRepository:
             raise BaseballIntelligenceIntegrityError("BIA snapshot canonical JSON is invalid") from exc
         if assembly.checksum != str(row["assembly_checksum"]) or assembly.canonical_json_bytes().decode("utf-8") != str(row["canonical_json"]):
             raise BaseballIntelligenceIntegrityError("BIA snapshot checksum does not reconcile")
+        try:
+            slate = self.daily_slate.get_daily_slate_snapshot(
+                str(row["upstream_daily_slate_snapshot_id"])
+            )
+            state = self.game_state.get_game_state_snapshot(
+                str(row["upstream_game_state_snapshot_id"])
+            )
+        except (BaseballIntelligenceRepositoryError, RuntimeError, ValueError) as exc:
+            raise BaseballIntelligenceIntegrityError(
+                "BIA sealed upstream evidence cannot be reconstructed"
+            ) from exc
+        if (
+            slate.run_id != str(row["run_id"])
+            or state.run_id != str(row["run_id"])
+            or state.upstream_daily_slate_snapshot_id != slate.snapshot_id
+            or state.state.upstream_daily_slate_checksum != slate.slate.checksum
+        ):
+            raise BaseballIntelligenceIntegrityError(
+                "BIA persisted upstream snapshot chain does not reconcile"
+            )
+        self._verify_assembly_lineage(
+            assembly,
+            slate,
+            state,
+            self.selector.load_candidates(
+                requested_date=assembly.requested_date,
+                canonical_player_ids=self.relevant_canonical_player_ids(state),
+            ),
+        )
         artifact = BaseballIntelligenceArtifactV1(str(row["artifact_relpath"]), str(row["artifact_checksum"]), int(row["artifact_byte_count"]))
         try:
             verify_baseball_intelligence_artifact(assembly, artifact, self.artifact_root, secret_values=self.secret_values)
