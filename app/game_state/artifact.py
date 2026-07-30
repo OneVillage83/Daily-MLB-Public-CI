@@ -22,6 +22,10 @@ class GameStateArtifactV1:
     byte_count: int
 
 
+class GameStateArtifactIntegrityError(RuntimeError):
+    """Raised when retained GameState artifact bytes fail verification."""
+
+
 def game_state_artifact_relpath(state: GameStateV1) -> str:
     return GAME_STATE_ARTIFACT_RELPATH.format(snapshot_checksum=state.checksum)
 
@@ -56,3 +60,32 @@ def write_game_state_artifact(
         checksum=hashlib.sha256(content).hexdigest(),
         byte_count=len(content),
     )
+
+
+def verify_game_state_artifact(
+    state: GameStateV1,
+    artifact: GameStateArtifactV1,
+    artifact_root: Path,
+) -> Path:
+    """Verify the exact canonical artifact retained for ``state`` offline."""
+
+    safe_relpath = validate_artifact_relpath(artifact.relpath)
+    if safe_relpath != game_state_artifact_relpath(state):
+        raise GameStateArtifactIntegrityError(
+            "GameState artifact path does not match its semantic checksum"
+        )
+    destination = resolve_contained_path(artifact_root, safe_relpath)
+    try:
+        content = destination.read_bytes()
+    except FileNotFoundError as exc:
+        raise GameStateArtifactIntegrityError("GameState artifact is missing") from exc
+    expected = state.canonical_json_bytes()
+    if (
+        content != expected
+        or hashlib.sha256(content).hexdigest() != artifact.checksum
+        or len(content) != artifact.byte_count
+    ):
+        raise GameStateArtifactIntegrityError(
+            "GameState artifact bytes, checksum, or byte count do not match"
+        )
+    return destination

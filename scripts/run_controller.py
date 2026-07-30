@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 
 from app.config import Settings, settings  # noqa: E402
 from app.daily_slate.handler import DailySlatePhaseHandler  # noqa: E402
+from app.game_state.handler import GameStatePhaseHandler  # noqa: E402
 from app.database import Database  # noqa: E402
 from app.redaction import redact_text  # noqa: E402
 from app.run_controller.contracts import PipelinePhaseKey  # noqa: E402
@@ -59,6 +60,11 @@ def _safe_configuration_metadata(configured_settings: Settings) -> dict[str, Any
             "endpoint_category": "daily_slate_schedule",
             "source_version": "statsapi-v1",
         },
+        "game_state": {
+            "authoritative_provider": "mlb",
+            "endpoint_category": "game_state_feed",
+            "source_version": "statsapi-game-feed-v1.1",
+        },
         "odds": {
             "enabled": bool(configured_settings.odds_api_key),
             "format": configured_settings.odds_format,
@@ -102,11 +108,21 @@ def build_controller(
         user_agent=_daily_slate_user_agent(configured_settings),
         secret_values=secret_values,
     )
+    game_state_handler = GameStatePhaseHandler(
+        database,
+        artifact_root=configured_settings.artifact_dir,
+        request_timeout_seconds=configured_settings.request_timeout_seconds,
+        user_agent=_daily_slate_user_agent(configured_settings),
+        secret_values=secret_values,
+    )
     return ManualRunController(
         repository,
         timezone_name=configured_settings.report_timezone,
         configuration_metadata=_safe_configuration_metadata(configured_settings),
-        handlers={PipelinePhaseKey.DAILY_SLATE: daily_slate_handler},
+        handlers={
+            PipelinePhaseKey.DAILY_SLATE: daily_slate_handler,
+            PipelinePhaseKey.GAME_STATE: game_state_handler,
+        },
     )
 
 
@@ -118,7 +134,7 @@ def _add_common_database_argument(
         "--database",
         type=Path,
         default=configured_settings.database_path,
-        help="schema-v8 SQLite database path",
+        help="schema-v9 SQLite database path",
     )
 
 
@@ -127,7 +143,7 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
         prog="run_controller",
         description=(
             "Initialize, inspect, and manually resume Daily MLB pipeline runs; "
-            "DAILY_SLATE uses authoritative MLB schedule acquisition"
+            "DAILY_SLATE and GAME_STATE use authoritative MLB acquisition"
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -149,7 +165,7 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
     resume = commands.add_parser(
         "resume",
         help=(
-            "resume persisted work; DAILY_SLATE can execute and the controller "
+            "resume persisted work; DAILY_SLATE and GAME_STATE can execute and the controller "
             "blocks safely at the next unimplemented phase"
         ),
     )

@@ -100,12 +100,14 @@ class _ExclusiveFileLock:
     @staticmethod
     def _lock_descriptor(descriptor: int, *, blocking: bool) -> None:
         if os.name == "nt":
-            import msvcrt
+            msvcrt = importlib.import_module("msvcrt")
+            locking = getattr(msvcrt, "locking")
+            nonblocking_lock = getattr(msvcrt, "LK_NBLCK")
 
             while True:
                 os.lseek(descriptor, 0, os.SEEK_SET)
                 try:
-                    msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                    locking(descriptor, nonblocking_lock, 1)
                     break
                 except OSError as exc:
                     if not blocking:
@@ -132,10 +134,12 @@ class _ExclusiveFileLock:
     @staticmethod
     def _unlock_descriptor(descriptor: int) -> None:
         if os.name == "nt":
-            import msvcrt
+            msvcrt = importlib.import_module("msvcrt")
+            locking = getattr(msvcrt, "locking")
+            unlock = getattr(msvcrt, "LK_UNLCK")
 
             os.lseek(descriptor, 0, os.SEEK_SET)
-            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            locking(descriptor, unlock, 1)
             return
 
         fcntl = importlib.import_module("fcntl")
