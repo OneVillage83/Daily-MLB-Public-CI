@@ -1,7 +1,7 @@
 # Baseball Intelligence Assembly V1 — Pre-Persistence Handoff
 
-**Historical foundation branch/PR:** `rc/baseball-intelligence-assembly-v1-direct-20260727` / private draft PR #11
-**Current reconciliation branch:** `rc/baseball-intelligence-foundation-reconciliation-20260729`
+**Historical foundation branch/PR:** `rc/baseball-intelligence-assembly-v1-direct-20260727` / private draft PR #11 (historical evidence only)
+**Accepted reconciliation branch:** `rc/baseball-intelligence-foundation-reconciliation-20260729`
 **Base:** accepted GameState handler checkpoint `24da1c9a3912272f8b5733a5f66ac41c32c68485`
 **Controller phase:** 3 — `BASEBALL_INTELLIGENCE_ASSEMBLY`
 
@@ -209,17 +209,21 @@ shortening the semantic artifact path or weakening containment checks.
 
 Sanitized public validation branch:
 
-`rc/baseball-intelligence-assembly-v1-direct-20260727`
+`rc/baseball-intelligence-foundation-reconciliation-20260729`
 
-Public draft PR #10 validates the same BIA source surface.
+Public draft PR #44 validates the accepted BIA1-A reconciliation source
+surface. The private/public approved source files are byte-equivalent; no
+test-only typing reconciliation difference remains.
 
-Focused Windows/Python 3.12 checkpoint after the first test-only typing correction:
+Current validation checkpoint:
 
-- 18 BIA tests passed
+- 25 BIA-focused tests passed; 250 cross-phase focused tests passed
 - Ruff passed
-- mypy passed across 166 source files
+- mypy passed across 247 source files
+- the two former Windows temporary-path artifact failures are resolved
+- the only remaining integrated full-suite failures are the separately tracked
+  Phase 4 Odds+Weather credential-boundary tests
 
-The first focused run had the same 18 runtime tests and Ruff green, with one mypy-only test-fixture narrowing error. No production BIA source change was needed; the public test fixture was narrowed and the second focused run passed.
 
 ## Current upstream and intentional blockers
 
