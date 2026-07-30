@@ -12,6 +12,46 @@ permissions:
   contents: read
 
 jobs:
+  gamestate-handler-diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install locked development dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+      - name: Focused GameState handler and controller validation
+        run: >-
+          python -m pytest
+          tests/test_game_state_handler.py
+          tests/test_game_state_contracts.py
+          tests/test_game_state_acquisition.py
+          tests/test_game_state_batch.py
+          tests/test_game_state_raw_link.py
+          tests/test_game_state_artifact.py
+          tests/test_game_state_repository.py
+          tests/test_game_state_migration_v9.py
+          tests/test_daily_slate_handler.py
+          tests/test_daily_slate_persistence.py
+          tests/test_run_controller_persistence.py
+          tests/test_run_controller_service.py
+          tests/test_run_controller_cli.py
+          tests/test_artifacts.py
+          tests/test_redaction.py
+          -q
+      - name: GameState handler lint
+        run: >-
+          python -m ruff check
+          app/game_state
+          app/daily_slate
+          scripts/run_controller.py
+          tests/test_game_state_handler.py
+          tests/test_run_controller_cli.py
+      - name: Full static type validation
+        run: python -m mypy --no-incremental
+
   python-quality:
     runs-on: windows-latest
     steps:
