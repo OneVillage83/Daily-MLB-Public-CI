@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from app.odds_weather.artifact import (
+    OddsWeatherArtifactIntegrityError,
     odds_weather_artifact_relpath,
+    publish_odds_weather_artifact,
+    verify_odds_weather_artifact,
     write_odds_weather_artifact,
 )
 from app.odds_weather.contracts import (
@@ -56,6 +59,38 @@ def test_rewriting_same_content_addressed_snapshot_is_idempotent(tmp_path: Path)
 
     assert first == second
     assert (tmp_path / first.relpath).read_bytes() == snapshot.canonical_json_bytes()
+
+
+def test_atomic_publish_reports_creation_then_verified_replay(tmp_path: Path) -> None:
+    snapshot = _empty_snapshot()
+
+    first, first_created = publish_odds_weather_artifact(snapshot, tmp_path)
+    second, second_created = publish_odds_weather_artifact(snapshot, tmp_path)
+
+    assert first_created is True
+    assert second_created is False
+    assert second == first
+    assert verify_odds_weather_artifact(snapshot, first, tmp_path).read_bytes() == (
+        snapshot.canonical_json_bytes()
+    )
+    assert not list((tmp_path / first.relpath).parent.glob(".tmp-*.part"))
+
+
+def test_artifact_verifier_rejects_missing_or_tampered_bytes(tmp_path: Path) -> None:
+    snapshot = _empty_snapshot()
+    artifact = write_odds_weather_artifact(snapshot, tmp_path)
+    destination = tmp_path / artifact.relpath
+
+    destination.write_bytes(b"tampered")
+    with pytest.raises(OddsWeatherArtifactIntegrityError, match="do not match"):
+        verify_odds_weather_artifact(snapshot, artifact, tmp_path)
+    with pytest.raises(OddsWeatherArtifactIntegrityError, match="do not match"):
+        write_odds_weather_artifact(snapshot, tmp_path)
+    assert destination.read_bytes() == b"tampered"
+
+    destination.unlink()
+    with pytest.raises(OddsWeatherArtifactIntegrityError, match="missing"):
+        verify_odds_weather_artifact(snapshot, artifact, tmp_path)
 
 
 def test_artifact_relpath_cannot_escape_root(tmp_path: Path) -> None:

@@ -19,6 +19,7 @@ from app.odds_weather.history import (
     select_odds_history_at,
 )
 from app.raw_payloads import RawPayloadCapture, sanitized_checksum
+from app.redaction import redact_value
 
 
 class OddsWeatherAdapterError(ValueError):
@@ -57,6 +58,18 @@ def _require_capture(
         )
 
 
+def _require_credential_free(
+    value: object,
+    *,
+    secret_values: tuple[str, ...],
+    name: str,
+) -> None:
+    if redact_value(value, secret_values) != value or any(
+        secret in str(value) for secret in secret_values
+    ):
+        raise OddsWeatherAdapterError(f"{name} contains credential-bearing material")
+
+
 def odds_collection_to_phase4(
     collection: OddsCollectionResult,
     *,
@@ -72,6 +85,7 @@ def odds_collection_to_phase4(
     cutoff (or the collector retrieval time by default) before line movement is computed.
     """
 
+    configured_secrets = tuple(str(value) for value in secret_values if str(value))
     if history_rows_by_event is not None and history_source is not None:
         raise OddsWeatherAdapterError(
             "provide either history_rows_by_event or history_source, not both"
@@ -91,7 +105,10 @@ def odds_collection_to_phase4(
         if history_observed_at is None
         else _aware_utc(history_observed_at, "history_observed_at")
     )
-    checksum = sanitized_checksum(collection.capture, secret_values=secret_values)
+    checksum = sanitized_checksum(
+        collection.capture,
+        secret_values=configured_secrets,
+    )
     provided_history = history_rows_by_event or {}
     events: list[OddsProviderEventV1] = []
     for index, event in enumerate(collection.games):
@@ -122,6 +139,7 @@ def odds_collection_to_phase4(
                 raw_capture_checksum=checksum,
                 event=event,
                 history_rows=rows,
+                secret_values=configured_secrets,
             )
         )
 
@@ -134,6 +152,11 @@ def odds_collection_to_phase4(
             provider_event_id=warning.event_id,
         )
         for warning in collection.warnings
+    )
+    _require_credential_free(
+        tuple(warning.as_dict() for warning in warnings),
+        secret_values=configured_secrets,
+        name="OddsCollector warnings",
     )
     return OddsCollectionAdapterResultV1(
         events=tuple(events),
@@ -151,6 +174,7 @@ def nws_forecast_to_phase4(
 ) -> WeatherForecastEvidenceV1:
     """Convert existing NWS point/hourly collector output into canonical phase-4 input."""
 
+    configured_secrets = tuple(str(value) for value in secret_values if str(value))
     _require_capture(point_capture, provider="nws", endpoint_category="point_lookup")
     _require_capture(
         forecast_capture,
@@ -163,10 +187,11 @@ def nws_forecast_to_phase4(
         provider=WeatherProvider.NWS,
         retrieved_at=retrieved_at,
         raw_capture_checksums=(
-            sanitized_checksum(point_capture, secret_values=secret_values),
-            sanitized_checksum(forecast_capture, secret_values=secret_values),
+            sanitized_checksum(point_capture, secret_values=configured_secrets),
+            sanitized_checksum(forecast_capture, secret_values=configured_secrets),
         ),
         forecast=dict(forecast),
+        secret_values=configured_secrets,
     )
 
 
@@ -179,6 +204,7 @@ def openweather_forecast_to_phase4(
 ) -> WeatherForecastEvidenceV1:
     """Convert existing OpenWeather One Call 3.0 output into canonical phase-4 input."""
 
+    configured_secrets = tuple(str(value) for value in secret_values if str(value))
     _require_capture(
         capture,
         provider="openweather",
@@ -189,7 +215,8 @@ def openweather_forecast_to_phase4(
         provider=WeatherProvider.OPENWEATHER,
         retrieved_at=_capture_time(capture),
         raw_capture_checksums=(
-            sanitized_checksum(capture, secret_values=secret_values),
+            sanitized_checksum(capture, secret_values=configured_secrets),
         ),
         forecast=dict(forecast),
+        secret_values=configured_secrets,
     )

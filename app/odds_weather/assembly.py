@@ -711,6 +711,12 @@ def _validate_upstream_game(
         ("source_game_id", slate_game.source_game_id, intelligence_game.source_game_id),
         ("away_team_id", slate_game.away_team_id, intelligence_game.away_team_id),
         ("home_team_id", slate_game.home_team_id, intelligence_game.home_team_id),
+        ("venue_id", slate_game.venue_id, intelligence_game.venue_id),
+        (
+            "upstream_daily_slate_game_checksum",
+            slate_game.checksum,
+            intelligence_game.upstream_daily_slate_game_checksum,
+        ),
     )
     mismatches = [name for name, left, right in comparisons if left != right]
     if mismatches:

@@ -8,7 +8,10 @@ from app.odds_weather.adapters import (
 from app.odds_weather.artifact import (
     ODDS_WEATHER_ARTIFACT_RELPATH,
     OddsWeatherArtifactV1,
+    OddsWeatherArtifactIntegrityError,
     odds_weather_artifact_relpath,
+    publish_odds_weather_artifact,
+    verify_odds_weather_artifact,
     write_odds_weather_artifact,
 )
 from app.odds_weather.assembly import (
@@ -60,6 +63,7 @@ __all__ = [
     "OddsSnapshotV1",
     "OddsWeatherAdapterError",
     "OddsWeatherArtifactV1",
+    "OddsWeatherArtifactIntegrityError",
     "OddsWeatherAssemblyError",
     "OddsWeatherAssemblyResultV1",
     "OddsWeatherContractError",
@@ -77,6 +81,8 @@ __all__ = [
     "nws_forecast_to_phase4",
     "odds_collection_to_phase4",
     "odds_weather_artifact_relpath",
+    "publish_odds_weather_artifact",
+    "verify_odds_weather_artifact",
     "openweather_forecast_to_phase4",
     "select_odds_history_at",
     "write_odds_weather_artifact",
