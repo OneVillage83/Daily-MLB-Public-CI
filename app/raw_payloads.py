@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Literal
 
-from app.redaction import redact_value
+from app.redaction import redact_value, redact_value_at_paths
 
 ProviderName = Literal["the_odds_api", "nws", "openweather"]
 EndpointCategory = Literal["mlb_odds", "point_lookup", "hourly_forecast", "one_call"]
@@ -102,12 +102,17 @@ def sanitized_json_bytes(
     *,
     secret_values: Iterable[str] = (),
 ) -> bytes:
-    preserved_fields = ("key",) if capture.provider == "the_odds_api" else ()
-    sanitized = redact_value(
-        capture.payload,
-        secret_values,
-        preserve_field_names=preserved_fields,
-    )
+    if capture.provider == "the_odds_api" and isinstance(capture.payload, list):
+        sanitized = redact_value_at_paths(
+            capture.payload,
+            secret_values,
+            preserve_sensitive_paths=(
+                ("*", "bookmakers", "*", "key"),
+                ("*", "bookmakers", "*", "markets", "*", "key"),
+            ),
+        )
+    else:
+        sanitized = redact_value(capture.payload, secret_values)
     return json.dumps(
         sanitized,
         ensure_ascii=False,

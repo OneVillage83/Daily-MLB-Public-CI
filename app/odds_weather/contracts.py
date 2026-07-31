@@ -13,8 +13,9 @@ from app.identifiers import parse_requested_date
 from app.processors.odds_processor import (
     CALCULATION_VERSION,
     ODDS_CONSENSUS_CONTRACT_VERSION,
+    SUPPORTED_MARKETS,
 )
-from app.redaction import redact_value
+from app.redaction import redact_value, redact_value_at_paths
 from app.team_aliases import CANONICAL_TEAM_KEYS, team_key
 
 ODDS_WEATHER_CONTRACT_VERSION = "DSE_ODDS_WEATHER_V1"
@@ -153,6 +154,202 @@ def _mapping(value: object, name: str) -> Mapping[str, Any]:
     return value
 
 
+_ODDS_EVENT_SEMANTIC_KEY_PATHS = (
+    ("bookmakers", "*", "key"),
+    ("bookmakers", "*", "markets", "*", "key"),
+)
+_FORBIDDEN_TRANSPORT_METADATA_NAMES = frozenset(
+    {
+        "headers",
+        "params",
+        "query",
+        "queryparams",
+        "querystring",
+        "quota",
+        "quotaheaders",
+        "requestheaders",
+        "requestparams",
+        "requestquery",
+        "requesturl",
+        "url",
+    }
+)
+
+
+def _normalized_field_name(value: object) -> str:
+    return "".join(character for character in str(value).casefold() if character.isalnum())
+
+
+def _reject_transport_metadata(value: object, name: str) -> None:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if _normalized_field_name(key) in _FORBIDDEN_TRANSPORT_METADATA_NAMES:
+                raise OddsWeatherContractError(
+                    f"{name} contains request, quota, or transport metadata"
+                )
+            _reject_transport_metadata(item, name)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_transport_metadata(item, name)
+
+
+def _contains_configured_secret(
+    value: object,
+    secret_values: tuple[str, ...],
+) -> bool:
+    if isinstance(value, str):
+        return any(secret in value for secret in secret_values)
+    if isinstance(value, Mapping):
+        return any(
+            _contains_configured_secret(key, secret_values)
+            or _contains_configured_secret(item, secret_values)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_contains_configured_secret(item, secret_values) for item in value)
+    return False
+
+
+def _require_credential_free(
+    value: object,
+    *,
+    name: str,
+    secret_values: Iterable[str] = (),
+    semantic_key_paths: tuple[tuple[str, ...], ...] = (),
+) -> None:
+    configured = tuple(str(secret) for secret in secret_values if str(secret))
+    if (
+        _contains_configured_secret(value, configured)
+        or redact_value_at_paths(
+            value,
+            configured,
+            preserve_sensitive_paths=semantic_key_paths,
+        )
+        != value
+    ):
+        raise OddsWeatherContractError(f"{name} contains credential-bearing material")
+
+
+def _required_finite(value: object, name: str) -> float:
+    result = _finite_optional(value, name)
+    if result is None:
+        raise OddsWeatherContractError(f"{name} must be finite numeric")
+    return result
+
+
+def _validate_odds_event_shape(event: Mapping[str, Any]) -> None:
+    bookmakers = event.get("bookmakers")
+    if not isinstance(bookmakers, tuple):
+        raise OddsWeatherContractError("provider event bookmakers must be a list")
+    for bookmaker_index, bookmaker_value in enumerate(bookmakers):
+        bookmaker = _mapping(
+            bookmaker_value,
+            f"provider event bookmakers[{bookmaker_index}]",
+        )
+        _required_text(
+            bookmaker.get("key"),
+            f"provider event bookmakers[{bookmaker_index}].key",
+        )
+        _required_text(
+            bookmaker.get("title"),
+            f"provider event bookmakers[{bookmaker_index}].title",
+        )
+        if bookmaker.get("last_update") is not None:
+            _iso_aware(
+                bookmaker.get("last_update"),
+                f"provider event bookmakers[{bookmaker_index}].last_update",
+            )
+        markets = bookmaker.get("markets")
+        if not isinstance(markets, tuple):
+            raise OddsWeatherContractError(
+                f"provider event bookmakers[{bookmaker_index}].markets must be a list"
+            )
+        for market_index, market_value in enumerate(markets):
+            market = _mapping(
+                market_value,
+                f"provider event bookmakers[{bookmaker_index}].markets[{market_index}]",
+            )
+            market_key = _required_text(
+                market.get("key"),
+                "provider event market key",
+            )
+            if market_key not in SUPPORTED_MARKETS:
+                raise OddsWeatherContractError(
+                    "provider event market key is not supported"
+                )
+            if market.get("last_update") is not None:
+                _iso_aware(
+                    market.get("last_update"),
+                    "provider event market last_update",
+                )
+            outcomes = market.get("outcomes")
+            if not isinstance(outcomes, tuple):
+                raise OddsWeatherContractError(
+                    "provider event market outcomes must be a list"
+                )
+            for outcome_index, outcome_value in enumerate(outcomes):
+                outcome = _mapping(
+                    outcome_value,
+                    f"provider event outcome[{outcome_index}]",
+                )
+                _required_text(outcome.get("name"), "provider event outcome name")
+                _required_finite(outcome.get("price"), "provider event outcome price")
+                _finite_optional(outcome.get("point"), "provider event outcome point")
+
+
+def _validate_history_row(
+    row: Mapping[str, Any],
+    *,
+    index: int,
+    provider_event_id: str,
+) -> None:
+    row_event_id = row.get("event_id")
+    if row_event_id is not None and _required_text(
+        row_event_id,
+        f"history_rows[{index}].event_id",
+    ) != provider_event_id:
+        raise OddsWeatherContractError(
+            f"history_rows[{index}] event_id disagrees with provider event"
+        )
+    _iso_aware(row.get("retrieved_at"), f"history_rows[{index}].retrieved_at")
+    for timestamp_name in (
+        "provider_last_update",
+        "bookmaker_last_update",
+        "market_last_update",
+    ):
+        if row.get(timestamp_name) is not None:
+            _iso_aware(
+                row.get(timestamp_name),
+                f"history_rows[{index}].{timestamp_name}",
+            )
+    if row.get("bookmaker_key") is not None:
+        _required_text(
+            row.get("bookmaker_key"),
+            f"history_rows[{index}].bookmaker_key",
+        )
+    if row.get("market_key") is not None:
+        market_key = _required_text(
+            row.get("market_key"),
+            f"history_rows[{index}].market_key",
+        )
+        if market_key not in SUPPORTED_MARKETS:
+            raise OddsWeatherContractError(
+                f"history_rows[{index}].market_key is not supported"
+            )
+    if row.get("outcome_name") is not None:
+        _required_text(
+            row.get("outcome_name"),
+            f"history_rows[{index}].outcome_name",
+        )
+    for price_name in ("price", "price_american"):
+        if row.get(price_name) is not None:
+            _required_finite(
+                row.get(price_name),
+                f"history_rows[{index}].{price_name}",
+            )
+    _finite_optional(row.get("point"), f"history_rows[{index}].point")
+
+
 @dataclass(frozen=True, slots=True)
 class OddsProviderEventV1:
     """Retained, structurally validated Odds API event evidence for fixture-first assembly."""
@@ -163,8 +360,9 @@ class OddsProviderEventV1:
     event: Mapping[str, Any]
     history_rows: tuple[Mapping[str, Any], ...] = ()
     contract_version: str = ODDS_PROVIDER_EVENT_CONTRACT_VERSION
+    secret_values: InitVar[Iterable[str]] = ()
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, secret_values: Iterable[str]) -> None:
         object.__setattr__(
             self,
             "provider_event_id",
@@ -199,20 +397,42 @@ class OddsProviderEventV1:
             raise OddsWeatherContractError(
                 "provider event teams must resolve exactly to canonical MLB teams"
             )
-        if not isinstance(frozen.get("bookmakers"), tuple):
-            raise OddsWeatherContractError("provider event bookmakers must be a list")
+        _validate_odds_event_shape(frozen)
+        _reject_transport_metadata(frozen, "provider event")
+        _require_credential_free(
+            frozen,
+            name="OddsProviderEventV1 event",
+            secret_values=secret_values,
+            semantic_key_paths=_ODDS_EVENT_SEMANTIC_KEY_PATHS,
+        )
         frozen_history: list[Mapping[str, Any]] = []
         for index, row in enumerate(self.history_rows):
             mapping = _mapping(row, f"history_rows[{index}]")
             item = _freeze_json(dict(mapping))
             assert isinstance(item, Mapping)
+            _validate_history_row(
+                item,
+                index=index,
+                provider_event_id=self.provider_event_id,
+            )
+            _reject_transport_metadata(item, f"history_rows[{index}]")
+            _require_credential_free(
+                item,
+                name=f"OddsProviderEventV1 history_rows[{index}]",
+                secret_values=secret_values,
+            )
             frozen_history.append(item)
         object.__setattr__(self, "history_rows", tuple(frozen_history))
-        serialized = self.as_dict()
-        if redact_value(serialized) != serialized:
-            raise OddsWeatherContractError(
-                "OddsProviderEventV1 contains credential-bearing material"
-            )
+        _require_credential_free(
+            {
+                "contract_version": self.contract_version,
+                "provider_event_id": self.provider_event_id,
+                "raw_capture_checksum": self.raw_capture_checksum,
+                "retrieved_at": self.retrieved_at.isoformat(),
+            },
+            name="OddsProviderEventV1 metadata",
+            secret_values=secret_values,
+        )
 
     @property
     def commence_time(self) -> datetime:
@@ -264,8 +484,9 @@ class WeatherForecastEvidenceV1:
     raw_capture_checksums: tuple[str, ...]
     forecast: Mapping[str, Any]
     contract_version: str = WEATHER_FORECAST_CONTRACT_VERSION
+    secret_values: InitVar[Iterable[str]] = ()
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, secret_values: Iterable[str]) -> None:
         object.__setattr__(
             self,
             "source_game_id",
@@ -290,6 +511,7 @@ class WeatherForecastEvidenceV1:
         frozen = _freeze_json(dict(raw))
         assert isinstance(frozen, Mapping)
         object.__setattr__(self, "forecast", frozen)
+        _reject_transport_metadata(frozen, "weather forecast")
         _iso_aware(frozen.get("forecast_time"), "forecast_time")
         _finite_optional(
             frozen.get("forecast_offset_minutes"),
@@ -316,11 +538,11 @@ class WeatherForecastEvidenceV1:
         _finite_optional(frozen.get("wind_gust_mph"), "wind_gust_mph", minimum=0.0)
         _finite_optional(frozen.get("clouds_pct"), "clouds_pct", minimum=0.0, maximum=100.0)
         _finite_optional(frozen.get("pressure_hpa"), "pressure_hpa", minimum=0.0)
-        serialized = self.as_dict()
-        if redact_value(serialized) != serialized:
-            raise OddsWeatherContractError(
-                "WeatherForecastEvidenceV1 contains credential-bearing material"
-            )
+        _require_credential_free(
+            self.as_dict(),
+            name="WeatherForecastEvidenceV1",
+            secret_values=secret_values,
+        )
 
     @property
     def forecast_time(self) -> datetime:

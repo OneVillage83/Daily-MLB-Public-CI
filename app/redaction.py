@@ -14,6 +14,7 @@ _SENSITIVE_NAMES = {
     "apikey",
     "appid",
     "authorization",
+    "bearer",
     "clientsecret",
     "credential",
     "credentials",
@@ -134,6 +135,46 @@ def redact_value(
             for item in value
         )
     return value
+
+
+def redact_value_at_paths(
+    value: Any,
+    secret_values: Iterable[str] = (),
+    *,
+    preserve_sensitive_paths: Iterable[tuple[str, ...]] = (),
+) -> Any:
+    """Redact sensitive names except at exact, schema-owned JSON paths.
+
+    Sequence positions are represented by ``"*"``. Preserving a sensitive field
+    name never preserves configured secret values contained in that field's value.
+    """
+
+    secrets = tuple(secret_values)
+    preserved = frozenset(
+        tuple(str(part).casefold() for part in path)
+        for path in preserve_sensitive_paths
+    )
+
+    def visit(item: Any, path: tuple[str, ...]) -> Any:
+        if isinstance(item, str):
+            return redact_text(item, secrets)
+        if isinstance(item, Mapping):
+            result: dict[Any, Any] = {}
+            for key, nested in item.items():
+                child_path = (*path, str(key).casefold())
+                result[key] = (
+                    REDACTED
+                    if is_sensitive_name(key) and child_path not in preserved
+                    else visit(nested, child_path)
+                )
+            return result
+        if isinstance(item, list):
+            return [visit(nested, (*path, "*")) for nested in item]
+        if isinstance(item, tuple):
+            return tuple(visit(nested, (*path, "*")) for nested in item)
+        return item
+
+    return visit(value, ())
 
 
 class RedactingFilter(logging.Filter):

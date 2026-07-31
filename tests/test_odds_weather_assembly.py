@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -652,3 +653,50 @@ def test_upstream_daily_slate_checksum_mismatch_fails_closed() -> None:
 
     with pytest.raises(OddsWeatherAssemblyError, match="supplied DailySlate"):
         assemble_odds_weather(slate=slate, baseball_intelligence=wrong)
+
+
+def test_upstream_daily_slate_game_checksum_mismatch_fails_closed() -> None:
+    game = _slate_game(900001)
+    slate = _slate(game)
+    bia = _bia(slate)
+    wrong_game = replace(
+        bia.games[0],
+        upstream_daily_slate_game_checksum="f" * 64,
+    )
+    wrong = replace(bia, games=(wrong_game,))
+
+    with pytest.raises(
+        OddsWeatherAssemblyError,
+        match="upstream_daily_slate_game_checksum",
+    ):
+        assemble_odds_weather(slate=slate, baseball_intelligence=wrong)
+
+
+def test_upstream_venue_mismatch_fails_closed() -> None:
+    game = _slate_game(900001)
+    slate = _slate(game)
+    bia = _bia(slate)
+    wrong_game = replace(bia.games[0], venue_id="venue:other")
+    wrong = replace(bia, games=(wrong_game,))
+
+    with pytest.raises(OddsWeatherAssemblyError, match="venue_id"):
+        assemble_odds_weather(slate=slate, baseball_intelligence=wrong)
+
+
+def test_game_state_derived_status_is_bound_by_bia_game_checksum() -> None:
+    game = _slate_game(900001)
+    slate = _slate(game)
+    bia = _bia(slate)
+    updated_game = replace(bia.games[0], game_status=DailySlateGameStatus.PREGAME)
+    updated_bia = replace(bia, games=(updated_game,))
+
+    result = assemble_odds_weather(
+        slate=slate,
+        baseball_intelligence=updated_bia,
+    )
+
+    assert result.snapshot.games[0].upstream_daily_slate_game_checksum == game.checksum
+    assert (
+        result.snapshot.games[0].upstream_baseball_intelligence_game_checksum
+        == updated_game.checksum
+    )
