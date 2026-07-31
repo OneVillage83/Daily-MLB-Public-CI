@@ -1,7 +1,8 @@
-# Baseball Intelligence Assembly V1 — Repository/Selector Handoff
+# Baseball Intelligence Assembly V1 — Production Phase Handoff
 
 **Historical foundation branch/PR:** `rc/baseball-intelligence-assembly-v1-direct-20260727` / private draft PR #11 (historical evidence only)
-**Current repository branch:** `rc/baseball-intelligence-repository-selector-20260730`
+**Repository/selector checkpoint:** `rc/baseball-intelligence-repository-selector-20260730` / public draft PR #50
+**Current handler/controller branch:** `rc/baseball-intelligence-handler-controller-20260730`
 **Base:** accepted GameState handler checkpoint `24da1c9a3912272f8b5733a5f66ac41c32c68485`
 **Controller phase:** 3 — `BASEBALL_INTELLIGENCE_ASSEMBLY`
 
@@ -21,6 +22,8 @@ Implemented:
 - DB-backed retained-V3 candidate selector
 - immutable Phase 3 attempt-manifest writer/verifier
 - `BaseballIntelligenceRepository` persistence, sealing, retrieval, and offline verification
+- zero-network production `BaseballIntelligencePhaseHandler`
+- Manual Run Controller registration for Phase 3
 
 The assembly consumes only:
 
@@ -31,8 +34,9 @@ The assembly consumes only:
 It does not call external providers and does not consume provider JSON directly.
 
 Schema v10 is frozen. The repository creates no tables lazily and does not
-change migration identities. The controller remains registered only for
-`DAILY_SLATE` and `GAME_STATE`.
+change migration identities. The controller is registered for exactly
+`DAILY_SLATE`, `GAME_STATE`, and `BASEBALL_INTELLIGENCE_ASSEMBLY`. It does not
+register `ODDS_WEATHER`.
 
 ## Frozen boundary carried forward
 
@@ -259,6 +263,59 @@ replaces conflicting evidence. A database rollback removes only files created
 by that call; pre-existing verified idempotent evidence is never deleted.
 Temporary files are removed after both successful and failed publication.
 
+## Production Phase 3 handler
+
+`BaseballIntelligencePhaseHandler` accepts only a database, artifact root,
+configured secret values, and an injectable timezone-aware clock. It accepts
+no provider client, transport, session, API key, odds, or weather input.
+
+For each new attempt it validates the controller context against the exact
+sealed DailySlate/GameState chain, calls its selection clock exactly once, and
+uses that UTC-normalized value as the fixed selection observation boundary.
+The boundary cannot precede either retained upstream observation.
+
+The Phase 3 input checksum contract is:
+
+```text
+DSE_BASEBALL_INTELLIGENCE_PHASE_INPUT_V1
+```
+
+Its canonical SHA-256 domain contains exactly:
+
+- contract version
+- requested date
+- immutable run/upstream `as_of_time`
+- upstream DailySlate checksum
+- upstream GameState checksum
+- exact DB-backed candidate-inventory checksum
+- fixed `selection_observed_at`
+
+The handler reloads the candidate inventory, invokes the frozen assembler, and
+requires the workflow inventory to equal the preloaded inventory. The
+repository then independently binds the inventory again within its stable
+write transaction and deterministically reassembles the result before
+persistence. The handler never writes relational rows, attempt manifests, or
+artifacts directly.
+
+An assembly with no warnings returns `succeeded`; deterministic missingness,
+blocked-evidence, and after-boundary warnings return
+`succeeded_with_warnings`. Both continue to the next canonical phase.
+
+Conflicting eligible retained features are classified as `selection_failed`
+only after a valid inventory exists. A persistence or final verification
+failure may retain `assembly_failed` only when no immutable assembled attempt
+already exists and the active attempt can safely accept failure evidence.
+Malformed or unsafe selector rows fail before a valid inventory exists and do
+not manufacture an empty inventory or misleading attempt manifest. Failure
+messages are redacted, deterministic, and credential-free; failure-evidence
+errors never replace the original handler exception.
+
+After persistence the handler reopens the sealed snapshot through the
+repository and verifies canonical bytes, checksum, snapshot identity, artifact
+metadata, attempt evidence, exact candidate-inventory checksum, selection
+boundary, and warnings. Exact replay verifies immutable evidence; conflicting
+replay fails closed.
+
 ## Validation evidence
 
 Sanitized public validation branch:
@@ -268,7 +325,7 @@ Sanitized public validation branch:
 Public draft PR #50 validates the schema-v10 repository/selector stack. The
 private/public approved source files are byte-equivalent.
 
-Current validation checkpoint:
+Accepted repository/selector validation checkpoint:
 
 - repository integrity coverage includes independent GameState player lineage,
   exact equivalent-row reconstruction, selector-inventory binding, atomic
@@ -286,22 +343,42 @@ Current validation checkpoint:
   Phase 4 Odds+Weather credential-boundary tests
 
 
-## Current upstream and intentional blockers
+The handler/controller checkpoint adds fixture-only production-path proof for:
 
-DailySlate V1 and GameState V1 production persistence/handlers are accepted;
-the controller executes phases 1 and 2 then blocks safely at phase 3.
+- the accepted six player categories and checksum-equivalent reruns
+- warning and no-warning status behavior
+- valid zero-game execution
+- failed attempt 1 followed by immutable successful attempt 2
+- database reopen and exact offline reconstruction
+- zero provider/application network requests
+- a successful Phase 3 commit followed by the existing safe block at
+  `ODDS_WEATHER`
+- repeated resume at `ODDS_WEATHER` without rerunning or incrementing Phase 3
 
-No production BIA handler is registered in this checkpoint.
+Final handler/controller validation:
 
-Do not register the production phase-3 handler yet.
+- 15 focused handler/controller tests passed
+- 414 broader Phase 1-3, migration, controller, artifact, and security tests
+  passed with 5 Windows symlink skips
+- development full suite: 1,478 passed, 8 skipped, plus only the 8 accepted
+  Phase 4 credential-boundary failures
+- stats full suite: 1,480 passed, 6 skipped, plus the same 8 accepted Phase 4
+  failures; stats-only: 267 passed
+- Ruff passed; full non-incremental mypy passed across 258 source files
+- dependency checks, locked audits, hash-locked dry runs, offline pybaseball
+  compatibility, SQLite integrity/foreign-key checks, and both secret scans
+  passed
 
-BIA1-B remaining work is limited to:
+## Current upstream and intentional blocker
 
-1. production `BASEBALL_INTELLIGENCE_ASSEMBLY` handler
-2. Phase 3 controller registration
-3. proof that successful Phase 3 advances only to a safe block at `ODDS_WEATHER`
+DailySlate V1, GameState V1, and Baseball Intelligence Assembly V1 production
+persistence/handlers are implemented. Phase 3 production completion means the
+controller can commit its immutable result and then safely stop before Phase 4.
+It does not claim Phase 4 success.
 
-Do not fabricate phase 3 or phase 4 success before those persistence/handler gates exist.
+The next canonical work is:
 
-No Phase 3 production handler is registered in this checkpoint. Do not claim
-Phase 3 execution success until the subsequent handler/controller checkpoint.
+4. `ODDS_WEATHER`
+
+Phase 4 retains eight known credential-boundary test failures. They are not
+modified or reclassified by this checkpoint, and no Phase 4 success is claimed.

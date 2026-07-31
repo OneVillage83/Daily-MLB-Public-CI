@@ -32,6 +32,11 @@ from app.baseball_intelligence.selector import (
     BaseballIntelligenceFeatureSelector,
     BaseballIntelligenceSelectorError,
 )
+from app.baseball_intelligence.handler import (
+    BASEBALL_INTELLIGENCE_PHASE_INPUT_CONTRACT,
+    BaseballIntelligencePhaseHandler,
+    baseball_intelligence_phase_input_checksum,
+)
 from app.baseball_intelligence.assembly import (
     BaseballIntelligenceAssemblyError,
     BaseballIntelligenceAssemblyResultV1,
@@ -58,6 +63,7 @@ from app.baseball_intelligence.contracts import (
 __all__ = [
     "BASEBALL_INTELLIGENCE_ARTIFACT_RELPATH",
     "BASEBALL_INTELLIGENCE_ATTEMPT_MANIFEST_CONTRACT",
+    "BASEBALL_INTELLIGENCE_PHASE_INPUT_CONTRACT",
     "BASEBALL_INTELLIGENCE_ASSEMBLY_CONTRACT_VERSION",
     "BASEBALL_INTELLIGENCE_LEAGUE",
     "BASEBALL_INTELLIGENCE_SPORT",
@@ -74,6 +80,7 @@ __all__ = [
     "BaseballIntelligenceAssemblyV1",
     "BaseballIntelligenceContractError",
     "BaseballIntelligenceFeatureSelector",
+    "BaseballIntelligencePhaseHandler",
     "BaseballIntelligenceIntegrityError",
     "BaseballIntelligenceGameV1",
     "BaseballIntelligenceRole",
@@ -93,6 +100,7 @@ __all__ = [
     "assemble_baseball_intelligence",
     "baseball_intelligence_attempt_manifest_relpath",
     "baseball_intelligence_artifact_relpath",
+    "baseball_intelligence_phase_input_checksum",
     "publish_baseball_intelligence_artifact",
     "publish_baseball_intelligence_attempt_manifest",
     "write_baseball_intelligence_artifact",

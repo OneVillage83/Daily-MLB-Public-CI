@@ -3,7 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import Settings, settings  # noqa: E402
+from app.baseball_intelligence import (  # noqa: E402
+    BASEBALL_INTELLIGENCE_ASSEMBLY_CONTRACT_VERSION,
+    BASEBALL_INTELLIGENCE_ATTEMPT_MANIFEST_CONTRACT,
+    BaseballIntelligencePhaseHandler,
+)
 from app.daily_slate.handler import DailySlatePhaseHandler  # noqa: E402
 from app.game_state.handler import GameStatePhaseHandler  # noqa: E402
 from app.database import Database  # noqa: E402
@@ -30,6 +36,7 @@ from app.run_controller.service import (  # noqa: E402
     ManualRunRecoveryRequired,
     ManualRunSummaryV1,
 )
+from app.stats.features import FEATURE_VERSION_V3  # noqa: E402
 
 
 EXIT_SUCCESS = 0
@@ -65,6 +72,15 @@ def _safe_configuration_metadata(configured_settings: Settings) -> dict[str, Any
             "endpoint_category": "game_state_feed",
             "source_version": "statsapi-game-feed-v1.1",
         },
+        "baseball_intelligence": {
+            "attempt_manifest_version": (
+                BASEBALL_INTELLIGENCE_ATTEMPT_MANIFEST_CONTRACT
+            ),
+            "contract_version": BASEBALL_INTELLIGENCE_ASSEMBLY_CONTRACT_VERSION,
+            "feature_version": FEATURE_VERSION_V3,
+            "network_enabled": False,
+            "source_mode": "retained_sqlite",
+        },
         "odds": {
             "enabled": bool(configured_settings.odds_api_key),
             "format": configured_settings.odds_format,
@@ -90,6 +106,7 @@ def build_controller(
     database_path: Path,
     *,
     configured_settings: Settings = settings,
+    clock: Callable[[], datetime] | None = None,
 ) -> ManualRunController:
     database = Database(
         database_path,
@@ -115,6 +132,22 @@ def build_controller(
         user_agent=_daily_slate_user_agent(configured_settings),
         secret_values=secret_values,
     )
+    if clock is None:
+        baseball_intelligence_handler = BaseballIntelligencePhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+        )
+    else:
+        baseball_intelligence_handler = BaseballIntelligencePhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            clock=clock,
+        )
+    controller_options: dict[str, Any] = {}
+    if clock is not None:
+        controller_options["clock"] = clock
     return ManualRunController(
         repository,
         timezone_name=configured_settings.report_timezone,
@@ -122,7 +155,11 @@ def build_controller(
         handlers={
             PipelinePhaseKey.DAILY_SLATE: daily_slate_handler,
             PipelinePhaseKey.GAME_STATE: game_state_handler,
+            PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY: (
+                baseball_intelligence_handler
+            ),
         },
+        **controller_options,
     )
 
 
@@ -143,7 +180,7 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
         prog="run_controller",
         description=(
             "Initialize, inspect, and manually resume Daily MLB pipeline runs; "
-            "DAILY_SLATE and GAME_STATE use authoritative MLB acquisition"
+            "phases 1-3 can execute; Phase 3 uses retained SQLite evidence"
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -165,8 +202,9 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
     resume = commands.add_parser(
         "resume",
         help=(
-            "resume persisted work; DAILY_SLATE and GAME_STATE can execute and the controller "
-            "blocks safely at the next unimplemented phase"
+            "resume persisted work; DAILY_SLATE, GAME_STATE, and "
+            "BASEBALL_INTELLIGENCE_ASSEMBLY can execute and the controller "
+            "blocks safely at ODDS_WEATHER"
         ),
     )
     _add_common_database_argument(resume, configured_settings)
