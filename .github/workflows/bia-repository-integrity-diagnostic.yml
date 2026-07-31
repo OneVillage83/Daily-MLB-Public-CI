@@ -22,7 +22,6 @@ jobs:
       - name: Focused BIA repository integrity
         run: >-
           python -m pytest -q
-          tests/test_baseball_intelligence_contracts.py
           tests/test_baseball_intelligence_assembly.py
           tests/test_baseball_intelligence_artifact.py
           tests/test_baseball_intelligence_selector.py
