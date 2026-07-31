@@ -93,7 +93,7 @@ def test_cli_start_show_json_and_duplicate_without_executing_network(
     assert configured.service_auth_token not in serialized
 
 
-def test_production_controller_registers_daily_slate_and_game_state(tmp_path: Path) -> None:
+def test_production_controller_registers_first_three_phases(tmp_path: Path) -> None:
     configured = _settings(tmp_path / "handlers.db")
 
     controller = build_controller(
@@ -104,6 +104,7 @@ def test_production_controller_registers_daily_slate_and_game_state(tmp_path: Pa
     assert tuple(controller.handlers) == (
         PipelinePhaseKey.DAILY_SLATE,
         PipelinePhaseKey.GAME_STATE,
+        PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY,
     )
 
 

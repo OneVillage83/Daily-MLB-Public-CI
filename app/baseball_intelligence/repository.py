@@ -573,7 +573,7 @@ class BaseballIntelligenceRepository:
         ):
             destination.unlink(missing_ok=True)
 
-    def persist_failed_attempt(self, *, run_id: str, phase_attempt: int, outcome: BaseballIntelligenceAttemptOutcome | str, inventory: BaseballFeatureCandidateInventoryV1, warnings: Iterable[BaseballIntelligenceWarningV1 | Mapping[str, object]] = ()) -> BaseballIntelligenceAttemptEvidenceV1:
+    def persist_failed_attempt(self, *, run_id: str, phase_attempt: int, outcome: BaseballIntelligenceAttemptOutcome | str, inventory: BaseballFeatureCandidateInventoryV1, warnings: Iterable[BaseballIntelligenceWarningV1 | Mapping[str, object]] = (), selection_observed_at: datetime | None = None) -> BaseballIntelligenceAttemptEvidenceV1:
         safe_run = validate_run_id(run_id)
         selected = BaseballIntelligenceAttemptOutcome(outcome)
         if selected is BaseballIntelligenceAttemptOutcome.ASSEMBLED:
@@ -606,6 +606,7 @@ class BaseballIntelligenceRepository:
                         assembly_checksum=None,
                         inventory=verified_inventory,
                         warnings=warning_payload,
+                        selection_observed_at=selection_observed_at,
                     )
                     manifest_artifact, created = (
                         publish_baseball_intelligence_attempt_manifest(
@@ -642,11 +643,29 @@ class BaseballIntelligenceRepository:
             or manifest.candidate_feature_checksums
             != inventory.candidate_feature_checksums
             or manifest.candidate_inventory_checksum != inventory.checksum
+            or (
+                selection_observed_at is not None
+                and manifest.selection_observed_at
+                != _aware(
+                    selection_observed_at.isoformat(),
+                    "selection_observed_at",
+                )
+            )
         ):
             raise BaseballIntelligencePersistenceConflict(
                 "existing BIA failed attempt conflicts with requested evidence"
             )
         return evidence
+
+    def get_attempt_manifest(
+        self,
+        run_id: str,
+        phase_attempt: int,
+    ) -> BaseballIntelligenceAttemptManifestV1:
+        """Return the fully verified canonical attempt manifest."""
+
+        evidence = self.get_attempt_evidence(run_id, phase_attempt)
+        return self._manifest_from_artifact(evidence.manifest)
 
     def persist_assembly(self, *, run_id: str, phase_attempt: int, result: BaseballIntelligenceAssemblyResultV1, inventory: BaseballFeatureCandidateInventoryV1) -> PersistedBaseballIntelligenceV1:
         safe_run = validate_run_id(run_id)
