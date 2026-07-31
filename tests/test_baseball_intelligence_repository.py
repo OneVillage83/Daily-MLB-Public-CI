@@ -3,12 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 from pytest import MonkeyPatch
 
 from app.baseball_intelligence import (
+    BaseballFeatureCandidateInventoryV1,
+    BaseballIntelligenceAssemblyResultV1,
     BaseballIntelligenceAttemptOutcome,
     BaseballIntelligenceRepository,
+    PersistedBaseballIntelligenceV1,
 )
 from app.game_state import GameStateRawLinkOutcome, write_game_state_artifact
 from app.run_controller.contracts import PipelinePhaseKey, PipelinePhaseStatus
@@ -182,11 +186,19 @@ def test_repository_retains_failed_attempt_without_creating_snapshot(
     assert first.manifest.relpath.endswith("attempt_0001.json")
 
 
-def test_repository_persists_six_category_assembly_from_retained_feature_rows(
+def _six_category_repository(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
-) -> None:
-    """Exercise the production serializer from the accepted six-category assembly."""
+    *,
+    persist: bool = True,
+) -> tuple[
+    BaseballIntelligenceRepository,
+    BaseballIntelligenceAssemblyResultV1,
+    BaseballFeatureCandidateInventoryV1,
+    PersistedBaseballIntelligenceV1 | None,
+    Any,
+    str,
+]:
     fixture = _six_category_fixture()
     run_id = "run_20260730_22222222222222222222222222222222"
     monkeypatch.setattr(game_state_repository_tests, "RUN_ID", run_id)
@@ -234,13 +246,35 @@ def test_repository_persists_six_category_assembly_from_retained_feature_rows(
         clock=lambda: fixture.assembly.observed_at,
     )
     result, inventory = repository.assemble_for_run(run_id=run_id)
-    persisted = repository.persist_assembly(
-        run_id=run_id,
-        phase_attempt=1,
-        result=result,
-        inventory=inventory,
+    persisted = (
+        repository.persist_assembly(
+            run_id=run_id,
+            phase_attempt=1,
+            result=result,
+            inventory=inventory,
+        )
+        if persist
+        else None
     )
-    reconstructed = repository.get_by_snapshot_id(persisted.snapshot_id)
+    return repository, result, inventory, persisted, fixture, run_id
+
+
+def test_repository_persists_six_category_assembly_from_retained_feature_rows(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Exercise the production serializer from the accepted six-category assembly."""
+    repository, result, inventory, persisted, fixture, run_id = _six_category_repository(
+        tmp_path,
+        monkeypatch,
+    )
+    assert persisted is not None
+    reopened = BaseballIntelligenceRepository(
+        type(repository.database)(repository.database.path),
+        artifact_root=repository.artifact_root,
+        clock=lambda: fixture.assembly.observed_at,
+    )
+    reconstructed = reopened.get_by_snapshot_id(persisted.snapshot_id)
 
     assert persisted.assembly.checksum == result.assembly.checksum
     assert reconstructed.assembly.canonical_json_bytes() == result.assembly.canonical_json_bytes()
@@ -274,3 +308,41 @@ def test_repository_persists_six_category_assembly_from_retained_feature_rows(
     )
     assert players["1006"].feature is not None
     assert players["1006"].feature.completeness_state == "degraded"
+    assert {
+        player_id: tuple(role.value for role in player.roles)
+        for player_id, player in players.items()
+    } == {
+        "1001": ("lineup", "batter"),
+        "1002": ("lineup", "batter"),
+        "1003": ("bullpen", "pitcher"),
+        "1004": ("bench", "batter"),
+        "1005": ("starter", "pitcher"),
+        "1006": ("lineup", "batter"),
+    }
+    evidence = reopened.get_attempt_evidence(run_id, 1)
+    manifest_payload = json.loads(
+        (reopened.artifact_root / evidence.manifest.relpath).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest_payload["candidate_inventory_checksum"] == inventory.checksum
+    assert manifest_payload["candidate_feature_snapshot_ids"] == list(
+        inventory.candidate_feature_snapshot_ids
+    )
+    with reopened.database.connect() as connection:
+        equivalents = connection.execute(
+            """SELECT source_player_id,ordinal,feature_snapshot_id,stats_run_id,
+                      is_representative
+               FROM baseball_intelligence_feature_equivalents
+               WHERE snapshot_id=?
+               ORDER BY source_player_id,ordinal""",
+            (persisted.snapshot_id,),
+        ).fetchall()
+    assert [
+        tuple(row)
+        for row in equivalents
+    ] == [
+        ("1005", 1, "feature:complete:a", "stats-run-complete-a", 1),
+        ("1005", 2, "feature:complete:b", "stats-run-complete-b", 0),
+        ("1006", 1, "feature:degraded", "stats-run-degraded", 1),
+    ]

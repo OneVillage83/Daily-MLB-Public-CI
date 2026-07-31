@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.baseball_intelligence.artifact import (
+    BaseballIntelligenceArtifactIntegrityError,
     baseball_intelligence_artifact_relpath,
     write_baseball_intelligence_artifact,
 )
@@ -74,11 +75,14 @@ def test_interrupted_atomic_write_cleans_short_temporary_file(
 ) -> None:
     assembly = _empty_assembly()
 
-    def fail_replace(_source: Path, _destination: Path) -> None:
-        raise OSError("fixture replacement failure")
+    def fail_publish(_source: Path, _destination: Path) -> None:
+        raise OSError("fixture publication failure")
 
-    monkeypatch.setattr("app.exporter.os.replace", fail_replace)
-    with pytest.raises(OSError, match="replacement failure"):
+    monkeypatch.setattr("app.exporter.os.link", fail_publish)
+    with pytest.raises(
+        BaseballIntelligenceArtifactIntegrityError,
+        match="atomically published",
+    ):
         write_baseball_intelligence_artifact(assembly, tmp_path)
 
     assert not list(tmp_path.rglob("*.part"))
