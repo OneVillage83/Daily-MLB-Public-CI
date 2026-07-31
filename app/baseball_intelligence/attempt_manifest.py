@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +15,7 @@ from app.artifacts import UnsafeArtifactPath, resolve_contained_path, validate_a
 from app.daily_slate.contracts import canonical_json_bytes
 from app.identifiers import parse_requested_date, validate_run_id
 from app.redaction import redact_value
+from app.exporter import atomic_create_bytes
 
 
 BASEBALL_INTELLIGENCE_ATTEMPT_MANIFEST_CONTRACT = (
@@ -87,9 +87,11 @@ class BaseballIntelligenceAttemptManifestV1:
     selection_observed_at: datetime
     outcome: BaseballIntelligenceAttemptOutcome | str
     assembly_checksum: str | None
+    candidate_canonical_player_ids: tuple[str, ...]
     candidate_feature_snapshot_ids: tuple[str, ...]
     candidate_stats_run_ids: tuple[str, ...]
     candidate_feature_checksums: tuple[str, ...]
+    candidate_inventory_checksum: str
     warnings: tuple[Mapping[str, object], ...]
     created_at: datetime
     contract_version: str = BASEBALL_INTELLIGENCE_ATTEMPT_MANIFEST_CONTRACT
@@ -124,18 +126,41 @@ class BaseballIntelligenceAttemptManifestV1:
             object.__setattr__(self, "assembly_checksum", _checksum(self.assembly_checksum, "assembly_checksum"))
         elif self.assembly_checksum is not None:
             raise ValueError("failed attempt must not contain assembly_checksum")
-        for field, checksum_values in (
-            ("candidate_feature_snapshot_ids", self.candidate_feature_snapshot_ids),
-            ("candidate_stats_run_ids", self.candidate_stats_run_ids),
-            ("candidate_feature_checksums", self.candidate_feature_checksums),
+        for field in (
+            "candidate_canonical_player_ids",
+            "candidate_stats_run_ids",
         ):
-            if field == "candidate_feature_checksums":
-                values = tuple(sorted({_checksum(value, field) for value in checksum_values}))
-            else:
-                values = tuple(sorted({str(value) for value in checksum_values}))
-                if any(not value or value != value.strip() for value in values):
-                    raise ValueError(f"{field} must contain non-empty trimmed strings")
+            raw_values = getattr(self, field)
+            values = tuple(sorted({str(value) for value in raw_values}))
+            if any(not value or value != value.strip() for value in values):
+                raise ValueError(f"{field} must contain non-empty trimmed strings")
             object.__setattr__(self, field, values)
+        snapshot_ids = tuple(str(value) for value in self.candidate_feature_snapshot_ids)
+        if (
+            any(not value or value != value.strip() for value in snapshot_ids)
+            or len(snapshot_ids) != len(set(snapshot_ids))
+        ):
+            raise ValueError(
+                "candidate_feature_snapshot_ids must contain unique non-empty trimmed strings"
+            )
+        object.__setattr__(self, "candidate_feature_snapshot_ids", snapshot_ids)
+        object.__setattr__(
+            self,
+            "candidate_feature_checksums",
+            tuple(
+                sorted(
+                    {
+                        _checksum(value, "candidate_feature_checksums")
+                        for value in self.candidate_feature_checksums
+                    }
+                )
+            ),
+        )
+        object.__setattr__(
+            self,
+            "candidate_inventory_checksum",
+            _checksum(self.candidate_inventory_checksum, "candidate_inventory_checksum"),
+        )
         object.__setattr__(self, "warnings", _warnings(self.warnings))
         if self.contract_version != BASEBALL_INTELLIGENCE_ATTEMPT_MANIFEST_CONTRACT:
             raise ValueError("invalid Baseball Intelligence attempt manifest contract_version")
@@ -145,8 +170,12 @@ class BaseballIntelligenceAttemptManifestV1:
     def as_dict(self) -> dict[str, object]:
         return {
             "assembly_checksum": self.assembly_checksum,
+            "candidate_canonical_player_ids": list(
+                self.candidate_canonical_player_ids
+            ),
             "candidate_feature_checksums": list(self.candidate_feature_checksums),
             "candidate_feature_snapshot_ids": list(self.candidate_feature_snapshot_ids),
+            "candidate_inventory_checksum": self.candidate_inventory_checksum,
             "candidate_stats_run_ids": list(self.candidate_stats_run_ids),
             "contract_version": self.contract_version,
             "created_at": self.created_at.isoformat(),
@@ -180,6 +209,19 @@ def write_baseball_intelligence_attempt_manifest(
 ) -> BaseballIntelligenceAttemptManifestArtifactV1:
     """Create immutable attempt evidence, or verify an exact idempotent replay."""
 
+    artifact, _ = publish_baseball_intelligence_attempt_manifest(
+        manifest,
+        artifact_root,
+    )
+    return artifact
+
+
+def publish_baseball_intelligence_attempt_manifest(
+    manifest: BaseballIntelligenceAttemptManifestV1,
+    artifact_root: Path,
+) -> tuple[BaseballIntelligenceAttemptManifestArtifactV1, bool]:
+    """Atomically publish immutable attempt evidence and report file ownership."""
+
     relpath = baseball_intelligence_attempt_manifest_relpath(
         manifest.run_id, manifest.phase_attempt
     )
@@ -189,10 +231,13 @@ def write_baseball_intelligence_attempt_manifest(
         destination = resolve_contained_path(artifact_root, relpath)
     except UnsafeArtifactPath as exc:
         raise BaseballIntelligenceAttemptManifestError("attempt manifest path is unsafe") from exc
-    destination.parent.mkdir(parents=True, exist_ok=True)
     try:
-        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
+        created = atomic_create_bytes(destination, content)
+    except (OSError, UnsafeArtifactPath) as exc:
+        raise BaseballIntelligenceAttemptManifestError(
+            "attempt manifest could not be atomically published"
+        ) from exc
+    if not created:
         existing = verify_baseball_intelligence_attempt_manifest(
             artifact_root=artifact_root,
             relpath=relpath,
@@ -202,16 +247,17 @@ def write_baseball_intelligence_attempt_manifest(
             raise BaseballIntelligenceAttemptManifestError(
                 "immutable attempt manifest conflicts with requested evidence"
             )
-        return existing
+        return existing, False
     try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
+        artifact = verify_baseball_intelligence_attempt_manifest(
+            artifact_root=artifact_root,
+            relpath=relpath,
+            expected=manifest,
+        )
     except BaseException:
         destination.unlink(missing_ok=True)
         raise
-    return BaseballIntelligenceAttemptManifestArtifactV1(relpath, checksum, len(content))
+    return artifact, True
 
 
 def verify_baseball_intelligence_attempt_manifest(

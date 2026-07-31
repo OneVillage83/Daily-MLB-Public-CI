@@ -10,7 +10,7 @@ from app.baseball_intelligence.contracts import (
     BaseballIntelligenceContractError,
 )
 from app.redaction import redact_value
-from app.exporter import write_bytes
+from app.exporter import atomic_create_bytes
 
 BASEBALL_INTELLIGENCE_ARTIFACT_RELPATH = (
     "baseball_intelligence/snapshots/{assembly_checksum}/"
@@ -44,6 +44,24 @@ def write_baseball_intelligence_artifact(
     relpath: str | None = None,
     secret_values: tuple[str, ...] = (),
 ) -> BaseballIntelligenceArtifactV1:
+    artifact, _ = publish_baseball_intelligence_artifact(
+        assembly,
+        artifact_root,
+        relpath=relpath,
+        secret_values=secret_values,
+    )
+    return artifact
+
+
+def publish_baseball_intelligence_artifact(
+    assembly: BaseballIntelligenceAssemblyV1,
+    artifact_root: Path,
+    *,
+    relpath: str | None = None,
+    secret_values: tuple[str, ...] = (),
+) -> tuple[BaseballIntelligenceArtifactV1, bool]:
+    """Atomically publish immutable content-addressed bytes."""
+
     selected_relpath = (
         baseball_intelligence_artifact_relpath(assembly)
         if relpath is None
@@ -57,15 +75,36 @@ def write_baseball_intelligence_artifact(
         )
     content = assembly.canonical_json_bytes()
     destination = resolve_contained_path(artifact_root, safe_relpath)
-    # The shared writer uses a short same-directory tempfile then os.replace.
-    # That preserves atomic replacement without extending the content-addressed
-    # destination filename beyond Windows' long-path limits.
-    write_bytes(destination, content)
-    return BaseballIntelligenceArtifactV1(
+    artifact = BaseballIntelligenceArtifactV1(
         relpath=safe_relpath,
         checksum=hashlib.sha256(content).hexdigest(),
         byte_count=len(content),
     )
+    try:
+        created = atomic_create_bytes(destination, content)
+    except (OSError, ValueError) as exc:
+        raise BaseballIntelligenceArtifactIntegrityError(
+            "Baseball Intelligence artifact could not be atomically published"
+        ) from exc
+    if not created:
+        verify_baseball_intelligence_artifact(
+            assembly,
+            artifact,
+            artifact_root,
+            secret_values=secret_values,
+        )
+        return artifact, False
+    try:
+        verify_baseball_intelligence_artifact(
+            assembly,
+            artifact,
+            artifact_root,
+            secret_values=secret_values,
+        )
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+    return artifact, True
 
 
 def verify_baseball_intelligence_artifact(

@@ -43,6 +43,45 @@ def write_bytes(path: Path, payload: bytes) -> None:
     _atomic_write_bytes(path, payload)
 
 
+def atomic_create_bytes(path: Path, payload: bytes) -> bool:
+    """Atomically create immutable bytes, returning false when the target exists.
+
+    The complete payload is first flushed to a short same-directory temporary
+    file.  A hard-link publication then makes the final name visible in one
+    filesystem operation without replacing an existing immutable target.
+    """
+
+    if not isinstance(payload, bytes):
+        raise TypeError("payload must be bytes")
+    target = Path(path)
+    if is_link_like(target) or is_link_like(target.parent):
+        raise UnsafeArtifactPath("artifacts must not be written through symbolic links")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if is_link_like(target.parent):
+        raise UnsafeArtifactPath("artifact directory must not be a symbolic link")
+
+    descriptor, temporary_path = _temporary_file(target.parent)
+    published = False
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary_path, target)
+        except FileExistsError:
+            return False
+        published = True
+        return True
+    finally:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except BaseException:
+            if published:
+                target.unlink(missing_ok=True)
+            raise
+
+
 def write_json(path: Path, payload: Any) -> None:
     """Atomically replace a JSON artifact after complete serialization."""
     serialized = json.dumps(payload, indent=2, ensure_ascii=False, default=str).encode("utf-8")
