@@ -29,7 +29,7 @@ from app.migrations import (
     FORMAL_SCHEMA_V8_STATEMENTS,
     FORMAL_SCHEMA_V9_FINGERPRINT,
     FORMAL_SCHEMA_V9_STATEMENTS,
-    FORMAL_SCHEMA_V10_FINGERPRINT,
+    FORMAL_SCHEMA_V11_FINGERPRINT,
     MIGRATION_HISTORY,
     MIGRATION_V1_CHECKSUM,
     MIGRATION_V2_CHECKSUM,
@@ -489,7 +489,7 @@ def test_v9_constants_and_historical_v1_to_v8_identities_are_pinned() -> None:
     )
     assert tuple(zip(checksums, fingerprints, strict=True)) == PINNED_V1_TO_V8
     assert tuple(row[1] for row in MIGRATION_HISTORY[:8]) == PINNED_V1_TO_V8_NAMES
-    assert CURRENT_SCHEMA_VERSION == 10
+    assert CURRENT_SCHEMA_VERSION == 11
     assert MIGRATION_V9_NAME == "game_state_v1_temporal_persistence"
     assert isinstance(FORMAL_SCHEMA_V9_STATEMENTS, tuple)
     assert FORMAL_SCHEMA_V9_STATEMENTS
@@ -500,9 +500,9 @@ def test_v9_constants_and_historical_v1_to_v8_identities_are_pinned() -> None:
     assert FORMAL_SCHEMA_V9_FINGERPRINT == (
         "c54cdd8b10591e7247f7c1a4d4f1b2bbe385c1ac7fbcb09be8bccd70228130bd"
     )
-    assert [row[0] for row in MIGRATION_HISTORY] == list(range(1, 11))
+    assert [row[0] for row in MIGRATION_HISTORY] == list(range(1, 12))
     assert MIGRATION_HISTORY[9] == (10, MIGRATION_V10_NAME, MIGRATION_V10_CHECKSUM)
-    assert MIGRATION_HISTORY[-2] == (
+    assert MIGRATION_HISTORY[8] == (
         9,
         MIGRATION_V9_NAME,
         MIGRATION_V9_CHECKSUM,
@@ -515,8 +515,8 @@ def test_fresh_install_has_exact_v9_objects_without_pre_v9_backup(
     path = tmp_path / "fresh.db"
     result = ensure_schema(path)
 
-    assert result.version == 10
-    assert result.schema_fingerprint == FORMAL_SCHEMA_V10_FINGERPRINT
+    assert result.version == 11
+    assert result.schema_fingerprint == FORMAL_SCHEMA_V11_FINGERPRINT
     assert result.backup_path is None
     migration_dir = path.with_name(f"{path.name}.migration-backups")
     assert list(migration_dir.glob("*.pre-v9-*.sqlite3")) == []
@@ -597,7 +597,7 @@ def test_fresh_install_has_exact_v9_objects_without_pre_v9_backup(
             "game_state_snapshots_validate_phase_and_upstream",
             "game_state_snapshots_validate_seal",
         }
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
         assert connection.execute(
             "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
         ).fetchall() == list(MIGRATION_HISTORY)
@@ -654,7 +654,7 @@ def test_recognized_v8_upgrade_creates_verified_backup_and_preserves_rows(
 
     result = ensure_schema(path)
 
-    assert result.version == 10
+    assert result.version == 11
     assert result.source_kind == "formal_v8"
     assert result.backup_path is not None and result.backup_path.exists()
     assert ".pre-v9-" in result.backup_path.name
@@ -714,9 +714,9 @@ def test_recognized_v8_upgrade_creates_verified_backup_and_preserves_rows(
                 ).fetchone()[0]
             ).split()
         )
-        assert "schema_versionIN(1,2,3,4,5,6,7,8,9,10)" in collector_sql
-        assert "database_schema_versionIN(7,8,9,10)" in pipeline_sql
-        assert schema_fingerprint(verification) == FORMAL_SCHEMA_V10_FINGERPRINT
+        assert "schema_versionIN(1,2,3,4,5,6,7,8,9,10,11)" in collector_sql
+        assert "database_schema_versionIN(7,8,9,10,11)" in pipeline_sql
+        assert schema_fingerprint(verification) == FORMAL_SCHEMA_V11_FINGERPRINT
         assert verification.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert verification.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
@@ -870,7 +870,7 @@ def test_repeated_v9_assurance_does_not_rerun_or_create_another_backup(
 
     second = ensure_schema(path)
 
-    assert first.version == second.version == 10
+    assert first.version == second.version == 11
     assert second.migrated is False
     assert list(migration_dir.glob("*.pre-v9-*.sqlite3")) == first_backups
     assert list(migration_dir.glob("migration-v9-*.json")) == first_diagnostics
