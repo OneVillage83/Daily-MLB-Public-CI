@@ -1,0 +1,35 @@
+name: bia-handler-controller-diagnostic
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  phase3-diagnostic:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install locked development dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+      - name: Phase 3 handler, controller, repository, selector, and schema regression
+        run: >-
+          python -m pytest -q
+          tests/test_baseball_intelligence_handler.py
+          tests/test_run_controller_baseball_intelligence.py
+          tests/test_baseball_intelligence_selector.py
+          tests/test_baseball_intelligence_repository.py
+          tests/test_baseball_intelligence_repository_integrity.py
+          tests/test_baseball_intelligence_migration_v10_roundtrip.py
+          tests/test_baseball_intelligence_artifact.py
+      - name: Ruff
+        run: python -m ruff check .
+      - name: Full non-incremental mypy
+        run: python -m mypy --no-incremental
