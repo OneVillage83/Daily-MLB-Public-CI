@@ -1,7 +1,7 @@
 # Baseball Intelligence Assembly V1 — Repository/Selector Handoff
 
 **Historical foundation branch/PR:** `rc/baseball-intelligence-assembly-v1-direct-20260727` / private draft PR #11 (historical evidence only)
-**Accepted reconciliation branch:** `rc/baseball-intelligence-foundation-reconciliation-20260729`
+**Current repository branch:** `rc/baseball-intelligence-repository-selector-20260730`
 **Base:** accepted GameState handler checkpoint `24da1c9a3912272f8b5733a5f66ac41c32c68485`
 **Controller phase:** 3 — `BASEBALL_INTELLIGENCE_ASSEMBLY`
 
@@ -221,13 +221,22 @@ candidates; the frozen assembler remains the sole owner of completeness, PIT,
 warnings, and representative-selection policy.
 
 `BaseballIntelligenceRepository` verifies the sealed DailySlate → GameState
-chain and both artifacts, derives relevant canonical player IDs from all
-retained GameState role buckets, invokes the selector and existing assembler,
-then atomically persists and seals the exact schema-v10 rows. It preserves
-resolved identities even where feature intelligence is unavailable. Reads
-reconstruct the real assembly contract, verify the artifact and immutable
-attempt manifest, validate relational child rows/counts, and fail closed on
-any disagreement.
+chain and both artifacts, independently reconstructs the exact GameState player
+registry and merged role set, and derives the relevant canonical-player set.
+Before either successful or failed attempt evidence is written, it reloads the
+selector inventory at the same stable database boundary and requires exact
+candidate, snapshot/run/checksum, requested-player, and inventory-checksum
+equality. Successful persistence reruns the frozen assembler at the supplied
+fixed observation boundary and requires byte-identical assembly output and
+warnings.
+
+Before sealing, the repository re-queries the snapshot plus every game, player,
+and equivalent-feature row. It verifies upstream game/player lineage,
+relational columns and canonical JSON, ordinals, representative snapshot/run
+pairing, per-game and top-level counts, and exact selected inventories. Every
+offline read repeats those checks against the independently reconstructed
+sealed GameState—not merely against the BIA snapshot's own child JSON. Resolved
+identities remain preserved where feature intelligence is unavailable.
 
 Attempt manifests use:
 
@@ -236,34 +245,44 @@ baseball_intelligence/attempts/<run_id>/attempt_<NNNN>.json
 ```
 
 They are canonical, credential-free, immutable evidence containing exact
-upstream lineage, selection boundary, outcome, warnings, and candidate
-inventory identities/checksums—but never feature payload duplication. Failed
+upstream lineage, selection boundary, outcome, warnings, requested canonical
+players, and candidate inventory identities/checksums—but never feature payload
+duplication. Failed
 `selection_failed` and `assembly_failed` attempts retain one manifest and one
 attempt-evidence row without a BIA snapshot. Exact replay verifies existing
 immutable evidence; conflicting replay fails closed.
 
-The writer uses the shared same-directory atomic byte writer. It creates a
-short temporary name and replaces the unchanged content-addressed destination
-atomically, avoiding the prior Windows long-temporary-path failure without
-shortening the semantic artifact path or weakening containment checks.
+The manifest and content-addressed artifact publishers write and fsync complete
+bytes to a short same-directory temporary file, then atomically create the
+immutable final name with a same-filesystem hard link. Publication never
+replaces conflicting evidence. A database rollback removes only files created
+by that call; pre-existing verified idempotent evidence is never deleted.
+Temporary files are removed after both successful and failed publication.
 
 ## Validation evidence
 
 Sanitized public validation branch:
 
-`rc/baseball-intelligence-foundation-reconciliation-20260729`
+`rc/baseball-intelligence-repository-selector-20260730`
 
-Public draft PR #44 validates the accepted BIA1-A reconciliation source
-surface. The private/public approved source files are byte-equivalent; no
-test-only typing reconciliation difference remains.
+Public draft PR #50 validates the schema-v10 repository/selector stack. The
+private/public approved source files are byte-equivalent.
 
 Current validation checkpoint:
 
-- 25 BIA-focused tests passed; 250 cross-phase focused tests passed
-- Ruff passed
-- mypy passed across 247 source files
-- the two former Windows temporary-path artifact failures are resolved
-- the only remaining integrated full-suite failures are the separately tracked
+- repository integrity coverage includes independent GameState player lineage,
+  exact equivalent-row reconstruction, selector-inventory binding, atomic
+  publication, rollback cleanup, immutable replay, six-category DB reopen, and
+  zero-game reconstruction
+- 80 focused BIA tests passed
+- 490 cross-phase focused tests passed with 5 Windows symlink skips
+- development full suite: 1,463 passed, 8 skipped, plus only the 8 accepted
+  Phase 4 credential-boundary failures
+- stats full suite: 1,465 passed, 6 skipped, plus the same 8 accepted Phase 4
+  failures; stats-only: 267 passed
+- Ruff passed; full non-incremental mypy passed across 255 source files
+- the two former Windows temporary-path artifact failures remain resolved
+- the only accepted integrated full-suite failures are the separately tracked
   Phase 4 Odds+Weather credential-boundary tests
 
 
@@ -276,10 +295,11 @@ No production BIA handler is registered in this checkpoint.
 
 Do not register the production phase-3 handler yet.
 
-BIA1-B remains blocked on phase execution integration:
+BIA1-B remaining work is limited to:
 
 1. production `BASEBALL_INTELLIGENCE_ASSEMBLY` handler
-2. controller registration and proof advancing from phase 3 to `ODDS_WEATHER`
+2. Phase 3 controller registration
+3. proof that successful Phase 3 advances only to a safe block at `ODDS_WEATHER`
 
 Do not fabricate phase 3 or phase 4 success before those persistence/handler gates exist.
 
