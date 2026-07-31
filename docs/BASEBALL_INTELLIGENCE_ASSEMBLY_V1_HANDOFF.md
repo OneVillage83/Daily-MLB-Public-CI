@@ -1,7 +1,7 @@
-# Baseball Intelligence Assembly V1 — Pre-Persistence Handoff
+# Baseball Intelligence Assembly V1 — Repository/Selector Handoff
 
 **Historical foundation branch/PR:** `rc/baseball-intelligence-assembly-v1-direct-20260727` / private draft PR #11 (historical evidence only)
-**Accepted reconciliation branch:** `rc/baseball-intelligence-foundation-reconciliation-20260729`
+**Current repository branch:** `rc/baseball-intelligence-repository-selector-20260730`
 **Base:** accepted GameState handler checkpoint `24da1c9a3912272f8b5733a5f66ac41c32c68485`
 **Controller phase:** 3 — `BASEBALL_INTELLIGENCE_ASSEMBLY`
 
@@ -16,8 +16,11 @@ Implemented:
 - `app/baseball_intelligence/assembly.py`
 - `app/baseball_intelligence/artifact.py`
 - `app/baseball_intelligence/__init__.py`
-- focused assembly tests
-- focused artifact tests
+- focused assembly and artifact tests
+- schema-v10 immutable temporal persistence surface
+- DB-backed retained-V3 candidate selector
+- immutable Phase 3 attempt-manifest writer/verifier
+- `BaseballIntelligenceRepository` persistence, sealing, retrieval, and offline verification
 
 The assembly consumes only:
 
@@ -26,6 +29,10 @@ The assembly consumes only:
 3. retained Baseball Intelligence V3 player feature snapshots
 
 It does not call external providers and does not consume provider JSON directly.
+
+Schema v10 is frozen. The repository creates no tables lazily and does not
+change migration identities. The controller remains registered only for
+`DAILY_SLATE` and `GAME_STATE`.
 
 ## Frozen boundary carried forward
 
@@ -200,28 +207,82 @@ baseball_intelligence/
 
 Artifact bytes exactly equal canonical assembly JSON bytes.
 
-The writer uses the shared same-directory atomic byte writer. It creates a
-short temporary name and replaces the unchanged content-addressed destination
-atomically, avoiding the prior Windows long-temporary-path failure without
-shortening the semantic artifact path or weakening containment checks.
+The repository verifies this content-addressed artifact before persistence and
+again on every offline read. Missing, altered, unsafe, or semantically wrong
+paths fail closed.
+
+## Candidate selector and repository
+
+`BaseballIntelligenceFeatureSelector` is read-only. It loads every retained V3
+player candidate for the exact requested date and exact resolved GameState
+canonical-player set, in deterministic canonical-player/snapshot/run/input
+order. It deliberately retains complete, degraded, blocked, and late-created
+candidates; the frozen assembler remains the sole owner of completeness, PIT,
+warnings, and representative-selection policy.
+
+`BaseballIntelligenceRepository` verifies the sealed DailySlate → GameState
+chain and both artifacts, independently reconstructs the exact GameState player
+registry and merged role set, and derives the relevant canonical-player set.
+Before either successful or failed attempt evidence is written, it reloads the
+selector inventory at the same stable database boundary and requires exact
+candidate, snapshot/run/checksum, requested-player, and inventory-checksum
+equality. Successful persistence reruns the frozen assembler at the supplied
+fixed observation boundary and requires byte-identical assembly output and
+warnings.
+
+Before sealing, the repository re-queries the snapshot plus every game, player,
+and equivalent-feature row. It verifies upstream game/player lineage,
+relational columns and canonical JSON, ordinals, representative snapshot/run
+pairing, per-game and top-level counts, and exact selected inventories. Every
+offline read repeats those checks against the independently reconstructed
+sealed GameState—not merely against the BIA snapshot's own child JSON. Resolved
+identities remain preserved where feature intelligence is unavailable.
+
+Attempt manifests use:
+
+```text
+baseball_intelligence/attempts/<run_id>/attempt_<NNNN>.json
+```
+
+They are canonical, credential-free, immutable evidence containing exact
+upstream lineage, selection boundary, outcome, warnings, requested canonical
+players, and candidate inventory identities/checksums—but never feature payload
+duplication. Failed
+`selection_failed` and `assembly_failed` attempts retain one manifest and one
+attempt-evidence row without a BIA snapshot. Exact replay verifies existing
+immutable evidence; conflicting replay fails closed.
+
+The manifest and content-addressed artifact publishers write and fsync complete
+bytes to a short same-directory temporary file, then atomically create the
+immutable final name with a same-filesystem hard link. Publication never
+replaces conflicting evidence. A database rollback removes only files created
+by that call; pre-existing verified idempotent evidence is never deleted.
+Temporary files are removed after both successful and failed publication.
 
 ## Validation evidence
 
 Sanitized public validation branch:
 
-`rc/baseball-intelligence-foundation-reconciliation-20260729`
+`rc/baseball-intelligence-repository-selector-20260730`
 
-Public draft PR #44 validates the accepted BIA1-A reconciliation source
-surface. The private/public approved source files are byte-equivalent; no
-test-only typing reconciliation difference remains.
+Public draft PR #50 validates the schema-v10 repository/selector stack. The
+private/public approved source files are byte-equivalent.
 
 Current validation checkpoint:
 
-- 25 BIA-focused tests passed; 250 cross-phase focused tests passed
-- Ruff passed
-- mypy passed across 247 source files
-- the two former Windows temporary-path artifact failures are resolved
-- the only remaining integrated full-suite failures are the separately tracked
+- repository integrity coverage includes independent GameState player lineage,
+  exact equivalent-row reconstruction, selector-inventory binding, atomic
+  publication, rollback cleanup, immutable replay, six-category DB reopen, and
+  zero-game reconstruction
+- 80 focused BIA tests passed
+- 490 cross-phase focused tests passed with 5 Windows symlink skips
+- development full suite: 1,463 passed, 8 skipped, plus only the 8 accepted
+  Phase 4 credential-boundary failures
+- stats full suite: 1,465 passed, 6 skipped, plus the same 8 accepted Phase 4
+  failures; stats-only: 267 passed
+- Ruff passed; full non-incremental mypy passed across 255 source files
+- the two former Windows temporary-path artifact failures remain resolved
+- the only accepted integrated full-suite failures are the separately tracked
   Phase 4 Odds+Weather credential-boundary tests
 
 
@@ -234,17 +295,13 @@ No production BIA handler is registered in this checkpoint.
 
 Do not register the production phase-3 handler yet.
 
-BIA1-B remains blocked on the formal upstream persistence chain:
+BIA1-B remaining work is limited to:
 
-1. DB-backed V3 feature selector for exact player/date/version evidence
-2. formal Baseball Intelligence Assembly persistence (expected schema v10)
-3. production `BASEBALL_INTELLIGENCE_ASSEMBLY` handler
-4. controller proof advancing from phase 3 to `ODDS_WEATHER`
+1. production `BASEBALL_INTELLIGENCE_ASSEMBLY` handler
+2. Phase 3 controller registration
+3. proof that successful Phase 3 advances only to a safe block at `ODDS_WEATHER`
 
 Do not fabricate phase 3 or phase 4 success before those persistence/handler gates exist.
 
-## Codex/local reconciliation note
-
-The sanitized public BIA test file contains one test-only mypy narrowing annotation on the checksum-equivalent duplicate-feature fixture. When Codex/local access returns, reconcile that trivial test-only difference back into the private branch before running the complete local gate.
-
-No architecture or production behavior differs between the private and public BIA implementation because of that annotation.
+No Phase 3 production handler is registered in this checkpoint. Do not claim
+Phase 3 execution success until the subsequent handler/controller checkpoint.
