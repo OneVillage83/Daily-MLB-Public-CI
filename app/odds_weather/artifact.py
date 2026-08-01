@@ -118,12 +118,17 @@ def verify_odds_weather_artifact(
         )
     try:
         destination = resolve_contained_path(artifact_root, safe_relpath)
+        metadata = destination.stat()
         content = destination.read_bytes()
     except (FileNotFoundError, ValueError) as exc:
         raise OddsWeatherArtifactIntegrityError(
             "Odds + Weather artifact is missing or unsafe"
         ) from exc
     expected = snapshot.canonical_json_bytes()
+    if getattr(metadata, "st_nlink", 1) != 1:
+        raise OddsWeatherArtifactIntegrityError(
+            "Odds + Weather artifact uses an unsafe hard link"
+        )
     if (
         content != expected
         or hashlib.sha256(content).hexdigest() != artifact.checksum
