@@ -302,10 +302,10 @@ leading event-list position. Unknown sensitive paths are redacted in retained
 raw bytes rather than preserved globally. Generic redaction behavior outside
 this provider boundary remains strict.
 
-## 15. Persistence and production wiring
+## 15. Persistence and retained-evidence repository
 
-The upstream temporal chain and formal Phase 4 persistence surface are now
-available through schema v11. The migration creates immutable attempt,
+The upstream temporal chain and formal Phase 4 persistence surface are
+available through frozen schema v11. The migration creates immutable attempt,
 snapshot, ordered game/warning/raw-capture, provider event/bookmaker/market/
 outcome, PIT odds-revision, weather-revision, and selected-evidence tables.
 It preserves distinct retrieval, provider-update, forecast-valid, as-of,
@@ -332,14 +332,64 @@ separate because it identifies exact serialized bytes rather than being
 assumed equal to the semantic snapshot checksum. The complete nullable-key and
 foreign-key audit is recorded in the migration specification.
 
+The repository now serializes the accepted canonical contracts without adding a
+competing model. Its deterministic selector reloads every retained event,
+bookmaker, market, outcome, odds-history revision, weather revision, raw link,
+and warning from schema-v11 rows. Explicit ordinals—not SQLite return order—own
+canonical ordering. Future and excluded evidence stays retained while only the
+frozen assembler's selected raw checksums enter the snapshot.
+
+The retained-inventory checksum is canonical SHA-256 over exact run ID, phase
+attempt, requested date, normalized UTC `as_of_time`, normalized UTC
+`observed_at` selection cutoff, phase input checksum, all three upstream
+snapshot IDs/checksums, ordered raw-capture identity, provider-event revision
+identity, explicit odds-history revision identity, weather-revision identity,
+source warnings, final warnings, and selected raw-capture checksums.
+`as_of_time` is the immutable upstream run reference; `observed_at` is the
+Phase 4 evidence-selection boundary. They are independently represented and
+must never be collapsed.
+
+Nested evidence is transitively bound without duplicating full payloads:
+raw-capture projections include the complete canonical metadata from which the
+metadata row checksum is reproduced; provider-event
+projections include event and complete event-row checksums; odds-history
+projections include every semantic revision dimension and row checksum; and
+weather projections include forecast and complete weather-row checksums. Full
+normalized payloads remain in canonical relational JSON rows and verified raw
+bytes.
+
+Configured-secret inventories are validation-only. They are accepted by the
+attempt-manifest constructor/factory and standalone publish, write, and verify
+APIs, and the repository passes the same inventory through every creation,
+replay, read, and snapshot-verification path. Secret inventories are not stored
+on the dataclass, serialized, compared, hashed, written to SQLite, or included
+in exception text. Clean canonical bytes and checksums therefore remain
+identical regardless of which absent configured-secret inventory is supplied.
+
+Persistence uses one SQLite write transaction after independently verifying
+the sealed Phase 1–3 chain and active Phase 4 attempt. Manifest and snapshot
+bytes are atomically created before row insertion; all rows are reloaded and
+reassembled before the one-time seal. A post-commit fresh connection repeats
+relational reconstruction, upstream/manifest/artifact/raw verification, and
+offline assembly. Exact replay is idempotent; any difference in input,
+inventory, warnings, artifact bytes, or upstream lineage fails closed.
+
+Failed acquisition, normalization, and assembly attempts retain immutable
+manifests and available evidence without creating a snapshot. Rollback removes
+only files newly created and still byte-identical to that transaction. A valid
+zero-game upstream chain remains a distinct assembled, sealed, reconstructable
+snapshot.
+
 Remaining order:
 
-1. Odds + Weather repository and retained-evidence selectors
-2. production phase-4 handler
-3. controller registration
-4. proof of safe block at `DATA_QUALITY`
+1. production phase-4 handler
+2. controller registration
+3. proof of safe block at `DATA_QUALITY`
 
-The production handler will call the existing live provider collectors, retain raw captures first, convert those retained results to `OddsProviderEventV1` / `WeatherForecastEvidenceV1`, then assemble the canonical phase-4 snapshot.
+The production handler will call the existing live provider collectors, retain
+raw captures first, convert retained results to `OddsProviderEventV1` /
+`WeatherForecastEvidenceV1`, then call this repository. No provider orchestration
+is implemented in the repository checkpoint.
 
 ## 16. OW1-A — foundation reconciliation
 
@@ -358,8 +408,7 @@ The production handler will call the existing live provider collectors, retain r
 
 ## 17. OW1-B — remaining production work
 
-1. DB-backed retained odds/weather selectors and repository
-2. production `ODDS_WEATHER` handler
-3. Phase 4 controller registration
-4. zero-game provider-call proof through the production handler
-5. manual controller proof advancing only to `DATA_QUALITY`
+1. production `ODDS_WEATHER` handler
+2. Phase 4 controller registration
+3. zero-game provider-call proof through the production handler
+4. manual controller proof advancing only to `DATA_QUALITY`

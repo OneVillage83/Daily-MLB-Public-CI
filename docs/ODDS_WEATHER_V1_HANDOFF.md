@@ -1,15 +1,16 @@
-# Odds + Weather V1 — Schema-v11 Persistence Handoff
+# Odds + Weather V1 — Repository and Retained-Evidence Handoff
 
-**Current private branch:** `rc/odds-weather-schema-v11-20260731`
-**Accepted base:** `rc/odds-weather-foundation-reconciliation-20260731` at `62cdcda3deed76be66f5bddb95ce653c2ea6effa`
+**Current private branch:** `rc/odds-weather-repository-selectors-20260731`
+**Accepted base:** `rc/odds-weather-schema-v11-20260731` at `30625eaa58a0bac3092f75496dad89b0ed540b6f`
 **Historical public evidence:** PR #13 / `rc/odds-weather-v1-direct-20260727` (not the integrated base)
 **Controller phase:** 4 — `ODDS_WEATHER`
 
 ## Purpose
 
-This checkpoint freezes the schema-v11 temporal persistence surface for
-controller phase 4. Repository serialization, retained-evidence selection, the
-production handler, and controller registration remain deliberately deferred.
+This checkpoint implements the durable Phase 4 repository, DB-backed retained-
+evidence selector, immutable attempt manifest, exact relational reconstruction,
+and offline integrity verification. The production handler and controller
+registration remain deliberately deferred.
 
 The phase boundary remains:
 
@@ -42,6 +43,9 @@ Core:
 - `app/odds_weather/adapters.py`
 - `app/odds_weather/history.py`
 - `app/odds_weather/artifact.py`
+- `app/odds_weather/attempt_manifest.py`
+- `app/odds_weather/selector.py`
+- `app/odds_weather/repository.py`
 - `app/odds_weather/__init__.py`
 
 Design/reference:
@@ -442,16 +446,97 @@ Focused validation exercises:
 - content-addressed artifact behavior
 - configured secret rejection
 
-## Work intentionally left for the next checkpoints
+## Repository and retained-evidence boundary
 
-1. Odds + Weather repository and retained-evidence selectors
-2. production Phase 4 handler
-3. controller registration
-4. proof of safe block at `DATA_QUALITY`
+`OddsWeatherRetainedEvidenceSelector` reconstructs, in explicit ordinal order,
+the exact immutable attempt inventory from schema v11. It verifies raw artifact
+bytes and metadata, provider-event revisions and their bookmaker/market/outcome
+children, every PIT odds-history row, every weather revision, and ordered
+weather/raw links. It returns all retained evidence—including future and
+excluded revisions—rather than making a new PIT decision. The frozen assembler
+remains the only selection owner.
+
+`OddsWeatherRetainedEvidenceInventoryV1` binds run ID, phase attempt, requested
+date, normalized UTC `as_of_time`, normalized UTC `observed_at` cutoff, phase
+input checksum, the exact three-snapshot upstream chain, ordered raw captures,
+provider-event revisions, odds-history revisions, weather revisions, source
+warnings, final warnings, and the selected raw-capture set. Its checksum is the
+canonical SHA-256 of that complete identity projection. `as_of_time` remains
+the immutable upstream run reference while `observed_at` remains the Phase 4
+selection boundary; both are directly and independently hashed.
+
+The checksum binds nested evidence transitively: raw metadata is represented by
+its full canonical projection, from which its row checksum is reproduced;
+provider-event identity carries the event checksum and full event-row checksum;
+odds-history identity lists every bookmaker/market/outcome, point,
+event/revision retrieval time, ordinal, and row checksum, with that checksum
+transitively binding price and provider/bookmaker/market update times; weather
+identity carries forecast and full row checksums. Payload JSON stays authoritative in the relational rows and verified
+raw artifacts rather than being duplicated in the identity projection.
+
+`OddsWeatherRepository` exposes:
+
+- `build_inventory(...)` and `assemble_inventory(...)`
+- `persist_assembly(...)` and `persist_failed_attempt(...)`
+- `get_attempt_evidence(...)`, `get_attempt_manifest(...)`, and
+  `list_attempt_evidence(...)`
+- `load_retained_inventory(...)`, including an existing-connection selector
+  boundary
+- `get_by_snapshot_id(...)`, `get_for_run_attempt(...)`, and
+  `get_latest_for_run(...)`
+
+Successful persistence verifies sealed DailySlate, GameState, and BIA objects;
+validates the active Phase 4 attempt; verifies every raw artifact; atomically
+publishes the manifest and snapshot artifact; inserts all 14-table relational
+evidence in one write transaction; reloads the inventory in that transaction;
+reassembles it; verifies every snapshot/game/warning/selection/count/checksum;
+and performs the one-time seal. After commit it opens a fresh normal SQLite
+connection, reconstructs from relational children, verifies upstream artifacts,
+manifest, snapshot artifact, selected and retained raw artifacts, then repeats
+the frozen assembly offline.
+
+Attempt manifests use contract
+`DSE_ODDS_WEATHER_ATTEMPT_MANIFEST_V1` and path
+`odds_weather/attempts/<run_id>/attempt_<NNNN>.json`. Atomic immutable creation
+uses a flushed/fsynced short same-directory temporary file and link publication.
+Exact replay verifies existing bytes; conflicting replay never overwrites them.
+Rollback cleanup removes only newly created files whose checksum and byte count
+still match repository ownership. Pre-existing verified files, raw provider
+artifacts, and unrelated files are never removed.
+
+The standalone manifest constructor, `from_inventory`, publisher, writer, and
+verifier all accept configured secret values as nonstored validation inputs.
+They scan all manifest string leaves both before publication and after parsing
+retained bytes. The repository passes its configured-secret inventory through
+assembled and failed construction, publication, idempotent replay, row
+reconstruction, attempt reads, snapshot verification, and close/reopen
+reconstruction. The inventory is never a dataclass field and never enters
+equality, `as_dict()`, canonical bytes, artifact metadata, retained-inventory
+checksums, SQLite, logs, or exceptions. Legitimate `bookmaker_key` and
+`market_key` identities remain semantic evidence; configured secret values in
+those or any other string value still fail closed.
+
+The repository distinguishes every retained raw capture from the exact selected
+raw checksum inventory stored on the sealed snapshot. Future odds/weather
+revisions remain queryable and auditable but cannot enter historical replay.
+Source warnings remain distinct in the attempt manifest; the canonical snapshot
+and warning table retain the frozen assembler's final ordered warnings.
+
+Failed outcomes are exactly `acquisition_failed`, `normalization_failed`, and
+`assembly_failed`. They retain an immutable manifest and available retained
+evidence but create no snapshot or snapshot artifact. A positively established
+zero-game chain instead creates and seals a canonical zero-game snapshot with
+zero child/selection rows and reconstructs exactly after database reopen.
+
+## Work intentionally left for the next checkpoint
+
+1. production Phase 4 handler
+2. Phase 4 controller registration
+3. proof of safe block at `DATA_QUALITY`
 
 Do not fabricate production phase success before the sealed persistence/handler chain exists.
 
-## Current checkpoint boundary
+## Frozen schema and current checkpoint boundary
 
 Schema v11 now formally creates the immutable Phase 4 temporal persistence
 surface documented in
@@ -482,32 +567,17 @@ availability groups. The final surface has 14 tables, 20 explicit indexes, 10
 validation/sealing triggers, 28 immutability triggers, and 138 formal schema
 statements. Every v1-v10 migration identity and SQL byte remains frozen.
 
-No `OddsWeatherRepository`, retained-evidence selector, production handler, or
-controller registration is included. The controller still executes only
-phases 1–3 and blocks safely at pending `ODDS_WEATHER`.
+Schema v11 is byte-for-byte frozen. This checkpoint changes no migration,
+table, index, trigger, checksum, or fingerprint. The controller still executes
+only phases 1–3 and blocks safely at pending `ODDS_WEATHER`; repository methods
+do not transition controller state. Exact local and public validation counts are
+recorded in the checkpoint completion report after the final heads are pushed.
+Application/provider network requests remain zero.
 
-Local reconciliation validation is green:
-
-- exact formerly failing credential-boundary tests: 8 passed in development
-  and 8 passed in stats
-- corrected schema-v11 migration suite: 23 passed
-- focused null-safe revision and content-addressed artifact-path corrections:
-  10 passed
-- focused Phase 4/migration/credential/security regression: 278 passed
-- Phase 1–3/migration/database/controller/Docker cross-phase regression:
-  385 passed
-- full development suite: 1,553 passed, 8 documented environment skips
-- full stats suite: 1,555 passed, 6 documented Windows symlink skips
-- stats-only suite: 267 passed
-- Ruff: passed
-- mypy `--no-incremental`: passed across 261 source files
-- fresh validation database: schema version 11, formal fingerprint exact,
-  `integrity_check=ok`, and zero foreign-key violations
-- repository and generated-evidence secret scans: passed
-- offline pybaseball compatibility: passed with zero network requests
-
-Public draft PR #55 remains stacked on
-`rc/odds-weather-foundation-reconciliation-20260731`; its exact-head Actions
-evidence is recorded after the corrected sanitized public branch is pushed.
-Application/provider network requests for this migration-only checkpoint
-remain zero.
+Repository external review subsequently found and corrected two identity-layer
+gaps without changing schema v11: `as_of_time` is now an explicit retained-
+inventory checksum member alongside `observed_at`, and every standalone attempt-
+manifest API now enforces configured-secret values through validation-only
+arguments. The repository checkpoint remains under review until this correction
+report and exact-head public CI are accepted. The production Phase 4 handler and
+controller registration remain deferred.
