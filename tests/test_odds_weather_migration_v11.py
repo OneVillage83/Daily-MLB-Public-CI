@@ -4,7 +4,7 @@ import hashlib
 import json
 import sqlite3
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -76,8 +76,8 @@ from tests.test_odds_weather_assembly import _odds_event, _weather
 
 V10_CHECKSUM = "877bdccccb64814a0844adb57279a87d477c79a0e8659ebc3a3dfc08d3bb071b"
 V10_FINGERPRINT = "13a8ed8e477c23954c94a7b6a697c6dae74efd5d3806f0187b1fa2abeb5933c6"
-V11_CHECKSUM = "5fa71f02ce91b799c4a5a50342360c3cb4a901cc72cc38a94d8698ad598b0e4e"
-V11_FINGERPRINT = "cf2e6ca926ab92f1428c41ab7492d75d88a5a3fff34e03397a573e4b6b74cfb3"
+V11_CHECKSUM = "a54865d8b5623e96c4f571d6c9d7f899e9ced0d1911128b5a874b41e29df75dd"
+V11_FINGERPRINT = "5b9635e1aac05d98fd61dadaf2ac5d435e4aaae9214c79501b5dd642673c75b8"
 
 TABLES = {
     "odds_weather_attempt_evidence",
@@ -112,6 +112,8 @@ INDEXES = {
     "idx_ow_markets_key_update",
     "idx_ow_outcomes_identity",
     "idx_ow_odds_revisions_cutoff",
+    "uq_ow_odds_revisions_unpointed_identity",
+    "uq_ow_odds_revisions_pointed_identity",
     "idx_ow_weather_revisions_cutoff",
     "idx_ow_weather_selections_provider",
 }
@@ -487,8 +489,15 @@ def _insert_snapshot_and_children(
     snapshot: OddsWeatherV1,
     event: OddsProviderEventV1,
     forecasts: tuple[WeatherForecastEvidenceV1, ...],
+    *,
+    artifact_relpath: str | None = None,
+    artifact_byte_count: int | None = None,
+    canonical_json: str | None = None,
+    null_snapshot_id: bool = False,
 ) -> str:
-    snapshot_id = f"odds-weather:{snapshot.checksum}"
+    snapshot_id: str | None = (
+        None if null_snapshot_id else f"odds-weather:{snapshot.checksum}"
+    )
     artifact = snapshot.canonical_json_bytes()
     connection.execute(
         """
@@ -523,7 +532,7 @@ def _insert_snapshot_and_children(
             _json(list(snapshot.source_raw_capture_checksums)),
             _json([warning.as_dict() for warning in snapshot.warnings]),
             len(snapshot.warnings),
-            artifact.decode(),
+            canonical_json or artifact.decode(),
             len(snapshot.games),
             len(snapshot.source_raw_capture_checksums),
             sum(
@@ -533,9 +542,13 @@ def _insert_snapshot_and_children(
                     for game in snapshot.games
                 ]
             ),
-            f"odds_weather/snapshots/{snapshot.checksum}/odds_weather_v1.json",
+            (
+                f"odds_weather/snapshots/{snapshot.checksum}/odds_weather_v1.json"
+                if artifact_relpath is None
+                else artifact_relpath
+            ),
             hashlib.sha256(artifact).hexdigest(),
-            len(artifact),
+            len(artifact) if artifact_byte_count is None else artifact_byte_count,
             snapshot.observed_at.isoformat(),
         ),
     )
@@ -641,7 +654,266 @@ def _insert_snapshot_and_children(
         "UPDATE odds_weather_snapshots SET sealed_at=? WHERE snapshot_id=?",
         (snapshot.observed_at.isoformat(), snapshot_id),
     )
+    assert snapshot_id is not None
     return snapshot_id
+
+
+@pytest.mark.parametrize(
+    ("price_delta", "row_checksum"),
+    (
+        pytest.param(0.0, None, id="exact_duplicate_evidence"),
+        pytest.param(7.0, _sha("conflicting-h2h-revision"), id="conflicting_evidence"),
+    ),
+)
+def test_h2h_revision_semantic_identity_is_null_safe(
+    tmp_path: Path,
+    price_delta: float,
+    row_checksum: str | None,
+) -> None:
+    connection, fixture, snapshot, event, forecasts = _build_phase4_fixture(tmp_path)
+    try:
+        _insert_attempt(connection, fixture, snapshot)
+        _insert_raw_and_provider_evidence(connection, snapshot, event, forecasts)
+        source = connection.execute(
+            """
+            SELECT bookmaker_key,market_key,outcome_name,price_american,point,
+                   provider_last_update,bookmaker_last_update,market_last_update,
+                   retrieved_at,canonical_json,row_checksum
+            FROM odds_weather_odds_revisions
+            WHERE run_id=? AND phase_attempt=1 AND market_key='h2h'
+              AND point IS NULL
+            ORDER BY ordinal LIMIT 1
+            """,
+            (RUN_ID,),
+        ).fetchone()
+        assert source is not None
+        before = connection.execute(
+            "SELECT count(*) FROM odds_weather_odds_revisions"
+        ).fetchone()[0]
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO odds_weather_odds_revisions(
+                  run_id,phase_attempt,provider_event_id,event_retrieved_at,
+                  ordinal,bookmaker_key,market_key,outcome_name,price_american,
+                  point,provider_last_update,bookmaker_last_update,
+                  market_last_update,retrieved_at,canonical_json,row_checksum
+                ) VALUES (?,1,?,?,100,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    RUN_ID,
+                    event.provider_event_id,
+                    event.retrieved_at.isoformat(),
+                    source[0],
+                    source[1],
+                    source[2],
+                    source[3] + price_delta,
+                    source[4],
+                    source[5],
+                    source[6],
+                    source[7],
+                    source[8],
+                    source[9],
+                    row_checksum or source[10],
+                ),
+            )
+        assert connection.execute(
+            "SELECT count(*) FROM odds_weather_odds_revisions"
+        ).fetchone()[0] == before
+    finally:
+        connection.close()
+
+
+def test_revision_identity_preserves_time_and_point_dimensions(tmp_path: Path) -> None:
+    connection, fixture, snapshot, event, forecasts = _build_phase4_fixture(tmp_path)
+    try:
+        _insert_attempt(connection, fixture, snapshot)
+        _insert_raw_and_provider_evidence(connection, snapshot, event, forecasts)
+
+        def source_for(market_key: str) -> tuple[Any, ...]:
+            row = connection.execute(
+                """
+                SELECT bookmaker_key,market_key,outcome_name,price_american,point,
+                       provider_last_update,bookmaker_last_update,market_last_update,
+                       retrieved_at,canonical_json
+                FROM odds_weather_odds_revisions
+                WHERE run_id=? AND phase_attempt=1 AND market_key=?
+                ORDER BY ordinal LIMIT 1
+                """,
+                (RUN_ID, market_key),
+            ).fetchone()
+            assert row is not None
+            return cast(tuple[Any, ...], row)
+
+        def insert_copy(
+            source: tuple[Any, ...],
+            *,
+            ordinal: int,
+            retrieved_at: str,
+            point: float | None,
+            salt: str,
+        ) -> None:
+            connection.execute(
+                """
+                INSERT INTO odds_weather_odds_revisions(
+                  run_id,phase_attempt,provider_event_id,event_retrieved_at,
+                  ordinal,bookmaker_key,market_key,outcome_name,price_american,
+                  point,provider_last_update,bookmaker_last_update,
+                  market_last_update,retrieved_at,canonical_json,row_checksum
+                ) VALUES (?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    RUN_ID,
+                    event.provider_event_id,
+                    event.retrieved_at.isoformat(),
+                    ordinal,
+                    source[0],
+                    source[1],
+                    source[2],
+                    source[3],
+                    point,
+                    source[5],
+                    source[6],
+                    source[7],
+                    retrieved_at,
+                    source[9],
+                    _sha(salt),
+                ),
+            )
+
+        h2h = source_for("h2h")
+        later_retrieval = (
+            datetime.fromisoformat(h2h[8]) + timedelta(minutes=1)
+        ).isoformat()
+        insert_copy(
+            h2h,
+            ordinal=100,
+            retrieved_at=later_retrieval,
+            point=None,
+            salt="h2h-later-retrieval",
+        )
+
+        for ordinal, (market_key, distinct_point) in enumerate(
+            (("spreads", -2.5), ("totals", 9.5)),
+            start=101,
+        ):
+            source = source_for(market_key)
+            insert_copy(
+                source,
+                ordinal=ordinal,
+                retrieved_at=source[8],
+                point=distinct_point,
+                salt=f"{market_key}-distinct-point",
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                insert_copy(
+                    source,
+                    ordinal=ordinal + 10,
+                    retrieved_at=source[8],
+                    point=distinct_point,
+                    salt=f"{market_key}-duplicate-point",
+                )
+
+        assert connection.execute(
+            "SELECT count(*) FROM odds_weather_odds_revisions WHERE market_key='h2h' AND retrieved_at=?",
+            (later_retrieval,),
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT count(*) FROM odds_weather_odds_revisions WHERE market_key='spreads' AND point=-2.5"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT count(*) FROM odds_weather_odds_revisions WHERE market_key='totals' AND point=9.5"
+        ).fetchone()[0] == 1
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "artifact_relpath",
+    (
+        f"odds_weather/snapshots/{'0' * 64}/odds_weather_v1.json",
+        f"odds_weather/snapshots/{'f' * 64}/odds_weather_v1.json",
+        "odds_weather/snapshots/not-a-checksum/odds_weather_v1.json",
+        "odds_weather/snapshots/../odds_weather_v1.json",
+        "odds_weather/snapshots/fixture/wrong.json",
+        "",
+    ),
+)
+def test_snapshot_artifact_path_is_bound_to_snapshot_checksum(
+    tmp_path: Path,
+    artifact_relpath: str,
+) -> None:
+    connection, fixture, snapshot, event, forecasts = _build_phase4_fixture(tmp_path)
+    try:
+        _insert_attempt(connection, fixture, snapshot)
+        _insert_raw_and_provider_evidence(connection, snapshot, event, forecasts)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_snapshot_and_children(
+                connection,
+                fixture,
+                snapshot,
+                event,
+                forecasts,
+                artifact_relpath=artifact_relpath,
+            )
+    finally:
+        connection.close()
+
+
+def test_snapshot_artifact_requires_nonempty_bytes_and_matching_canonical_checksum(
+    tmp_path: Path,
+) -> None:
+    connection, fixture, snapshot, event, forecasts = _build_phase4_fixture(tmp_path)
+    try:
+        _insert_attempt(connection, fixture, snapshot)
+        _insert_raw_and_provider_evidence(connection, snapshot, event, forecasts)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_snapshot_and_children(
+                connection,
+                fixture,
+                snapshot,
+                event,
+                forecasts,
+                artifact_byte_count=0,
+            )
+    finally:
+        connection.close()
+
+
+def test_snapshot_primary_identity_is_explicitly_nonnull(tmp_path: Path) -> None:
+    connection, fixture, snapshot, event, forecasts = _build_phase4_fixture(tmp_path)
+    try:
+        _insert_attempt(connection, fixture, snapshot)
+        _insert_raw_and_provider_evidence(connection, snapshot, event, forecasts)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_snapshot_and_children(
+                connection,
+                fixture,
+                snapshot,
+                event,
+                forecasts,
+                null_snapshot_id=True,
+            )
+    finally:
+        connection.close()
+
+    connection, fixture, snapshot, event, forecasts = _build_phase4_fixture(tmp_path)
+    try:
+        _insert_attempt(connection, fixture, snapshot)
+        _insert_raw_and_provider_evidence(connection, snapshot, event, forecasts)
+        payload = snapshot.as_dict()
+        payload["checksum"] = "0" * 64
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_snapshot_and_children(
+                connection,
+                fixture,
+                snapshot,
+                event,
+                forecasts,
+                canonical_json=_json(payload),
+            )
+    finally:
+        connection.close()
 
 
 def _doubleheader_fixture() -> Fixture:
@@ -1123,6 +1395,7 @@ def test_one_game_contract_evidence_seals_and_is_immutable(tmp_path: Path) -> No
             ("DELETE FROM odds_weather_snapshots WHERE snapshot_id=?", (snapshot_id,)),
             ("DELETE FROM odds_weather_games WHERE snapshot_id=?", (snapshot_id,)),
             ("UPDATE odds_weather_snapshots SET canonical_json='{}' WHERE snapshot_id=?", (snapshot_id,)),
+            ("UPDATE odds_weather_snapshots SET artifact_relpath='odds_weather/snapshots/wrong/odds_weather_v1.json' WHERE snapshot_id=?", (snapshot_id,)),
             ("UPDATE odds_weather_snapshots SET sealed_at=? WHERE snapshot_id=?", (snapshot.observed_at.isoformat(), snapshot_id)),
         ):
             with pytest.raises(sqlite3.IntegrityError):
@@ -1447,7 +1720,7 @@ def test_attempt_parentage_identity_and_replay_conflicts_fail_closed(tmp_path: P
 
 def test_schema_statement_inventory_is_deterministic() -> None:
     assert len(ODDS_WEATHER_SCHEMA_V11_TABLE_STATEMENTS) == 14
-    assert len(ODDS_WEATHER_SCHEMA_V11_INDEX_STATEMENTS) == 18
+    assert len(ODDS_WEATHER_SCHEMA_V11_INDEX_STATEMENTS) == 20
     assert len(ODDS_WEATHER_SCHEMA_V11_VALIDATION_TRIGGER_STATEMENTS) == 10
     assert len(ODDS_WEATHER_SCHEMA_V11_IMMUTABILITY_TRIGGER_STATEMENTS) == 28
-    assert len(FORMAL_SCHEMA_V11_STATEMENTS) == 136
+    assert len(FORMAL_SCHEMA_V11_STATEMENTS) == 138

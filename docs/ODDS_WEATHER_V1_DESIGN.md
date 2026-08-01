@@ -317,6 +317,21 @@ credential exclusions, checksum, and fingerprint are authoritative in
 `ODDS_WEATHER_V1_MIGRATION_V11_SPEC.md`. The schema permits a positively
 established zero-game snapshot but cannot convert a failed attempt into one.
 
+The finalized v11 revision identity is null-safe under SQLite. No-point
+revisions use a partial unique identity over attempt, exact provider-event
+revision, bookmaker, market, outcome, and revision retrieval time. Pointed
+revisions add the exact retained point. Thus `h2h` observations with `NULL`
+point cannot be duplicated or contradicted at one observation instant, while
+different spread/total line points and later PIT observations remain distinct.
+
+The snapshot row is independently bound by SQL to
+`odds_weather/snapshots/<snapshot_checksum>/odds_weather_v1.json`, requires a
+positive artifact byte count, and requires the checksum embedded in canonical
+top-level JSON to equal `snapshot_checksum`. The artifact checksum is kept
+separate because it identifies exact serialized bytes rather than being
+assumed equal to the semantic snapshot checksum. The complete nullable-key and
+foreign-key audit is recorded in the migration specification.
+
 Remaining order:
 
 1. Odds + Weather repository and retained-evidence selectors

@@ -69,7 +69,9 @@ ODDS_WEATHER_SCHEMA_V11_TABLE_STATEMENTS = (
     """,
     f"""
     CREATE TABLE odds_weather_snapshots (
-        snapshot_id TEXT PRIMARY KEY CHECK (snapshot_id='odds-weather:' || snapshot_checksum),
+        snapshot_id TEXT NOT NULL PRIMARY KEY CHECK (
+            snapshot_id='odds-weather:' || snapshot_checksum
+        ),
         run_id TEXT NOT NULL,
         phase_key TEXT NOT NULL DEFAULT 'odds_weather' CHECK (phase_key='odds_weather'),
         phase_attempt INTEGER NOT NULL CHECK (phase_attempt>=1),
@@ -97,13 +99,21 @@ ODDS_WEATHER_SCHEMA_V11_TABLE_STATEMENTS = (
         warning_count INTEGER NOT NULL CHECK (
             warning_count>=0 AND warning_count=json_array_length(warnings_json)
         ),
-        canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json)),
+        canonical_json TEXT NOT NULL CHECK (
+            json_valid(canonical_json)
+            AND json_type(canonical_json,'$.checksum')='text'
+            AND json_extract(canonical_json,'$.checksum')=snapshot_checksum
+        ),
         game_count INTEGER NOT NULL CHECK (game_count>=0),
         selected_raw_capture_count INTEGER NOT NULL CHECK (selected_raw_capture_count>=0),
         weather_selection_count INTEGER NOT NULL CHECK (weather_selection_count>=0),
-        artifact_relpath TEXT NOT NULL CHECK (length(trim(artifact_relpath))>0),
+        artifact_relpath TEXT NOT NULL CHECK (
+            artifact_relpath=
+                'odds_weather/snapshots/' || snapshot_checksum ||
+                '/odds_weather_v1.json'
+        ),
         artifact_checksum TEXT NOT NULL CHECK ({_sha('artifact_checksum')}),
-        artifact_byte_count INTEGER NOT NULL CHECK (artifact_byte_count>=0),
+        artifact_byte_count INTEGER NOT NULL CHECK (artifact_byte_count>0),
         sealed_at TEXT CHECK (sealed_at IS NULL OR ({_aware('sealed_at')})),
         created_at TEXT NOT NULL CHECK ({_aware('created_at')}),
         UNIQUE(run_id,phase_attempt),
@@ -293,10 +303,6 @@ ODDS_WEATHER_SCHEMA_V11_TABLE_STATEMENTS = (
         ),
         row_checksum TEXT NOT NULL CHECK ({_sha('row_checksum')}),
         PRIMARY KEY(run_id,phase_attempt,provider_event_id,event_retrieved_at,ordinal),
-        UNIQUE(
-            run_id,phase_attempt,provider_event_id,event_retrieved_at,
-            bookmaker_key,market_key,outcome_name,retrieved_at,point
-        ),
         FOREIGN KEY(run_id,phase_attempt,provider_event_id,event_retrieved_at)
             REFERENCES odds_weather_provider_events(
                 run_id,phase_attempt,provider_event_id,retrieved_at
@@ -553,6 +559,8 @@ ODDS_WEATHER_SCHEMA_V11_INDEX_STATEMENTS = (
     "CREATE INDEX idx_ow_markets_key_update ON odds_weather_markets(market_key,market_last_update,run_id,phase_attempt)",
     "CREATE INDEX idx_ow_outcomes_identity ON odds_weather_outcomes(outcome_name,market_key,bookmaker_key,run_id,phase_attempt)",
     "CREATE INDEX idx_ow_odds_revisions_cutoff ON odds_weather_odds_revisions(provider_event_id,bookmaker_key,market_key,outcome_name,retrieved_at,run_id,phase_attempt)",
+    "CREATE UNIQUE INDEX uq_ow_odds_revisions_unpointed_identity ON odds_weather_odds_revisions(run_id,phase_attempt,provider_event_id,event_retrieved_at,bookmaker_key,market_key,outcome_name,retrieved_at) WHERE point IS NULL",
+    "CREATE UNIQUE INDEX uq_ow_odds_revisions_pointed_identity ON odds_weather_odds_revisions(run_id,phase_attempt,provider_event_id,event_retrieved_at,bookmaker_key,market_key,outcome_name,retrieved_at,point) WHERE point IS NOT NULL",
     "CREATE INDEX idx_ow_weather_revisions_cutoff ON odds_weather_weather_revisions(source_game_id,provider,forecast_time,retrieved_at,run_id,phase_attempt)",
     "CREATE INDEX idx_ow_weather_selections_provider ON odds_weather_game_weather_selections(provider,weather_retrieved_at,snapshot_id,source_game_id)",
 )

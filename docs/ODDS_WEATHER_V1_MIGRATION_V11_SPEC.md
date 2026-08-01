@@ -28,9 +28,9 @@ following the existing formal migration convention. The formal schema-v11
 fingerprint is computed from the exact v1-v11 statement chain.
 
 - Migration checksum:
-  `5fa71f02ce91b799c4a5a50342360c3cb4a901cc72cc38a94d8698ad598b0e4e`
+  `a54865d8b5623e96c4f571d6c9d7f899e9ced0d1911128b5a874b41e29df75dd`
 - Formal schema-v11 fingerprint:
-  `cf2e6ca926ab92f1428c41ab7492d75d88a5a3fff34e03397a573e4b6b74cfb3`
+  `5b9635e1aac05d98fd61dadaf2ac5d435e4aaae9214c79501b5dd642673c75b8`
 
 An existing recognized v10 database receives a verified SQLite-backup-API
 backup named:
@@ -82,9 +82,14 @@ child counts, the required content-addressed artifact metadata group, and a
 one-time `sealed_at` transition.
 
 Artifact relative path, checksum, and byte count are all required. Application
-verification in the later repository must require the semantic path
-`odds_weather/snapshots/<snapshot_checksum>/odds_weather_v1.json`, containment,
-canonical bytes, SHA-256, and byte count.
+verification in the later repository must require containment, canonical
+bytes, SHA-256, and byte count. SQL independently requires the exact semantic
+path `odds_weather/snapshots/<snapshot_checksum>/odds_weather_v1.json`, a
+strictly positive artifact byte count, and equality between
+`json_extract(canonical_json,'$.checksum')` and `snapshot_checksum`. The
+snapshot checksum remains the contract's semantic content identity; the
+artifact checksum remains the SHA-256 of exact serialized artifact bytes and
+is intentionally not forced equal by SQL.
 
 ### `odds_weather_games`
 
@@ -167,6 +172,25 @@ prevents contradictory prices for the same semantic observation boundary while
 allowing later observations to remain distinct. Rows after a future cutoff are
 stored rather than collapsed; the future repository selector must filter them
 at or before the fixed Phase 4 cutoff.
+
+SQLite treats `NULL` values as distinct in ordinary unique constraints. The
+original provisional v11 composite uniqueness declaration therefore did not
+protect no-point moneyline revisions. The final migration replaces it with two
+deterministic partial unique indexes:
+
+- `uq_ow_odds_revisions_unpointed_identity` applies when `point IS NULL` and
+  keys identity by run, attempt, provider event, event retrieval, bookmaker,
+  market, outcome, and revision retrieval time;
+- `uq_ow_odds_revisions_pointed_identity` applies when `point IS NOT NULL` and
+  adds the exact point to that identity.
+
+For canonical `h2h` history, point is absent and is not an identity dimension.
+For spread and total history with a retained real point, point is an identity
+dimension, so different valid line points may coexist at one retrieval instant
+while duplicate or conflicting evidence at the same point cannot. A structurally
+retained unpointed spread or total row remains covered by the unpointed index;
+the migration does not silently strengthen or rewrite the accepted contract.
+Different revision retrieval times remain distinct for every supported market.
 
 ### `odds_weather_weather_revisions`
 
@@ -262,13 +286,47 @@ patterns:
 14. `idx_ow_markets_key_update`
 15. `idx_ow_outcomes_identity`
 16. `idx_ow_odds_revisions_cutoff`
-17. `idx_ow_weather_revisions_cutoff`
-18. `idx_ow_weather_selections_provider`
+17. `uq_ow_odds_revisions_unpointed_identity` (partial unique, `point IS NULL`)
+18. `uq_ow_odds_revisions_pointed_identity` (partial unique, `point IS NOT NULL`)
+19. `idx_ow_weather_revisions_cutoff`
+20. `idx_ow_weather_selections_provider`
 
 Primary and unique constraints provide parent-local identity and ordinal lookup;
 redundant indexes are omitted.
 
-## 7. Security boundary
+The formal Phase 4 surface contains 14 tables, 20 explicit indexes, 10
+validation/sealing triggers, and 28 immutability triggers. The formal v11
+statement chain contains 138 statements.
+
+## 7. Nullable-constraint audit
+
+Every v11 primary-key and unique-index column is explicitly non-null except two
+documented cases:
+
+- `odds_weather_odds_revisions.point` is intentionally optional and is made
+  null-safe by the paired partial unique indexes above (`corrected`);
+- `odds_weather_games.selected_provider_event_id` is intentionally nullable so
+  multiple unavailable games can coexist. Its uniqueness prevents one selected
+  event from serving two games only when a value exists (`intentional`).
+
+`odds_weather_snapshots.snapshot_id` is explicitly `NOT NULL`; this avoids
+SQLite's legacy rowid-table behavior in which a non-integer primary key does not
+alone provide a reliable not-null guarantee. All other composite primary-key and
+unique-index columns are declared `NOT NULL` (`forbidden`).
+
+Nullable foreign-key fields on `odds_weather_games` are intentional. The odds
+availability cross-column check requires selected provider event, odds
+retrieval time, raw checksum, match offset, summary JSON, and summary checksum
+to be all present for `available` or all absent for `unavailable`; the composite
+provider-event and raw-capture foreign keys therefore cannot be partially
+bypassed. Multiple unavailable games with null selected-event identity are
+valid. Optional venue identity, scheduled start, provider/update timestamps,
+forecast offset, warning context, and weather context fields do not participate
+in a primary or unique semantic identity. Their NULL behavior is explicit in
+type/check clauses and remains application-verified where the accepted contract
+delegates semantic reconstruction.
+
+## 8. Security boundary
 
 No v11 table contains a configured-secret list, API key, credential, bearer or
 authorization value, request URL/query/header, quota metadata, password, client
@@ -280,7 +338,7 @@ configured-secret validation before later repository persistence.
 Migration SQL, fingerprint, canonical object bytes, equality, and checksums do
 not depend on configured secret inventories.
 
-## 8. Required migration verification
+## 9. Required migration verification
 
 Focused tests must prove fresh v11 installation, recognized v10 upgrade,
 verified backup/diagnostic behavior, rollback under injected failure,
@@ -288,7 +346,9 @@ fresh/upgrade fingerprint equivalence, unchanged v1-v10 identities, exact
 tables/indexes/triggers/FKs/constraints, representative one-game and
 doubleheader relational evidence, multiple bookmaker/market/outcome and PIT
 revision retention, multiple weather-provider/revision retention, warnings,
-artifact immutability, zero-game sealing, acquisition-failure distinction,
+null-safe no-point and pointed revision identity, exact semantic artifact path,
+positive artifact byte count, canonical JSON checksum identity, nullable-key
+classification, artifact immutability, zero-game sealing, acquisition-failure distinction,
 immutability, `integrity_check=ok`, zero foreign-key violations, and zero
 application/provider network calls.
 
