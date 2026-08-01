@@ -917,10 +917,12 @@ class OddsWeatherRepository:
                         snapshot_checksum=snapshot.checksum,
                         created_at=now,
                         completed_at=now,
+                        secret_values=self.secret_values,
                     )
                     manifest_artifact, manifest_created = publish_odds_weather_attempt_manifest(
                         manifest,
                         self.artifact_root,
+                        secret_values=self.secret_values,
                     )
                     if manifest_created:
                         created_manifest = manifest_artifact
@@ -1039,10 +1041,12 @@ class OddsWeatherRepository:
                         snapshot_checksum=None,
                         created_at=now,
                         completed_at=now,
+                        secret_values=self.secret_values,
                     )
                     artifact, created = publish_odds_weather_attempt_manifest(
                         manifest,
                         self.artifact_root,
+                        secret_values=self.secret_values,
                     )
                     if created:
                         created_manifest = artifact
@@ -1357,7 +1361,12 @@ class OddsWeatherRepository:
         return payload
 
     def _manifest_from_row(self, row: sqlite3.Row) -> OddsWeatherAttemptManifestV1:
-        payload = self._read_manifest_payload(str(row["evidence_manifest_relpath"]))
+        try:
+            payload = self._read_manifest_payload(str(row["evidence_manifest_relpath"]))
+        except OddsWeatherAttemptManifestError as exc:
+            raise OddsWeatherIntegrityError(
+                "Odds Weather attempt manifest violates its retained security boundary"
+            ) from exc
         selected_values = payload.get("selected_raw_capture_checksums", [])
         if not isinstance(selected_values, list):
             raise OddsWeatherIntegrityError(
@@ -1392,6 +1401,7 @@ class OddsWeatherRepository:
                 created_at=_aware(payload["created_at"], "manifest created_at"),
                 completed_at=_aware(payload["completed_at"], "manifest completed_at"),
                 contract_version=str(payload["contract_version"]),
+                secret_values=self.secret_values,
             )
         except (KeyError, TypeError, ValueError, OddsWeatherIntegrityError) as exc:
             raise OddsWeatherIntegrityError(
@@ -1463,6 +1473,7 @@ class OddsWeatherRepository:
                 artifact_root=self.artifact_root,
                 relpath=str(row["evidence_manifest_relpath"]),
                 expected=manifest,
+                secret_values=self.secret_values,
             )
         except OddsWeatherAttemptManifestError as exc:
             raise OddsWeatherIntegrityError(
@@ -1788,6 +1799,7 @@ class OddsWeatherRepository:
                 artifact_root=self.artifact_root,
                 relpath=str(attempt_row["evidence_manifest_relpath"]),
                 expected=manifest,
+                secret_values=self.secret_values,
             )
         except OddsWeatherAttemptManifestError as exc:
             raise OddsWeatherIntegrityError("Odds Weather attempt manifest is invalid") from exc

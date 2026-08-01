@@ -406,6 +406,7 @@ class OddsWeatherRetainedEvidenceInventoryV1:
 
     def identity_dict(self) -> dict[str, object]:
         return {
+            "as_of_time": self.as_of_time.isoformat(),
             "final_warnings": [item.as_dict() for item in self.final_warnings],
             "observed_at": self.observed_at.isoformat(),
             "odds_revision_inventory": list(self.odds_revision_inventory),

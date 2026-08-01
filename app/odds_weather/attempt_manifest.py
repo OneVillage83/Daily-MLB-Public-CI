@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -130,8 +130,9 @@ class OddsWeatherAttemptManifestV1:
     created_at: datetime
     completed_at: datetime
     contract_version: str = ODDS_WEATHER_ATTEMPT_MANIFEST_CONTRACT
+    secret_values: InitVar[Iterable[str]] = ()
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, secret_values: Iterable[str]) -> None:
         object.__setattr__(self, "run_id", validate_run_id(self.run_id))
         if (
             isinstance(self.phase_attempt, bool)
@@ -186,7 +187,8 @@ class OddsWeatherAttemptManifestV1:
         object.__setattr__(self, "final_warnings", _warning_inventory(self.final_warnings))
         if self.contract_version != ODDS_WEATHER_ATTEMPT_MANIFEST_CONTRACT:
             raise ValueError("invalid Odds Weather attempt manifest contract_version")
-        if redact_value(self.as_dict()) != self.as_dict():
+        configured_secrets = tuple(str(value) for value in secret_values if str(value))
+        if redact_value(self.as_dict(), configured_secrets) != self.as_dict():
             raise ValueError("Odds Weather attempt manifest contains credential-bearing material")
 
     @classmethod
@@ -198,6 +200,7 @@ class OddsWeatherAttemptManifestV1:
         snapshot_checksum: str | None,
         created_at: datetime,
         completed_at: datetime,
+        secret_values: Iterable[str] = (),
     ) -> OddsWeatherAttemptManifestV1:
         return cls(
             run_id=inventory.run_id,
@@ -224,6 +227,7 @@ class OddsWeatherAttemptManifestV1:
             retained_inventory_checksum=inventory.checksum,
             created_at=created_at,
             completed_at=completed_at,
+            secret_values=secret_values,
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -270,9 +274,16 @@ class OddsWeatherAttemptManifestArtifactV1:
 def publish_odds_weather_attempt_manifest(
     manifest: OddsWeatherAttemptManifestV1,
     artifact_root: Path,
+    *,
+    secret_values: Iterable[str] = (),
 ) -> tuple[OddsWeatherAttemptManifestArtifactV1, bool]:
     """Atomically publish immutable attempt evidence and report ownership."""
 
+    configured_secrets = tuple(str(value) for value in secret_values if str(value))
+    if redact_value(manifest.as_dict(), configured_secrets) != manifest.as_dict():
+        raise OddsWeatherAttemptManifestError(
+            "Odds Weather attempt manifest contains credential-bearing material"
+        )
     relpath = odds_weather_attempt_manifest_relpath(manifest.run_id, manifest.phase_attempt)
     content = manifest.canonical_json_bytes()
     checksum = hashlib.sha256(content).hexdigest()
@@ -289,6 +300,7 @@ def publish_odds_weather_attempt_manifest(
             artifact_root=artifact_root,
             relpath=relpath,
             expected=manifest,
+            secret_values=configured_secrets,
         )
         if retained != artifact:
             raise OddsWeatherAttemptManifestError(
@@ -301,6 +313,7 @@ def publish_odds_weather_attempt_manifest(
                 artifact_root=artifact_root,
                 relpath=relpath,
                 expected=manifest,
+                secret_values=configured_secrets,
             ),
             True,
         )
@@ -312,8 +325,14 @@ def publish_odds_weather_attempt_manifest(
 def write_odds_weather_attempt_manifest(
     manifest: OddsWeatherAttemptManifestV1,
     artifact_root: Path,
+    *,
+    secret_values: Iterable[str] = (),
 ) -> OddsWeatherAttemptManifestArtifactV1:
-    return publish_odds_weather_attempt_manifest(manifest, artifact_root)[0]
+    return publish_odds_weather_attempt_manifest(
+        manifest,
+        artifact_root,
+        secret_values=secret_values,
+    )[0]
 
 
 def verify_odds_weather_attempt_manifest(
@@ -321,7 +340,13 @@ def verify_odds_weather_attempt_manifest(
     artifact_root: Path,
     relpath: str,
     expected: OddsWeatherAttemptManifestV1,
+    secret_values: Iterable[str] = (),
 ) -> OddsWeatherAttemptManifestArtifactV1:
+    configured_secrets = tuple(str(value) for value in secret_values if str(value))
+    if redact_value(expected.as_dict(), configured_secrets) != expected.as_dict():
+        raise OddsWeatherAttemptManifestError(
+            "attempt manifest contains credential-bearing material"
+        )
     try:
         safe_relpath = validate_artifact_relpath(relpath)
         if safe_relpath != odds_weather_attempt_manifest_relpath(
@@ -350,7 +375,7 @@ def verify_odds_weather_attempt_manifest(
     if (
         not isinstance(parsed, Mapping)
         or canonical_json_bytes(dict(parsed)) != content
-        or redact_value(parsed) != parsed
+        or redact_value(parsed, configured_secrets) != parsed
     ):
         raise OddsWeatherAttemptManifestError(
             "attempt manifest is noncanonical or credential-bearing"

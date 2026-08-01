@@ -456,12 +456,23 @@ weather/raw links. It returns all retained evidence—including future and
 excluded revisions—rather than making a new PIT decision. The frozen assembler
 remains the only selection owner.
 
-`OddsWeatherRetainedEvidenceInventoryV1` binds run/attempt/date/as-of/cutoff,
-the exact three-snapshot upstream chain, phase input checksum, ordered raw
-captures, provider-event revisions, odds-history revisions, weather revisions,
-source warnings, final warnings, and the selected raw-capture set. Its checksum
-is the canonical SHA-256 of that complete identity projection; configured
-secret inventories are validation-only inputs and never enter it.
+`OddsWeatherRetainedEvidenceInventoryV1` binds run ID, phase attempt, requested
+date, normalized UTC `as_of_time`, normalized UTC `observed_at` cutoff, phase
+input checksum, the exact three-snapshot upstream chain, ordered raw captures,
+provider-event revisions, odds-history revisions, weather revisions, source
+warnings, final warnings, and the selected raw-capture set. Its checksum is the
+canonical SHA-256 of that complete identity projection. `as_of_time` remains
+the immutable upstream run reference while `observed_at` remains the Phase 4
+selection boundary; both are directly and independently hashed.
+
+The checksum binds nested evidence transitively: raw metadata is represented by
+its full canonical projection, from which its row checksum is reproduced;
+provider-event identity carries the event checksum and full event-row checksum;
+odds-history identity lists every bookmaker/market/outcome, point,
+event/revision retrieval time, ordinal, and row checksum, with that checksum
+transitively binding price and provider/bookmaker/market update times; weather
+identity carries forecast and full row checksums. Payload JSON stays authoritative in the relational rows and verified
+raw artifacts rather than being duplicated in the identity projection.
 
 `OddsWeatherRepository` exposes:
 
@@ -492,6 +503,18 @@ Exact replay verifies existing bytes; conflicting replay never overwrites them.
 Rollback cleanup removes only newly created files whose checksum and byte count
 still match repository ownership. Pre-existing verified files, raw provider
 artifacts, and unrelated files are never removed.
+
+The standalone manifest constructor, `from_inventory`, publisher, writer, and
+verifier all accept configured secret values as nonstored validation inputs.
+They scan all manifest string leaves both before publication and after parsing
+retained bytes. The repository passes its configured-secret inventory through
+assembled and failed construction, publication, idempotent replay, row
+reconstruction, attempt reads, snapshot verification, and close/reopen
+reconstruction. The inventory is never a dataclass field and never enters
+equality, `as_dict()`, canonical bytes, artifact metadata, retained-inventory
+checksums, SQLite, logs, or exceptions. Legitimate `bookmaker_key` and
+`market_key` identities remain semantic evidence; configured secret values in
+those or any other string value still fail closed.
 
 The repository distinguishes every retained raw capture from the exact selected
 raw checksum inventory stored on the sealed snapshot. Future odds/weather
@@ -550,3 +573,11 @@ only phases 1–3 and blocks safely at pending `ODDS_WEATHER`; repository method
 do not transition controller state. Exact local and public validation counts are
 recorded in the checkpoint completion report after the final heads are pushed.
 Application/provider network requests remain zero.
+
+Repository external review subsequently found and corrected two identity-layer
+gaps without changing schema v11: `as_of_time` is now an explicit retained-
+inventory checksum member alongside `observed_at`, and every standalone attempt-
+manifest API now enforces configured-secret values through validation-only
+arguments. The repository checkpoint remains under review until this correction
+report and exact-head public CI are accepted. The production Phase 4 handler and
+controller registration remain deferred.

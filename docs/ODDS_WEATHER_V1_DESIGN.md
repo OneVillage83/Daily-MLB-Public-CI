@@ -339,12 +339,32 @@ and warning from schema-v11 rows. Explicit ordinals—not SQLite return order—
 canonical ordering. Future and excluded evidence stays retained while only the
 frozen assembler's selected raw checksums enter the snapshot.
 
-The attempt inventory checksum covers exact run/attempt/date/cutoff, all three
-upstream snapshot IDs/checksums, phase input checksum, ordered raw metadata,
-provider/odds/weather revision identities and row checksums, source/final
-warnings, and selected raw checksums. Full normalized payloads remain in their
-canonical relational JSON rows and raw bytes rather than being duplicated in
-the manifest.
+The retained-inventory checksum is canonical SHA-256 over exact run ID, phase
+attempt, requested date, normalized UTC `as_of_time`, normalized UTC
+`observed_at` selection cutoff, phase input checksum, all three upstream
+snapshot IDs/checksums, ordered raw-capture identity, provider-event revision
+identity, explicit odds-history revision identity, weather-revision identity,
+source warnings, final warnings, and selected raw-capture checksums.
+`as_of_time` is the immutable upstream run reference; `observed_at` is the
+Phase 4 evidence-selection boundary. They are independently represented and
+must never be collapsed.
+
+Nested evidence is transitively bound without duplicating full payloads:
+raw-capture projections include the complete canonical metadata from which the
+metadata row checksum is reproduced; provider-event
+projections include event and complete event-row checksums; odds-history
+projections include every semantic revision dimension and row checksum; and
+weather projections include forecast and complete weather-row checksums. Full
+normalized payloads remain in canonical relational JSON rows and verified raw
+bytes.
+
+Configured-secret inventories are validation-only. They are accepted by the
+attempt-manifest constructor/factory and standalone publish, write, and verify
+APIs, and the repository passes the same inventory through every creation,
+replay, read, and snapshot-verification path. Secret inventories are not stored
+on the dataclass, serialized, compared, hashed, written to SQLite, or included
+in exception text. Clean canonical bytes and checksums therefore remain
+identical regardless of which absent configured-secret inventory is supplied.
 
 Persistence uses one SQLite write transaction after independently verifying
 the sealed Phase 1–3 chain and active Phase 4 attempt. Manifest and snapshot

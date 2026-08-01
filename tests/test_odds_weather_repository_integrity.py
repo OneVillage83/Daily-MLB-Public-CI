@@ -138,6 +138,35 @@ def test_repository_rejects_configured_secret_hidden_as_semantic_bookmaker_key(
         )
 
 
+@pytest.mark.parametrize(
+    "read_method",
+    ("attempt_evidence", "attempt_manifest", "snapshot_id", "run_attempt", "latest"),
+)
+def test_repository_read_paths_reject_configured_secret_in_retained_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    read_method: str,
+) -> None:
+    repository, _, _, persisted, run_id = _persist_one_game(tmp_path, monkeypatch)
+    guarded = OddsWeatherRepository(
+        type(repository.database)(repository.database.path),
+        artifact_root=repository.artifact_root,
+        secret_values=("book-a",),
+    )
+
+    with pytest.raises(OddsWeatherIntegrityError, match="manifest"):
+        if read_method == "attempt_evidence":
+            guarded.get_attempt_evidence(run_id, 1)
+        elif read_method == "attempt_manifest":
+            guarded.get_attempt_manifest(run_id, 1)
+        elif read_method == "snapshot_id":
+            guarded.get_by_snapshot_id(persisted.snapshot_id)
+        elif read_method == "run_attempt":
+            guarded.get_for_run_attempt(run_id, 1)
+        else:
+            guarded.get_latest_for_run(run_id)
+
+
 @pytest.mark.parametrize("target", ("manifest", "snapshot", "raw"))
 def test_repository_retrieval_rejects_missing_or_tampered_artifact(
     tmp_path: Path,

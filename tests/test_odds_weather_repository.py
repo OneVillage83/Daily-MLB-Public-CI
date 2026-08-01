@@ -429,6 +429,174 @@ def test_configured_secret_inventory_does_not_change_clean_semantic_identity(
         inventory.identity_dict()
     )
     assert rebound_inventory.checksum == inventory.checksum
+    persisted = validating_repository.persist_assembly(
+        run_id=inventory.run_id,
+        phase_attempt=inventory.phase_attempt,
+        result=reassembled,
+        inventory=rebound_inventory,
+    )
+    manifest = validating_repository.get_attempt_manifest(
+        inventory.run_id,
+        inventory.phase_attempt,
+    )
+    manifest_bytes = (
+        repository.artifact_root
+        / validating_repository.get_attempt_evidence(
+            inventory.run_id,
+            inventory.phase_attempt,
+        ).manifest.relpath
+    ).read_bytes()
+    assert b"configured-secret-not-present-in-clean-evidence" not in manifest_bytes
+    assert manifest.retained_inventory_checksum == inventory.checksum
+    assert repository.persist_assembly(
+        run_id=inventory.run_id,
+        phase_attempt=inventory.phase_attempt,
+        result=result,
+        inventory=inventory,
+    ) == persisted
+
+
+def test_retained_inventory_checksum_binds_complete_identity_projection(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _, _, inventory, _ = _one_game_repository(tmp_path, monkeypatch)
+    assert set(inventory.identity_dict()) == {
+        "as_of_time",
+        "final_warnings",
+        "observed_at",
+        "odds_revision_inventory",
+        "phase_attempt",
+        "phase_input_checksum",
+        "provider_event_inventory",
+        "raw_capture_inventory",
+        "requested_date",
+        "run_id",
+        "selected_raw_capture_checksums",
+        "source_warnings",
+        "upstream_baseball_intelligence_checksum",
+        "upstream_baseball_intelligence_snapshot_id",
+        "upstream_daily_slate_checksum",
+        "upstream_daily_slate_snapshot_id",
+        "upstream_game_state_checksum",
+        "upstream_game_state_snapshot_id",
+        "weather_revision_inventory",
+    }
+
+    raw = list(inventory.raw_captures)
+    raw[0] = replace(raw[0], provider_timestamp=inventory.observed_at)
+
+    provider_events = list(inventory.provider_events)
+    provider_events[0] = replace(
+        provider_events[0],
+        event=replace(
+            provider_events[0].event,
+            retrieved_at=provider_events[0].event.retrieved_at + timedelta(seconds=1),
+        ),
+    )
+
+    odds_events = list(inventory.provider_events)
+    history = odds_events[0].event.mutable_history_rows()
+    first_history = dict(history[0])
+    first_history["price_american"] = float(first_history["price_american"]) + 1
+    history[0] = first_history
+    odds_events[0] = replace(
+        odds_events[0],
+        event=replace(odds_events[0].event, history_rows=tuple(history)),
+    )
+
+    weather = list(inventory.weather_revisions)
+    weather[0] = replace(
+        weather[0],
+        evidence=replace(
+            weather[0].evidence,
+            retrieved_at=weather[0].evidence.retrieved_at + timedelta(seconds=1),
+        ),
+    )
+
+    source_warning = OddsWeatherWarningV1(
+        code="checksum_audit_source_warning",
+        domain=OddsWeatherWarningDomain.ODDS,
+        message="Deterministic checksum-audit source warning",
+    )
+    assert inventory.final_warnings
+    final_warnings = list(inventory.final_warnings)
+    final_warnings[0] = replace(
+        final_warnings[0],
+        message=f"{final_warnings[0].message} (checksum audit)",
+    )
+
+    mutations = {
+        "run_id": replace(
+            inventory,
+            run_id="run_20260731_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ),
+        "phase_attempt": replace(inventory, phase_attempt=2),
+        "requested_date": replace(inventory, requested_date="2026-07-29"),
+        "as_of_time": replace(
+            inventory,
+            as_of_time=inventory.as_of_time + timedelta(seconds=1),
+        ),
+        "observed_at": replace(
+            inventory,
+            observed_at=inventory.observed_at + timedelta(seconds=1),
+        ),
+        "phase_input_checksum": replace(
+            inventory,
+            phase_input_checksum=hashlib.sha256(b"other phase input").hexdigest(),
+        ),
+        "daily_slate_snapshot_id": replace(
+            inventory,
+            upstream_daily_slate_snapshot_id="daily-slate:other",
+        ),
+        "daily_slate_checksum": replace(
+            inventory,
+            upstream_daily_slate_checksum=hashlib.sha256(b"other slate").hexdigest(),
+        ),
+        "game_state_snapshot_id": replace(
+            inventory,
+            upstream_game_state_snapshot_id="game-state:other",
+        ),
+        "game_state_checksum": replace(
+            inventory,
+            upstream_game_state_checksum=hashlib.sha256(b"other state").hexdigest(),
+        ),
+        "bia_snapshot_id": replace(
+            inventory,
+            upstream_baseball_intelligence_snapshot_id="bia:other",
+        ),
+        "bia_checksum": replace(
+            inventory,
+            upstream_baseball_intelligence_checksum=hashlib.sha256(b"other bia").hexdigest(),
+        ),
+        "raw_capture_identity": replace(inventory, raw_captures=tuple(raw)),
+        "provider_event_revision_identity": replace(
+            inventory,
+            provider_events=tuple(provider_events),
+        ),
+        "odds_revision_identity": replace(
+            inventory,
+            provider_events=tuple(odds_events),
+        ),
+        "weather_revision_identity": replace(
+            inventory,
+            weather_revisions=tuple(weather),
+        ),
+        "source_warnings": replace(
+            inventory,
+            source_warnings=(*inventory.source_warnings, source_warning),
+        ),
+        "final_warnings": replace(inventory, final_warnings=tuple(final_warnings)),
+        "selected_raw_capture_inventory": replace(
+            inventory,
+            selected_raw_capture_checksums=inventory.selected_raw_capture_checksums[:-1],
+        ),
+    }
+
+    for field, changed in mutations.items():
+        assert changed != inventory, field
+        assert changed.identity_dict() != inventory.identity_dict(), field
+        assert changed.checksum != inventory.checksum, field
 
 
 def test_repository_preserves_source_warnings_and_final_canonical_order(
