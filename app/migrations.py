@@ -12,9 +12,10 @@ from uuid import uuid4
 
 from app.redaction import redact_text
 from app.fielding_grain_migration import FORMAL_SCHEMA_V6_STATEMENTS
+from app.odds_weather_migration import ODDS_WEATHER_SCHEMA_V11_STATEMENTS
 
 
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 MIGRATION_V1_NAME = "formal_phase1_schema"
 MIGRATION_V2_NAME = "phase1_odds_history_and_freshness"
 MIGRATION_V3_NAME = "release_candidate_evidence_ledger"
@@ -25,6 +26,7 @@ MIGRATION_V7_NAME = "manual_pipeline_run_controller"
 MIGRATION_V8_NAME = "daily_slate_v1_temporal_persistence"
 MIGRATION_V9_NAME = "game_state_v1_temporal_persistence"
 MIGRATION_V10_NAME = "baseball_intelligence_assembly_v1_temporal_persistence"
+MIGRATION_V11_NAME = "odds_weather_v1_temporal_persistence"
 
 DSE_MLB_ML_CANDIDATE_V1_GATE_CODES = (
     "prediction_valid",
@@ -3845,6 +3847,72 @@ FORMAL_SCHEMA_V10_STATEMENTS = (
 )
 
 
+_COLLECTOR_RUNS_V11_CREATE = (
+    _COLLECTOR_RUNS_V10_CREATE.replace("_collector_runs_v10", "_collector_runs_v11")
+    .replace(
+        "schema_version IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)",
+        "schema_version IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)",
+    )
+)
+_COLLECTOR_RUNS_V11_COPY = _COLLECTOR_RUNS_V10_COPY.replace(
+    "_collector_runs_v10", "_collector_runs_v11"
+)
+_PIPELINE_RUNS_V11_CREATE = (
+    _PIPELINE_RUNS_V10_CREATE.replace("_pipeline_runs_v10", "_pipeline_runs_v11")
+    .replace(
+        "database_schema_version IN (7, 8, 9, 10)",
+        "database_schema_version IN (7, 8, 9, 10, 11)",
+    )
+)
+_PIPELINE_RUNS_V11_COPY = _PIPELINE_RUNS_V10_COPY.replace(
+    "_pipeline_runs_v10", "_pipeline_runs_v11"
+)
+
+
+FORMAL_SCHEMA_V11_STATEMENTS = (
+    "DROP TRIGGER publication_batches_validate_draft",
+    "DROP TRIGGER daily_slate_snapshots_validate_phase",
+    "DROP TRIGGER game_state_attempt_evidence_validate_phase_and_upstream",
+    "DROP TRIGGER game_state_attempt_evidence_reject_update",
+    "DROP TRIGGER game_state_attempt_evidence_reject_delete",
+    "DROP TRIGGER game_state_snapshots_validate_phase_and_upstream",
+    "DROP TRIGGER game_state_snapshots_reject_update",
+    "DROP TRIGGER game_state_snapshots_validate_seal",
+    "DROP TRIGGER game_state_snapshots_reject_delete",
+    "DROP TRIGGER game_state_games_validate_unsealed_snapshot",
+    "DROP TRIGGER game_state_games_reject_update",
+    "DROP TRIGGER game_state_games_reject_delete",
+    "DROP TRIGGER baseball_intelligence_attempt_evidence_validate_phase",
+    "DROP TRIGGER baseball_intelligence_attempt_evidence_reject_update",
+    "DROP TRIGGER baseball_intelligence_attempt_evidence_reject_delete",
+    "DROP TRIGGER baseball_intelligence_snapshots_validate_phase",
+    "DROP TRIGGER baseball_intelligence_snapshots_reject_update",
+    "DROP TRIGGER baseball_intelligence_games_validate_upstream",
+    "DROP TRIGGER baseball_intelligence_games_reject_update",
+    "DROP TRIGGER baseball_intelligence_games_reject_delete",
+    "DROP TRIGGER baseball_intelligence_players_validate_unsealed",
+    "DROP TRIGGER baseball_intelligence_players_reject_update",
+    "DROP TRIGGER baseball_intelligence_players_reject_delete",
+    "DROP TRIGGER baseball_intelligence_equivalents_validate_unsealed",
+    "DROP TRIGGER baseball_intelligence_equivalents_reject_update",
+    "DROP TRIGGER baseball_intelligence_equivalents_reject_delete",
+    "DROP TRIGGER baseball_intelligence_snapshots_validate_seal",
+    "DROP TRIGGER baseball_intelligence_snapshots_reject_delete",
+    _COLLECTOR_RUNS_V11_CREATE,
+    _COLLECTOR_RUNS_V11_COPY,
+    "DROP TABLE collector_runs",
+    "ALTER TABLE _collector_runs_v11 RENAME TO collector_runs",
+    _PIPELINE_RUNS_V11_CREATE,
+    _PIPELINE_RUNS_V11_COPY,
+    "DROP TABLE pipeline_runs",
+    "ALTER TABLE _pipeline_runs_v11 RENAME TO pipeline_runs",
+    FORMAL_SCHEMA_V7_STATEMENTS[7],
+    FORMAL_SCHEMA_V7_STATEMENTS[8],
+    *ODDS_WEATHER_SCHEMA_V11_STATEMENTS,
+    *FORMAL_SCHEMA_V10_STATEMENTS[34:],
+)
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -4060,6 +4128,28 @@ MIGRATION_V10_CHECKSUM = hashlib.sha256(
         )
     ).encode("utf-8")
 ).hexdigest()
+FORMAL_SCHEMA_V11_FINGERPRINT = _fingerprint_for_migration_chain(
+    FORMAL_SCHEMA_V1_STATEMENTS,
+    FORMAL_SCHEMA_V2_STATEMENTS,
+    FORMAL_SCHEMA_V3_STATEMENTS,
+    FORMAL_SCHEMA_V4_STATEMENTS,
+    FORMAL_SCHEMA_V5_STATEMENTS,
+    FORMAL_SCHEMA_V6_STATEMENTS,
+    FORMAL_SCHEMA_V7_STATEMENTS,
+    FORMAL_SCHEMA_V8_STATEMENTS,
+    FORMAL_SCHEMA_V9_STATEMENTS,
+    FORMAL_SCHEMA_V10_STATEMENTS,
+    FORMAL_SCHEMA_V11_STATEMENTS,
+)
+MIGRATION_V11_CHECKSUM = hashlib.sha256(
+    (
+        MIGRATION_V11_NAME
+        + "\nformal-v10-to-v11\n"
+        + "\n".join(
+            _canonical_sql(statement) for statement in FORMAL_SCHEMA_V11_STATEMENTS
+        )
+    ).encode("utf-8")
+).hexdigest()
 
 MIGRATION_HISTORY = (
     (1, MIGRATION_V1_NAME, MIGRATION_V1_CHECKSUM),
@@ -4072,6 +4162,7 @@ MIGRATION_HISTORY = (
     (8, MIGRATION_V8_NAME, MIGRATION_V8_CHECKSUM),
     (9, MIGRATION_V9_NAME, MIGRATION_V9_CHECKSUM),
     (10, MIGRATION_V10_NAME, MIGRATION_V10_CHECKSUM),
+    (11, MIGRATION_V11_NAME, MIGRATION_V11_CHECKSUM),
 )
 
 
@@ -4094,6 +4185,11 @@ def _v10_diagnostic_filename(started_at: str) -> str:
     return f"migration-v10-{safe_timestamp}-{uuid4().hex[:8]}.json"
 
 
+def _v11_diagnostic_filename(started_at: str) -> str:
+    safe_timestamp = started_at.replace(":", "").replace("+", "_")
+    return f"migration-v11-{safe_timestamp}-{uuid4().hex[:8]}.json"
+
+
 def _v9_backup_filename(database_path: Path, started_at: str) -> str:
     safe_timestamp = started_at.replace(":", "").replace("+", "_")
     return (
@@ -4106,6 +4202,14 @@ def _v10_backup_filename(database_path: Path, started_at: str) -> str:
     safe_timestamp = started_at.replace(":", "").replace("+", "_")
     return (
         f"{database_path.name}.pre-v10-{safe_timestamp}-"
+        f"{uuid4().hex[:8]}.sqlite3"
+    )
+
+
+def _v11_backup_filename(database_path: Path, started_at: str) -> str:
+    safe_timestamp = started_at.replace(":", "").replace("+", "_")
+    return (
+        f"{database_path.name}.pre-v11-{safe_timestamp}-"
         f"{uuid4().hex[:8]}.sqlite3"
     )
 
@@ -4242,6 +4346,41 @@ def _create_verified_v10_backup(
     return _verify_v9_backup(backup_path, FORMAL_SCHEMA_V9_FINGERPRINT)
 
 
+def _create_verified_v11_backup(
+    database_path: Path,
+    backup_path: Path,
+) -> dict[str, Any]:
+    _create_verified_backup(
+        database_path,
+        backup_path,
+        FORMAL_SCHEMA_V10_FINGERPRINT,
+    )
+    verification = _verify_v9_backup(backup_path, FORMAL_SCHEMA_V10_FINGERPRINT)
+    connection = sqlite3.connect(backup_path, timeout=5.0)
+    try:
+        observed_history = [
+            (int(row[0]), str(row[1]), str(row[2]))
+            for row in connection.execute(
+                "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
+            ).fetchall()
+        ]
+        if observed_history != list(MIGRATION_HISTORY[:10]):
+            raise BackupVerificationError(
+                "Schema v11 backup migration history is not exact through v10"
+            )
+        if int(connection.execute("PRAGMA user_version").fetchone()[0]) != 10:
+            raise BackupVerificationError(
+                "Schema v11 backup user_version is not 10"
+            )
+    finally:
+        connection.close()
+    return {
+        **verification,
+        "migration_history": [list(row) for row in observed_history],
+        "user_version": 10,
+    }
+
+
 def _v9_preflight_diagnostic(
     *,
     database_path: Path,
@@ -4304,6 +4443,39 @@ def _v10_preflight_diagnostic(
     }
 
 
+def _v11_preflight_diagnostic(
+    *,
+    database_path: Path,
+    backup_path: Path,
+    started_at: str,
+    source_integrity: list[str],
+    source_foreign_keys: list[tuple[Any, ...]],
+    backup_verification: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "backup_foreign_key_violations": backup_verification[
+            "foreign_key_violations"
+        ],
+        "backup_integrity_check": backup_verification["integrity_check"],
+        "backup_migration_history": backup_verification["migration_history"],
+        "backup_path": str(backup_path.resolve()),
+        "backup_user_version": backup_verification["user_version"],
+        "completed_at": None,
+        "database_path": str(database_path.resolve()),
+        "migration_checksum": MIGRATION_V11_CHECKSUM,
+        "migration_name": MIGRATION_V11_NAME,
+        "outcome": "pending",
+        "source_fingerprint": FORMAL_SCHEMA_V10_FINGERPRINT,
+        "source_foreign_key_violations": source_foreign_keys,
+        "source_integrity_check": source_integrity,
+        "source_version": 10,
+        "started_at": started_at,
+        "status": "preflight_verified",
+        "target_fingerprint": FORMAL_SCHEMA_V11_FINGERPRINT,
+        "target_version": 11,
+    }
+
+
 def _verify_v9_preflight_diagnostic(
     diagnostic_path: Path,
     expected: dict[str, Any],
@@ -4336,6 +4508,22 @@ def _verify_v10_preflight_diagnostic(
         )
 
 
+def _verify_v11_preflight_diagnostic(
+    diagnostic_path: Path,
+    expected: dict[str, Any],
+) -> None:
+    try:
+        observed = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DiagnosticWriteError(
+            "Schema v11 migration diagnostic is not readable"
+        ) from exc
+    if observed != expected:
+        raise DiagnosticWriteError(
+            "Schema v11 migration diagnostic is internally inconsistent"
+        )
+
+
 def _assert_foreign_keys(connection: sqlite3.Connection) -> None:
     violations = connection.execute("PRAGMA foreign_key_check").fetchall()
     if violations:
@@ -4356,6 +4544,7 @@ def _assert_target_schema(connection: sqlite3.Connection, version: int) -> None:
         8: FORMAL_SCHEMA_V8_FINGERPRINT,
         9: FORMAL_SCHEMA_V9_FINGERPRINT,
         10: FORMAL_SCHEMA_V10_FINGERPRINT,
+        11: FORMAL_SCHEMA_V11_FINGERPRINT,
     }.get(version)
     if expected_fingerprint is None:
         raise SchemaVerificationError(f"Unsupported target schema version {version}")
@@ -5344,6 +5533,120 @@ def _upgrade_formal_v9_schema(
     )
 
 
+def _upgrade_formal_v10_schema(
+    connection: sqlite3.Connection,
+    database_path: Path,
+    prior_result: MigrationResult | None = None,
+) -> MigrationResult:
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) != 10:
+        raise SchemaVerificationError(
+            "Formal v10 upgrade requires PRAGMA user_version=10"
+        )
+    validated = _validate_versioned_schema(connection)
+    if validated.version != 10:
+        raise SchemaVerificationError(
+            "Formal v10 upgrade requires exact migration history through v10"
+        )
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+        raise SchemaVerificationError(
+            "Formal v10 source requires foreign-key enforcement before schema v11 upgrade"
+        )
+    source_integrity = [
+        str(row[0]) for row in connection.execute("PRAGMA integrity_check").fetchall()
+    ]
+    if source_integrity != ["ok"]:
+        raise SchemaVerificationError(
+            "Formal v10 source integrity_check must be ok before schema v11 upgrade"
+        )
+    source_foreign_keys = [
+        tuple(row) for row in connection.execute("PRAGMA foreign_key_check").fetchall()
+    ]
+    if source_foreign_keys:
+        raise SchemaVerificationError(
+            "Formal v10 source has foreign-key violations before schema v11 upgrade"
+        )
+
+    source_kind = prior_result.source_kind if prior_result else "formal_v10"
+    backup_path = prior_result.backup_path if prior_result else None
+    diagnostic_path = prior_result.diagnostic_path if prior_result else None
+    v11_diagnostic: dict[str, Any] | None = None
+    if source_kind == "formal_v10":
+        started_at = _utc_now()
+        migration_dir = _migration_directory(database_path)
+        backup_path = migration_dir / _v11_backup_filename(database_path, started_at)
+        backup_verification = _create_verified_v11_backup(database_path, backup_path)
+        diagnostic_path = migration_dir / _v11_diagnostic_filename(started_at)
+        v11_diagnostic = _v11_preflight_diagnostic(
+            database_path=database_path,
+            backup_path=backup_path,
+            started_at=started_at,
+            source_integrity=source_integrity,
+            source_foreign_keys=source_foreign_keys,
+            backup_verification=backup_verification,
+        )
+        _write_atomic_diagnostic(diagnostic_path, v11_diagnostic)
+        _verify_v11_preflight_diagnostic(diagnostic_path, v11_diagnostic)
+
+    connection.execute("PRAGMA foreign_keys=OFF")
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 0:
+        raise SchemaVerificationError(
+            "Unable to prepare transactional schema v11 upgrade"
+        )
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if schema_fingerprint(connection) != FORMAL_SCHEMA_V10_FINGERPRINT:
+            raise SchemaVerificationError("Formal v10 schema changed before migration lock")
+        _execute_statements(connection, FORMAL_SCHEMA_V11_STATEMENTS)
+        applied_at = _utc_now()
+        connection.execute(
+            "INSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES (11, ?, ?, ?)",
+            (MIGRATION_V11_NAME, MIGRATION_V11_CHECKSUM, applied_at),
+        )
+        connection.execute("PRAGMA user_version=11")
+        _assert_target_schema(connection, 11)
+        connection.commit()
+    except Exception as exc:
+        if connection.in_transaction:
+            connection.rollback()
+        if v11_diagnostic is not None and diagnostic_path is not None:
+            v11_diagnostic.update(
+                {
+                    "completed_at": _utc_now(),
+                    "error": redact_text(str(exc)),
+                    "outcome": "migration_failed",
+                    "status": "completed",
+                }
+            )
+            _write_atomic_diagnostic(diagnostic_path, v11_diagnostic)
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+        raise SchemaVerificationError(
+            "Foreign-key enforcement could not be restored after schema v11 upgrade"
+        )
+    _assert_target_schema(connection, 11)
+    if v11_diagnostic is not None and diagnostic_path is not None:
+        v11_diagnostic.update(
+            {
+                "completed_at": _utc_now(),
+                "outcome": "migration_verified",
+                "status": "completed",
+            }
+        )
+        _write_atomic_diagnostic(diagnostic_path, v11_diagnostic)
+        _verify_v11_preflight_diagnostic(diagnostic_path, v11_diagnostic)
+    return MigrationResult(
+        version=11,
+        schema_fingerprint=FORMAL_SCHEMA_V11_FINGERPRINT,
+        migrated=True,
+        source_kind=source_kind,
+        backup_path=backup_path,
+        diagnostic_path=diagnostic_path,
+    )
+
+
 def _validate_versioned_schema(connection: sqlite3.Connection) -> MigrationResult:
     rows = connection.execute(
         "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
@@ -5380,6 +5683,7 @@ def _validate_versioned_schema(connection: sqlite3.Connection) -> MigrationResul
         8: FORMAL_SCHEMA_V8_FINGERPRINT,
         9: FORMAL_SCHEMA_V9_FINGERPRINT,
         10: FORMAL_SCHEMA_V10_FINGERPRINT,
+        11: FORMAL_SCHEMA_V11_FINGERPRINT,
     }
     return MigrationResult(
         version=newest,
@@ -5441,6 +5745,8 @@ def ensure_schema(database_path: Path) -> MigrationResult:
             result = _upgrade_formal_v8_schema(connection, path, result)
         if result.version == 9:
             result = _upgrade_formal_v9_schema(connection, path, result)
+        if result.version == 10:
+            result = _upgrade_formal_v10_schema(connection, path, result)
 
         journal_mode = str(connection.execute("PRAGMA journal_mode=WAL").fetchone()[0])
         if journal_mode.lower() != "wal":

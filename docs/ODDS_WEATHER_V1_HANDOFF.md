@@ -1,13 +1,15 @@
-# Odds + Weather V1 — Pre-Persistence Handoff
+# Odds + Weather V1 — Schema-v11 Persistence Handoff
 
-**Current private branch:** `rc/odds-weather-foundation-reconciliation-20260731`
-**Accepted base:** `rc/baseball-intelligence-handler-controller-20260730` at `e03780fa00df5af0a1e093d6a34e5f1dd5eb146f`
+**Current private branch:** `rc/odds-weather-schema-v11-20260731`
+**Accepted base:** `rc/odds-weather-foundation-reconciliation-20260731` at `62cdcda3deed76be66f5bddb95ce653c2ea6effa`
 **Historical public evidence:** PR #13 / `rc/odds-weather-v1-direct-20260727` (not the integrated base)
 **Controller phase:** 4 — `ODDS_WEATHER`
 
 ## Purpose
 
-This checkpoint completes everything that is safe to build for controller phase 4 before the temporal persistence chain and production handler are available.
+This checkpoint freezes the schema-v11 temporal persistence surface for
+controller phase 4. Repository serialization, retained-evidence selection, the
+production handler, and controller registration remain deliberately deferred.
 
 The phase boundary remains:
 
@@ -442,32 +444,70 @@ Focused validation exercises:
 
 ## Work intentionally left for the next checkpoints
 
-1. schema-v11 temporal persistence design and migration
-2. Odds + Weather repository and retained-evidence selectors
-3. production Phase 4 handler
-4. controller registration
-5. proof of safe block at `DATA_QUALITY`
+1. Odds + Weather repository and retained-evidence selectors
+2. production Phase 4 handler
+3. controller registration
+4. proof of safe block at `DATA_QUALITY`
 
 Do not fabricate production phase success before the sealed persistence/handler chain exists.
 
 ## Current checkpoint boundary
 
-Schema remains v10. No Phase 4 persistence table, repository, production
-handler, or controller registration is included. The controller still executes
-only phases 1–3 and blocks safely at pending `ODDS_WEATHER`.
+Schema v11 now formally creates the immutable Phase 4 temporal persistence
+surface documented in
+`ODDS_WEATHER_V1_MIGRATION_V11_SPEC.md`. Migration identity is
+`odds_weather_v1_temporal_persistence`, checksum
+`a54865d8b5623e96c4f571d6c9d7f899e9ced0d1911128b5a874b41e29df75dd`,
+and formal fingerprint
+`5b9635e1aac05d98fd61dadaf2ac5d435e4aaae9214c79501b5dd642673c75b8`.
+Fresh installs and verified v10 upgrades produce the same schema; existing v10
+databases receive a verified pre-v11 backup and atomic diagnostic.
+
+External review reproduced and closed two provisional-v11 integrity gaps:
+
+- SQLite considered `NULL` point values distinct inside the original composite
+  unique constraint. Paired partial unique indexes now make unpointed revision
+  identity null-safe and retain exact point as an identity dimension for
+  pointed spread/total history.
+- Snapshot artifact metadata previously accepted any nonblank relative path.
+  SQL now requires the exact checksum-derived Phase 4 semantic path, positive
+  artifact bytes, and agreement between the canonical JSON checksum field and
+  `snapshot_checksum`.
+
+The nullable audit also made `snapshot_id` explicitly `NOT NULL`, documented
+the intentional null uniqueness of unavailable games' selected provider event,
+and confirmed all remaining optional venue, weather, provider-update, and
+warning-context fields are outside unique identities or protected by explicit
+availability groups. The final surface has 14 tables, 20 explicit indexes, 10
+validation/sealing triggers, 28 immutability triggers, and 138 formal schema
+statements. Every v1-v10 migration identity and SQL byte remains frozen.
+
+No `OddsWeatherRepository`, retained-evidence selector, production handler, or
+controller registration is included. The controller still executes only
+phases 1–3 and blocks safely at pending `ODDS_WEATHER`.
 
 Local reconciliation validation is green:
 
 - exact formerly failing credential-boundary tests: 8 passed in development
   and 8 passed in stats
-- focused Phase 4/collector/processor/stadium/security: 254 passed
-- Phase 1–3/schema/controller/Docker cross-phase regression: 347 passed
-- full development suite: 1,527 passed, 8 documented environment skips
-- full stats suite: 1,529 passed, 6 documented Windows symlink skips
+- corrected schema-v11 migration suite: 23 passed
+- focused null-safe revision and content-addressed artifact-path corrections:
+  10 passed
+- focused Phase 4/migration/credential/security regression: 278 passed
+- Phase 1–3/migration/database/controller/Docker cross-phase regression:
+  385 passed
+- full development suite: 1,553 passed, 8 documented environment skips
+- full stats suite: 1,555 passed, 6 documented Windows symlink skips
 - stats-only suite: 267 passed
 - Ruff: passed
-- mypy `--no-incremental`: passed across 259 source files
+- mypy `--no-incremental`: passed across 261 source files
+- fresh validation database: schema version 11, formal fingerprint exact,
+  `integrity_check=ok`, and zero foreign-key violations
+- repository and generated-evidence secret scans: passed
+- offline pybaseball compatibility: passed with zero network requests
 
-The new stacked public PR and exact Actions evidence are recorded after the
-sanitized public branch is pushed. Application/provider network requests for
-this fixture-first checkpoint remain zero.
+Public draft PR #55 remains stacked on
+`rc/odds-weather-foundation-reconciliation-20260731`; its exact-head Actions
+evidence is recorded after the corrected sanitized public branch is pushed.
+Application/provider network requests for this migration-only checkpoint
+remain zero.

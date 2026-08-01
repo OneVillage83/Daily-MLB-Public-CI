@@ -304,17 +304,40 @@ this provider boundary remains strict.
 
 ## 15. Persistence and production wiring
 
-The upstream temporal chain is now available through schema v10, but formal
-Phase 4 persistence remains deliberately deferred to the next checkpoint.
-Schema v10 and every historical migration identity remain unchanged here.
+The upstream temporal chain and formal Phase 4 persistence surface are now
+available through schema v11. The migration creates immutable attempt,
+snapshot, ordered game/warning/raw-capture, provider event/bookmaker/market/
+outcome, PIT odds-revision, weather-revision, and selected-evidence tables.
+It preserves distinct retrieval, provider-update, forecast-valid, as-of,
+creation, completion, and sealing timestamps. Every v1-v10 statement and
+migration identity remains unchanged.
+
+The exact schema design, relationships, indexes, backup/diagnostic behavior,
+credential exclusions, checksum, and fingerprint are authoritative in
+`ODDS_WEATHER_V1_MIGRATION_V11_SPEC.md`. The schema permits a positively
+established zero-game snapshot but cannot convert a failed attempt into one.
+
+The finalized v11 revision identity is null-safe under SQLite. No-point
+revisions use a partial unique identity over attempt, exact provider-event
+revision, bookmaker, market, outcome, and revision retrieval time. Pointed
+revisions add the exact retained point. Thus `h2h` observations with `NULL`
+point cannot be duplicated or contradicted at one observation instant, while
+different spread/total line points and later PIT observations remain distinct.
+
+The snapshot row is independently bound by SQL to
+`odds_weather/snapshots/<snapshot_checksum>/odds_weather_v1.json`, requires a
+positive artifact byte count, and requires the checksum embedded in canonical
+top-level JSON to equal `snapshot_checksum`. The artifact checksum is kept
+separate because it identifies exact serialized bytes rather than being
+assumed equal to the semantic snapshot checksum. The complete nullable-key and
+foreign-key audit is recorded in the migration specification.
 
 Remaining order:
 
-1. schema-v11 temporal persistence design and migration
-2. Odds + Weather repository and retained-evidence selectors
-3. production phase-4 handler
-4. controller registration
-5. proof of safe block at `DATA_QUALITY`
+1. Odds + Weather repository and retained-evidence selectors
+2. production phase-4 handler
+3. controller registration
+4. proof of safe block at `DATA_QUALITY`
 
 The production handler will call the existing live provider collectors, retain raw captures first, convert those retained results to `OddsProviderEventV1` / `WeatherForecastEvidenceV1`, then assemble the canonical phase-4 snapshot.
 
@@ -335,9 +358,8 @@ The production handler will call the existing live provider collectors, retain r
 
 ## 17. OW1-B — remaining production work
 
-1. schema-v11 migration specification and implementation
-2. DB-backed retained odds/weather selectors and repository
-3. production `ODDS_WEATHER` handler
-4. Phase 4 controller registration
-5. zero-game provider-call proof through the production handler
-6. manual controller proof advancing only to `DATA_QUALITY`
+1. DB-backed retained odds/weather selectors and repository
+2. production `ODDS_WEATHER` handler
+3. Phase 4 controller registration
+4. zero-game provider-call proof through the production handler
+5. manual controller proof advancing only to `DATA_QUALITY`

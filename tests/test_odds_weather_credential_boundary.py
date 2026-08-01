@@ -221,6 +221,40 @@ def test_configured_secret_is_rejected_without_entering_canonical_output() -> No
     assert CONFIGURED_SECRET not in json.dumps(safe.as_dict(), sort_keys=True)
 
 
+@pytest.mark.parametrize("semantic_key", ("bookmaker", "market"))
+def test_configured_secret_is_rejected_in_semantic_key_fields(
+    semantic_key: str,
+) -> None:
+    event = _event()
+    if semantic_key == "bookmaker":
+        event["bookmakers"][0]["key"] = CONFIGURED_SECRET
+    else:
+        event["bookmakers"][0]["markets"][0]["key"] = CONFIGURED_SECRET
+
+    expected = "credential-bearing" if semantic_key == "bookmaker" else "not supported"
+    with pytest.raises(OddsWeatherContractError, match=expected):
+        _evidence(event, secret_values=(CONFIGURED_SECRET,))
+
+
+def test_clean_semantic_keys_are_independent_of_secret_inventory() -> None:
+    baseline = _evidence()
+    with_unrelated_secrets = _evidence(
+        secret_values=("different-configured-secret", CONFIGURED_SECRET),
+    )
+
+    assert with_unrelated_secrets == baseline
+    assert with_unrelated_secrets.as_dict() == baseline.as_dict()
+    assert json.dumps(
+        with_unrelated_secrets.as_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+    ) == json.dumps(
+        baseline.as_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def test_configured_secret_is_rejected_in_history_values() -> None:
     row = _history_row()
     row["outcome_name"] = f"Los Angeles {CONFIGURED_SECRET}"
