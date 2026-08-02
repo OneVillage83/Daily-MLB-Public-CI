@@ -1,16 +1,17 @@
-# Odds + Weather V1 — Repository and Retained-Evidence Handoff
+# Odds + Weather V1 — Production Phase Handoff
 
-**Current private branch:** `rc/odds-weather-repository-selectors-20260731`
-**Accepted base:** `rc/odds-weather-schema-v11-20260731` at `30625eaa58a0bac3092f75496dad89b0ed540b6f`
+**Current private branch:** `rc/phase4-production-acceleration-20260801`
+**Accepted base:** `rc/odds-weather-repository-selectors-20260731` at `13507df70823c428f62ef91b2189731b74cd238c`
 **Historical public evidence:** PR #13 / `rc/odds-weather-v1-direct-20260727` (not the integrated base)
 **Controller phase:** 4 — `ODDS_WEATHER`
 
 ## Purpose
 
-This checkpoint implements the durable Phase 4 repository, DB-backed retained-
-evidence selector, immutable attempt manifest, exact relational reconstruction,
-and offline integrity verification. The production handler and controller
-registration remain deliberately deferred.
+The durable Phase 4 repository and selectors are accepted. This sprint adds the
+production `OddsWeatherPhaseHandler`, registers Phase 4 in the Manual Run
+Controller, and advances the safe execution boundary to pending `DATA_QUALITY`.
+It also establishes the repository-wide persistence and validation protocols in
+`PIPELINE_PERSISTENCE_STANDARD.md` and `VALIDATION_TIERS.md`.
 
 The phase boundary remains:
 
@@ -528,13 +529,80 @@ evidence but create no snapshot or snapshot artifact. A positively established
 zero-game chain instead creates and seals a canonical zero-game snapshot with
 zero child/selection rows and reconstructs exactly after database reopen.
 
-## Work intentionally left for the next checkpoint
+## Production handler and controller boundary
 
-1. production Phase 4 handler
-2. Phase 4 controller registration
-3. proof of safe block at `DATA_QUALITY`
+`OddsWeatherPhaseHandler(context) -> PhaseExecutionResult` accepts only an
+active `ODDS_WEATHER` attempt. It independently reloads and verifies the sealed
+DailySlate, GameState, and Baseball Intelligence chain before any acquisition.
+The constructor supports deterministic injection of the clock, odds collector,
+NWS collector, optional OpenWeather collector, repository, stadium authority,
+and acquisition planner; production defaults reuse the validated collectors.
 
-Do not fabricate production phase success before the sealed persistence/handler chain exists.
+The handler fixes one UTC observation boundary for the attempt after acquisition
+timestamps are known and before PIT selection. Its
+`DSE_ODDS_WEATHER_PHASE_INPUT_V1` checksum binds requested date, upstream as-of
+time, the fixed observation cutoff, all three upstream checksums, accepted
+snapshot/event/weather contract versions, provider policy versions and modes,
+configured nonsecret odds regions/markets/format, OpenWeather enablement and
+comparison mode, and stadium catalog/policy versions. Credentials, request
+metadata, and secret inventories never enter the checksum.
+
+For nonempty slates, validated odds evidence is required, NWS is primary, and
+OpenWeather is comparison/fallback evidence under the accepted policy. A failed
+NWS request may fall back to OpenWeather with an explicit warning; failure of
+both required paths retains `acquisition_failed`. Optional comparison failure
+does not discard valid NWS evidence. Adapter failures retain
+`normalization_failed`; deterministic assembly or persistence/reconstruction
+failures retain `assembly_failed`. Each failure keeps safely available raw and
+normalized evidence in its immutable attempt manifest and creates no snapshot.
+Failure-evidence errors are attached to, but never mask, the original error.
+
+A positively established zero-game chain skips every provider and collector,
+builds an empty inventory, persists and reconstructs a sealed zero-game
+snapshot, and returns success. A nonempty acquisition failure cannot use this
+path.
+
+On success the handler builds and assembles the accepted retained inventory,
+persists through `OddsWeatherRepository`, reloads attempt evidence, manifest,
+inventory, artifact and relational snapshot, and requires exact canonical
+equivalence. No warnings returns `SUCCEEDED`; canonical warnings return
+`SUCCEEDED_WITH_WARNINGS`. The handler returns both phase-input and output
+checksums, the content-addressed artifact path, exact warnings, and
+`continue_pipeline=True`; only the controller service changes phase state.
+
+Production controller construction now registers exactly:
+
+1. `DAILY_SLATE`
+2. `GAME_STATE`
+3. `BASEBALL_INTELLIGENCE_ASSEMBLY`
+4. `ODDS_WEATHER`
+
+After Phase 4 commits, the same resume blocks safely at unregistered pending
+`DATA_QUALITY`. A later resume does not rerun Phase 4 or alter its attempt,
+checksums, manifest, or snapshot. The next accepted sprint is
+`DATA_QUALITY -> MATCHUP_PACKET -> MODEL_FEATURE_SET`; those phases are not
+implemented here.
+
+## Validation protocol
+
+During implementation, run focused checks with:
+
+```text
+python scripts/validate_checkpoint.py task --test <path> --python-target <path>
+```
+
+At the single sprint boundary, run:
+
+```text
+python scripts/validate_checkpoint.py sprint
+```
+
+Use `--explain` to print commands and documented skips without execution. This
+sprint intentionally does not run the release profile, the complete local stats
+environment, dependency audits, hash-lock rehearsals, Docker, or the migration
+failure-injection matrix because schema, dependencies, stats contracts, lock
+files, and Docker inputs are unchanged. Public CI supplies final cross-platform,
+stats-environment, security, and Docker evidence.
 
 ## Frozen schema and current checkpoint boundary
 
@@ -568,16 +636,14 @@ validation/sealing triggers, 28 immutability triggers, and 138 formal schema
 statements. Every v1-v10 migration identity and SQL byte remains frozen.
 
 Schema v11 is byte-for-byte frozen. This checkpoint changes no migration,
-table, index, trigger, checksum, or fingerprint. The controller still executes
-only phases 1–3 and blocks safely at pending `ODDS_WEATHER`; repository methods
+table, index, trigger, checksum, or fingerprint. The controller executes phases
+1–4 and blocks safely at pending `DATA_QUALITY`; repository and handler methods
 do not transition controller state. Exact local and public validation counts are
 recorded in the checkpoint completion report after the final heads are pushed.
-Application/provider network requests remain zero.
+Application/provider network requests during tests remain zero.
 
 Repository external review subsequently found and corrected two identity-layer
-gaps without changing schema v11: `as_of_time` is now an explicit retained-
-inventory checksum member alongside `observed_at`, and every standalone attempt-
-manifest API now enforces configured-secret values through validation-only
-arguments. The repository checkpoint remains under review until this correction
-report and exact-head public CI are accepted. The production Phase 4 handler and
-controller registration remain deferred.
+gaps without changing schema v11: `as_of_time` is an explicit retained-inventory
+checksum member alongside `observed_at`, and every standalone attempt-manifest
+API enforces configured-secret values through validation-only arguments. Those
+accepted boundaries are unchanged by the production handler.
