@@ -23,6 +23,7 @@ from app.run_controller.contracts import (
 from app.run_controller.service import (
     ManualRunExecutionBlocked,
     ManualRunExecutionError,
+    PhaseExecutionResult,
 )
 from scripts.run_controller import (
     EXIT_BLOCKED,
@@ -121,15 +122,26 @@ def _persist_phase_two(
         game_state_repository.database.path,
         game_state_repository.artifact_root,
     )
+    def phase_four_fixture(_context):
+        return PhaseExecutionResult(
+            status=PipelinePhaseStatus.SUCCEEDED,
+            input_checksum="4" * 64,
+            output_checksum="5" * 64,
+            artifact_relpath=(
+                "odds_weather/snapshots/" + "5" * 64 + "/odds_weather_v1.json"
+            ),
+        )
+
     controller = build_controller(
         configured.database_path,
         configured_settings=configured,
         clock=lambda: SELECTION_OBSERVED,
+        odds_weather_handler=phase_four_fixture,
     )
     return controller, configured, run_id, slate, state
 
 
-def test_production_controller_registers_exactly_phases_one_through_three(
+def test_production_controller_registers_exactly_phases_one_through_four(
     tmp_path,
 ) -> None:
     configured = _settings(tmp_path / "handlers.db", tmp_path / "artifacts")
@@ -142,8 +154,9 @@ def test_production_controller_registers_exactly_phases_one_through_three(
         PipelinePhaseKey.DAILY_SLATE,
         PipelinePhaseKey.GAME_STATE,
         PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY,
+        PipelinePhaseKey.ODDS_WEATHER,
     )
-    assert PipelinePhaseKey.ODDS_WEATHER not in controller.handlers
+    assert PipelinePhaseKey.DATA_QUALITY not in controller.handlers
     metadata = _safe_configuration_metadata(configured)["baseball_intelligence"]
     assert metadata == {
         "attempt_manifest_version": (
@@ -156,7 +169,7 @@ def test_production_controller_registers_exactly_phases_one_through_three(
     }
 
 
-def test_six_category_resume_commits_phase_three_then_blocks_at_odds_weather(
+def test_six_category_resume_commits_phase_three_and_four_then_blocks_at_data_quality(
     tmp_path,
     monkeypatch,
     capsys,
@@ -168,7 +181,7 @@ def test_six_category_resume_commits_phase_three_then_blocks_at_odds_weather(
     )
     with pytest.raises(ManualRunExecutionBlocked) as blocked:
         controller.resume(run_id)
-    assert blocked.value.phase_key is PipelinePhaseKey.ODDS_WEATHER
+    assert blocked.value.phase_key is PipelinePhaseKey.DATA_QUALITY
 
     summary = controller.show(run_id)
     phase = summary.phases[2]
@@ -182,11 +195,11 @@ def test_six_category_resume_commits_phase_three_then_blocks_at_odds_weather(
         f"baseball_intelligence/snapshots/{phase.output_checksum}/"
         "baseball_intelligence_assembly_v1.json"
     )
-    assert odds.status is PipelinePhaseStatus.PENDING
-    assert odds.attempt_count == 0
+    assert odds.status is PipelinePhaseStatus.SUCCEEDED
+    assert odds.attempt_count == 1
     assert all(
         item.status is PipelinePhaseStatus.PENDING
-        for item in summary.phases[3:]
+        for item in summary.phases[4:]
     )
     handler = controller.handlers[PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY]
     assert isinstance(handler, BaseballIntelligencePhaseHandler)
@@ -205,7 +218,7 @@ def test_six_category_resume_commits_phase_three_then_blocks_at_odds_weather(
     first_attempt = handler.repository.get_attempt_evidence(run_id, 1)
     with pytest.raises(ManualRunExecutionBlocked) as second_block:
         controller.resume(run_id)
-    assert second_block.value.phase_key is PipelinePhaseKey.ODDS_WEATHER
+    assert second_block.value.phase_key is PipelinePhaseKey.DATA_QUALITY
     assert controller.show(run_id).phases[2].attempt_count == 1
     assert handler.repository.list_attempt_evidence(run_id) == (first_attempt,)
 
@@ -221,7 +234,7 @@ def test_six_category_resume_commits_phase_three_then_blocks_at_odds_weather(
     )
     output = capsys.readouterr()
     assert exit_code == EXIT_BLOCKED
-    assert "odds_weather" in output.err
+    assert "data_quality" in output.err
     assert configured.odds_api_key not in output.err
     assert configured.service_auth_token not in output.err
 
@@ -282,14 +295,14 @@ def test_phase_three_failure_and_retry_preserve_attempt_one(
     monkeypatch.setattr(handler.repository, "assemble_for_run", original_assemble)
     with pytest.raises(ManualRunExecutionBlocked) as blocked:
         controller.resume(run_id)
-    assert blocked.value.phase_key is PipelinePhaseKey.ODDS_WEATHER
+    assert blocked.value.phase_key is PipelinePhaseKey.DATA_QUALITY
     succeeded = controller.show(run_id)
     assert succeeded.run.status is PipelineRunStatus.RUNNING
     assert succeeded.phases[2].status is (
         PipelinePhaseStatus.SUCCEEDED_WITH_WARNINGS
     )
     assert succeeded.phases[2].attempt_count == 2
-    assert succeeded.phases[3].status is PipelinePhaseStatus.PENDING
+    assert succeeded.phases[3].status is PipelinePhaseStatus.SUCCEEDED
     assert handler.repository.get_attempt_evidence(run_id, 1) == first
     second = handler.repository.get_attempt_evidence(run_id, 2)
     assert second.outcome is BaseballIntelligenceAttemptOutcome.ASSEMBLED
@@ -298,7 +311,7 @@ def test_phase_three_failure_and_retry_preserve_attempt_one(
     assert latest.phase_attempt == 2
 
 
-def test_zero_game_controller_advances_to_odds_weather_without_network(
+def test_zero_game_controller_advances_through_odds_weather_without_network(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -309,7 +322,7 @@ def test_zero_game_controller_advances_to_odds_weather_without_network(
     )
     with pytest.raises(ManualRunExecutionBlocked) as blocked:
         controller.resume(run_id)
-    assert blocked.value.phase_key is PipelinePhaseKey.ODDS_WEATHER
+    assert blocked.value.phase_key is PipelinePhaseKey.DATA_QUALITY
     summary = controller.show(run_id)
     phase = summary.phases[2]
     assert phase.status is PipelinePhaseStatus.SUCCEEDED

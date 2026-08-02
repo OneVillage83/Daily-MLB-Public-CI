@@ -20,6 +20,13 @@ from app.baseball_intelligence import (  # noqa: E402
 )
 from app.daily_slate.handler import DailySlatePhaseHandler  # noqa: E402
 from app.game_state.handler import GameStatePhaseHandler  # noqa: E402
+from app.odds_weather import (  # noqa: E402
+    ODDS_WEATHER_ATTEMPT_MANIFEST_CONTRACT,
+    ODDS_WEATHER_CONTRACT_VERSION,
+    ODDS_WEATHER_PHASE_INPUT_CONTRACT,
+    WEATHER_FORECAST_CONTRACT_VERSION,
+    OddsWeatherPhaseHandler,
+)
 from app.database import Database  # noqa: E402
 from app.redaction import redact_text  # noqa: E402
 from app.run_controller.contracts import PipelinePhaseKey  # noqa: E402
@@ -35,6 +42,7 @@ from app.run_controller.service import (  # noqa: E402
     ManualRunExecutionError,
     ManualRunRecoveryRequired,
     ManualRunSummaryV1,
+    PhaseHandler,
 )
 from app.stats.features import FEATURE_VERSION_V3  # noqa: E402
 
@@ -81,6 +89,25 @@ def _safe_configuration_metadata(configured_settings: Settings) -> dict[str, Any
             "network_enabled": False,
             "source_mode": "retained_sqlite",
         },
+        "odds_weather": {
+            "attempt_manifest_version": ODDS_WEATHER_ATTEMPT_MANIFEST_CONTRACT,
+            "contract_version": ODDS_WEATHER_CONTRACT_VERSION,
+            "input_contract_version": ODDS_WEATHER_PHASE_INPUT_CONTRACT,
+            "network_enabled": True,
+            "nws_mode": "primary",
+            "odds_mode": "the_odds_api_mlb",
+            "openweather_enabled": configured_settings.openweather_enabled,
+            "openweather_mode": (
+                "comparison"
+                if configured_settings.openweather_enabled
+                and configured_settings.weather_compare_enabled
+                else "fallback"
+                if configured_settings.openweather_enabled
+                else "disabled"
+            ),
+            "source_mode": "provider_acquisition_and_retained_sqlite",
+            "weather_contract_version": WEATHER_FORECAST_CONTRACT_VERSION,
+        },
         "odds": {
             "enabled": bool(configured_settings.odds_api_key),
             "format": configured_settings.odds_format,
@@ -107,6 +134,7 @@ def build_controller(
     *,
     configured_settings: Settings = settings,
     clock: Callable[[], datetime] | None = None,
+    odds_weather_handler: PhaseHandler | None = None,
 ) -> ManualRunController:
     database = Database(
         database_path,
@@ -145,6 +173,17 @@ def build_controller(
             secret_values=secret_values,
             clock=clock,
         )
+    if odds_weather_handler is None:
+        odds_weather_options: dict[str, Any] = {}
+        if clock is not None:
+            odds_weather_options["clock"] = clock
+        odds_weather_handler = OddsWeatherPhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            configured_settings=configured_settings,
+            secret_values=secret_values,
+            **odds_weather_options,
+        )
     controller_options: dict[str, Any] = {}
     if clock is not None:
         controller_options["clock"] = clock
@@ -158,6 +197,7 @@ def build_controller(
             PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY: (
                 baseball_intelligence_handler
             ),
+            PipelinePhaseKey.ODDS_WEATHER: odds_weather_handler,
         },
         **controller_options,
     )
@@ -180,7 +220,7 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
         prog="run_controller",
         description=(
             "Initialize, inspect, and manually resume Daily MLB pipeline runs; "
-            "phases 1-3 can execute; Phase 3 uses retained SQLite evidence"
+            "phases 1-4 can execute; Phase 4 persists retained provider evidence"
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -203,8 +243,8 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
         "resume",
         help=(
             "resume persisted work; DAILY_SLATE, GAME_STATE, and "
-            "BASEBALL_INTELLIGENCE_ASSEMBLY can execute and the controller "
-            "blocks safely at ODDS_WEATHER"
+            "BASEBALL_INTELLIGENCE_ASSEMBLY and ODDS_WEATHER can execute and "
+            "the controller blocks safely at DATA_QUALITY"
         ),
     )
     _add_common_database_argument(resume, configured_settings)
