@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import app.odds_weather.handler as handler_module
 from app.collectors.odds_collector import OddsCollectionResult
 from app.config import Settings
 from app.http import HttpRequestDiagnostics
@@ -168,6 +169,48 @@ def _handler(repository, inventory, *, settings=None, clock=None, **overrides):
     )
 
 
+def _raw_artifact_paths(root: Path) -> set[Path]:
+    return {
+        path
+        for path in root.rglob("*.json")
+        if "raw" in path.parts
+    }
+
+
+def _direct_raw_capture(inventory) -> RawPayloadCapture:
+    event = inventory.eligible_provider_event_revisions[0].event
+    return _capture(
+        provider="the_odds_api",
+        endpoint="mlb_odds",
+        payload=[event.mutable_event()],
+        retrieved_at=event.retrieved_at,
+        event_id=None,
+    )
+
+
+def _unsafe_capture_with(
+    capture: RawPayloadCapture,
+    field: str,
+    value: object,
+) -> RawPayloadCapture:
+    unsafe = object.__new__(RawPayloadCapture)
+    for name in (
+        "provider",
+        "endpoint_category",
+        "payload",
+        "retrieved_at",
+        "provider_timestamp",
+        "content_type",
+        "event_id",
+    ):
+        object.__setattr__(
+            unsafe,
+            name,
+            value if name == field else getattr(capture, name),
+        )
+    return unsafe
+
+
 def test_phase_input_checksum_binds_every_behavior_changing_field_and_not_secrets() -> None:
     policy = OddsWeatherPhasePolicyV1(
         odds_weather_contract_version="snapshot-v1",
@@ -305,6 +348,15 @@ def test_one_game_handler_persists_and_reconstructs_exact_success(tmp_path, monk
     assert reopened.get_for_run_attempt(run_id, 1).snapshot == persisted.snapshot
     assert reopened.get_attempt_manifest(run_id, 1).phase_input_checksum == result.input_checksum
     assert reopened.load_retained_inventory(run_id, 1).checksum == persisted.retained_inventory_checksum
+    assert [capture.endpoint_category for capture in reopened.load_retained_inventory(
+        run_id,
+        1,
+    ).raw_captures] == [
+        "mlb_odds",
+        "point_lookup",
+        "hourly_forecast",
+        "one_call",
+    ]
 
 
 def test_zero_game_fast_path_calls_no_provider_and_returns_success(tmp_path) -> None:
@@ -418,6 +470,226 @@ def test_required_weather_acquisition_failure_retains_failed_attempt(
     assert evidence.outcome is OddsWeatherAttemptOutcome.ACQUISITION_FAILED
     assert evidence.snapshot_checksum is None
     assert repository.get_latest_for_run(run_id) is None
+
+
+def test_partial_nws_publication_retains_successful_point_capture(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository, _, inventory, run_id = _one_game_repository(tmp_path, monkeypatch)
+    real_atomic_create = handler_module.atomic_create_bytes
+    before = _raw_artifact_paths(repository.artifact_root)
+
+    def fail_hourly_publication(path: Path, payload: bytes) -> bool:
+        if "hourly_forecast" in path.parts:
+            raise OSError("injected hourly publication failure")
+        return real_atomic_create(path, payload)
+
+    monkeypatch.setattr(
+        handler_module,
+        "atomic_create_bytes",
+        fail_hourly_publication,
+    )
+
+    with pytest.raises(
+        handler_module.OddsWeatherAcquisitionError,
+        match="raw capture could not be published",
+    ):
+        _handler(repository, inventory)(_context(repository, run_id))
+
+    evidence = repository.get_attempt_evidence(run_id, 1)
+    retained = repository.load_retained_inventory(run_id, 1)
+    manifest = repository.get_attempt_manifest(run_id, 1)
+    endpoints = [capture.endpoint_category for capture in retained.raw_captures]
+    represented_paths = {capture.raw_relpath for capture in retained.raw_captures}
+    newly_created_paths = {
+        path.relative_to(repository.artifact_root).as_posix()
+        for path in _raw_artifact_paths(repository.artifact_root) - before
+    }
+
+    assert evidence.outcome is OddsWeatherAttemptOutcome.ACQUISITION_FAILED
+    assert evidence.snapshot_checksum is None
+    assert endpoints == ["mlb_odds", "point_lookup"]
+    assert "hourly_forecast" not in endpoints
+    assert [capture.ordinal for capture in retained.raw_captures] == [1, 2]
+    assert tuple(manifest.raw_capture_inventory) == tuple(
+        capture.as_dict() for capture in retained.raw_captures
+    )
+    assert newly_created_paths <= represented_paths
+    assert newly_created_paths == {
+        capture.raw_relpath
+        for capture in retained.raw_captures
+        if capture.endpoint_category == "point_lookup"
+    }
+
+
+def test_first_nws_publication_failure_leaves_no_nws_artifact(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository, _, inventory, run_id = _one_game_repository(tmp_path, monkeypatch)
+    real_atomic_create = handler_module.atomic_create_bytes
+    before = _raw_artifact_paths(repository.artifact_root)
+
+    def fail_point_publication(path: Path, payload: bytes) -> bool:
+        if "point_lookup" in path.parts:
+            raise OSError("injected point publication failure")
+        return real_atomic_create(path, payload)
+
+    monkeypatch.setattr(
+        handler_module,
+        "atomic_create_bytes",
+        fail_point_publication,
+    )
+
+    with pytest.raises(handler_module.OddsWeatherAcquisitionError):
+        _handler(repository, inventory)(_context(repository, run_id))
+
+    retained = repository.load_retained_inventory(run_id, 1)
+    assert [capture.endpoint_category for capture in retained.raw_captures] == [
+        "mlb_odds"
+    ]
+    newly_created = _raw_artifact_paths(repository.artifact_root) - before
+    assert not {
+        path
+        for path in newly_created
+        if "nws" in path.parts
+    }
+    assert {
+        path.relative_to(repository.artifact_root).as_posix()
+        for path in newly_created
+    } <= {capture.raw_relpath for capture in retained.raw_captures}
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("retrieved_at", "not-a-timestamp", "raw capture retrieved_at"),
+        ("provider_timestamp", "not-a-timestamp", "provider timestamp"),
+    ),
+)
+def test_invalid_raw_capture_timestamps_create_no_final_artifact(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+    message,
+) -> None:
+    repository, _, inventory, _run_id = _one_game_repository(tmp_path, monkeypatch)
+    handler = _handler(repository, inventory)
+    capture = _unsafe_capture_with(_direct_raw_capture(inventory), field, value)
+    before = _raw_artifact_paths(repository.artifact_root)
+
+    with pytest.raises(handler_module.OddsWeatherAcquisitionError) as raised:
+        handler._publish_raw_capture(
+            capture=capture,
+            run_id=inventory.run_id,
+            requested_date=inventory.requested_date,
+            ordinal=1,
+        )
+
+    assert raised.value.__cause__ is not None
+    assert message in str(raised.value.__cause__)
+    assert _raw_artifact_paths(repository.artifact_root) == before
+
+
+def test_descriptor_construction_failure_precedes_raw_publication(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository, _, inventory, _run_id = _one_game_repository(tmp_path, monkeypatch)
+    handler = _handler(repository, inventory)
+    before = _raw_artifact_paths(repository.artifact_root)
+
+    def fail_descriptor(**kwargs):
+        del kwargs
+        raise ValueError("injected descriptor construction failure")
+
+    monkeypatch.setattr(handler_module, "OddsWeatherRawCaptureV1", fail_descriptor)
+
+    with pytest.raises(
+        handler_module.OddsWeatherAcquisitionError,
+        match="raw capture could not be published",
+    ):
+        handler._publish_raw_capture(
+            capture=_direct_raw_capture(inventory),
+            run_id=inventory.run_id,
+            requested_date=inventory.requested_date,
+            ordinal=1,
+        )
+
+    assert _raw_artifact_paths(repository.artifact_root) == before
+
+
+def test_post_create_verification_failure_removes_only_new_exact_artifact(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository, _, inventory, _run_id = _one_game_repository(tmp_path, monkeypatch)
+    handler = _handler(repository, inventory)
+    before = _raw_artifact_paths(repository.artifact_root)
+    real_read_bytes = Path.read_bytes
+    injected = False
+
+    def fail_first_raw_read(path: Path) -> bytes:
+        nonlocal injected
+        if not injected and "raw" in path.parts:
+            injected = True
+            raise OSError("injected post-create verification failure")
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", fail_first_raw_read)
+
+    with pytest.raises(handler_module.OddsWeatherAcquisitionError):
+        handler._publish_raw_capture(
+            capture=_direct_raw_capture(inventory),
+            run_id=inventory.run_id,
+            requested_date=inventory.requested_date,
+            ordinal=1,
+        )
+
+    assert injected
+    assert _raw_artifact_paths(repository.artifact_root) == before
+
+
+def test_raw_publication_exact_replay_and_conflict_preserve_preexisting_file(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repository, _, inventory, _run_id = _one_game_repository(tmp_path, monkeypatch)
+    handler = _handler(repository, inventory)
+    capture = _direct_raw_capture(inventory)
+    descriptor = handler._publish_raw_capture(
+        capture=capture,
+        run_id=inventory.run_id,
+        requested_date=inventory.requested_date,
+        ordinal=1,
+    )
+    path = repository.artifact_root / descriptor.raw_relpath
+    original = path.read_bytes()
+
+    replay = handler._publish_raw_capture(
+        capture=capture,
+        run_id=inventory.run_id,
+        requested_date=inventory.requested_date,
+        ordinal=1,
+    )
+    assert replay == descriptor
+    assert path.read_bytes() == original
+
+    conflicting = b"preexisting conflicting immutable raw evidence"
+    path.write_bytes(conflicting)
+    with pytest.raises(
+        handler_module.OddsWeatherAcquisitionError,
+        match="conflicts with immutable evidence",
+    ):
+        handler._publish_raw_capture(
+            capture=capture,
+            run_id=inventory.run_id,
+            requested_date=inventory.requested_date,
+            ordinal=1,
+        )
+    assert path.read_bytes() == conflicting
 
 
 def test_nws_failure_uses_openweather_fallback_with_explicit_warning(

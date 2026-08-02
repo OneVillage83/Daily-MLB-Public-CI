@@ -557,6 +557,16 @@ failures retain `assembly_failed`. Each failure keeps safely available raw and
 normalized evidence in its immutable attempt manifest and creates no snapshot.
 Failure-evidence errors are attached to, but never mask, the original error.
 
+Raw publication validates the complete descriptor, timestamps, checksum, byte
+count, containment-safe path, and relative path before atomically exposing final
+bytes. A newly created file is removed after a post-create failure only when its
+bytes, checksum, and size still prove ownership by that call; pre-existing exact,
+conflicting, changed, and unrelated files are never removed. Multi-capture NWS
+acquisition owns the point descriptor immediately before attempting the hourly
+capture. Thus an hourly publication failure retains the Odds and NWS point raw
+evidence with contiguous ordinals, records `acquisition_failed`, and cannot
+orphan the point artifact from its attempt manifest.
+
 A positively established zero-game chain skips every provider and collector,
 builds an empty inventory, persists and reconstructs a sealed zero-game
 snapshot, and returns success. A nonempty acquisition failure cannot use this

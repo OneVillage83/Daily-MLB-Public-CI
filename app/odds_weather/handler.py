@@ -369,14 +369,40 @@ class OddsWeatherPhaseHandler:
         source_game_id: str | None = None,
         provider_event_id: str | None = None,
     ) -> OddsWeatherRawCaptureV1:
+        created = False
+        path: Path | None = None
+        content: bytes | None = None
+        checksum: str | None = None
         try:
             content = sanitized_json_bytes(capture, secret_values=self.secret_values)
             checksum = hashlib.sha256(content).hexdigest()
+            provider_timestamp = (
+                None
+                if capture.provider_timestamp is None
+                else _parse_aware_utc(capture.provider_timestamp, "provider timestamp")
+            )
+            retrieved_at = _parse_aware_utc(
+                capture.retrieved_at,
+                "raw capture retrieved_at",
+            )
             path = ArtifactPaths(
                 self.artifact_root,
                 parse_requested_date(requested_date),
                 run_id,
             ).raw_json_path(capture.provider, capture.endpoint_category, checksum)
+            relpath = path.relative_to(self.artifact_root.resolve()).as_posix()
+            descriptor = OddsWeatherRawCaptureV1(
+                ordinal=ordinal,
+                provider=capture.provider,
+                endpoint_category=capture.endpoint_category,
+                source_game_id=source_game_id,
+                provider_event_id=provider_event_id,
+                retrieved_at=retrieved_at,
+                provider_timestamp=provider_timestamp,
+                raw_relpath=relpath,
+                checksum=checksum,
+                byte_count=len(content),
+            )
             created = atomic_create_bytes(path, content)
             if not created and path.read_bytes() != content:
                 raise OddsWeatherAcquisitionError(
@@ -386,29 +412,27 @@ class OddsWeatherPhaseHandler:
                 raise OddsWeatherAcquisitionError(
                     "raw capture publication did not preserve exact bytes"
                 )
-        except OddsWeatherAcquisitionError:
-            raise
+            return descriptor
         except Exception as exc:
+            if created and path is not None and content is not None and checksum is not None:
+                try:
+                    retained = path.read_bytes()
+                    if (
+                        len(retained) == len(content)
+                        and hashlib.sha256(retained).hexdigest() == checksum
+                        and retained == content
+                    ):
+                        path.unlink(missing_ok=True)
+                except Exception as cleanup_error:
+                    exc.add_note(
+                        "new raw-capture artifact cleanup could not be verified "
+                        f"({type(cleanup_error).__name__})"
+                    )
+            if isinstance(exc, OddsWeatherAcquisitionError):
+                raise
             raise OddsWeatherAcquisitionError(
                 "raw capture could not be published as immutable evidence"
             ) from exc
-        provider_timestamp = (
-            None
-            if capture.provider_timestamp is None
-            else _parse_aware_utc(capture.provider_timestamp, "provider timestamp")
-        )
-        return OddsWeatherRawCaptureV1(
-            ordinal=ordinal,
-            provider=capture.provider,
-            endpoint_category=capture.endpoint_category,
-            source_game_id=source_game_id,
-            provider_event_id=provider_event_id,
-            retrieved_at=_parse_aware_utc(capture.retrieved_at, "raw capture retrieved_at"),
-            provider_timestamp=provider_timestamp,
-            raw_relpath=path.relative_to(self.artifact_root.resolve()).as_posix(),
-            checksum=checksum,
-            byte_count=len(content),
-        )
 
     def _failed_inventory(
         self,
@@ -728,6 +752,7 @@ class OddsWeatherPhaseHandler:
                         ordinal=next_ordinal,
                         source_game_id=game.source_game_id,
                     )
+                    raw_captures.append(point)
                     next_ordinal += 1
                     hourly = self._publish_raw_capture(
                         capture=forecast_capture,
@@ -736,8 +761,8 @@ class OddsWeatherPhaseHandler:
                         ordinal=next_ordinal,
                         source_game_id=game.source_game_id,
                     )
+                    raw_captures.append(hourly)
                     next_ordinal += 1
-                    raw_captures.extend((point, hourly))
                     weather_evidence.append(
                         nws_forecast_to_phase4(
                             source_game_id=game.source_game_id,
