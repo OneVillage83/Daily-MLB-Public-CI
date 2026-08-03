@@ -586,12 +586,14 @@ Production controller construction now registers exactly:
 2. `GAME_STATE`
 3. `BASEBALL_INTELLIGENCE_ASSEMBLY`
 4. `ODDS_WEATHER`
+5. `DATA_QUALITY`
+6. `MATCHUP_PACKET`
+7. `MODEL_FEATURE_SET`
 
-After Phase 4 commits, the same resume blocks safely at unregistered pending
-`DATA_QUALITY`. A later resume does not rerun Phase 4 or alter its attempt,
-checksums, manifest, or snapshot. The next accepted sprint is
-`DATA_QUALITY -> MATCHUP_PACKET -> MODEL_FEATURE_SET`; those phases are not
-implemented here.
+After Phase 4 commits, the zero-network pre-model chain continues through
+Phases 5–7. The same resume then blocks safely at unregistered pending
+`PREDICTIONS`. A later resume does not rerun any completed Phase 1–7 attempt or
+alter its checksums, manifest, or snapshot.
 
 ## Validation protocol
 

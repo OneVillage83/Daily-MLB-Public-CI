@@ -15,6 +15,17 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 SPRINT_FOCUSED_TESTS: Final = (
+    "tests/test_pre_model_migration_v12.py",
+    "tests/test_pre_model_pipeline.py",
+    "tests/test_data_quality_contracts.py",
+    "tests/test_data_quality_engine.py",
+    "tests/test_data_quality_rules.py",
+    "tests/test_matchup_packet.py",
+    "tests/test_matchup_packet_artifact.py",
+    "tests/test_model_feature_set.py",
+    "tests/test_model_feature_set_artifact.py",
+    "tests/test_model_feature_set_identity.py",
+    "tests/test_model_feature_set_v3_integration.py",
     "tests/test_odds_weather_handler.py",
     "tests/test_run_controller_odds_weather.py",
     "tests/test_odds_weather_attempt_manifest.py",
@@ -23,6 +34,9 @@ SPRINT_FOCUSED_TESTS: Final = (
     "tests/test_odds_weather_repository_integrity.py",
     "tests/test_odds_weather_credential_boundary.py",
     "tests/test_odds_weather_migration_v11.py",
+    "tests/test_baseball_intelligence_migration_v10.py",
+    "tests/test_game_state_migration_v9.py",
+    "tests/test_migrations.py",
     "tests/test_odds_weather_assembly.py",
     "tests/test_run_controller_baseball_intelligence.py",
     "tests/test_run_controller_service.py",
@@ -32,6 +46,8 @@ SPRINT_FOCUSED_TESTS: Final = (
 SPRINT_STATS_TESTS: Final = (
     "tests/stats/test_feature_materialization.py",
     "tests/stats/test_stats_features.py",
+    "tests/stats/test_migration_v5.py",
+    "tests/stats/test_fielding_grain_v6.py",
 )
 
 
@@ -199,7 +215,7 @@ def _skips(profile: str) -> tuple[str, ...]:
             "complete local stats-environment suite (shared stats code and dependencies unchanged)",
             "dependency audits and hash-locked install rehearsals (dependencies unchanged)",
             "local Docker build (Docker/runtime files unchanged; exact-head public CI supplies proof)",
-            "migration fresh/upgrade/failure-injection matrix (schema unchanged)",
+            "complete release migration failure-injection matrix (focused v12 fresh/upgrade and rollback gates run in sprint)",
         )
     return ()
 

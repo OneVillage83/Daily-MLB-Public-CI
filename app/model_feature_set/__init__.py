@@ -3,6 +3,13 @@ from app.model_feature_set.artifact import (
     ModelFeatureSetArtifactV1,
     model_feature_set_artifact_relpath,
     write_model_feature_set_artifact,
+    verify_model_feature_set_artifact,
+)
+from app.model_feature_set.attempt_manifest import (
+    MODEL_FEATURE_SET_ATTEMPT_MANIFEST_CONTRACT,
+    create_model_feature_set_attempt_manifest,
+    publish_model_feature_set_attempt_manifest,
+    verify_model_feature_set_attempt_manifest,
 )
 from app.model_feature_set.builder import (
     ModelFeatureSetBuildError,
@@ -10,9 +17,28 @@ from app.model_feature_set.builder import (
     build_model_feature_set,
 )
 from app.model_feature_set.contracts import (
+    MODEL_FEATURE_ENCODING_POLICY_VERSION,
+    MODEL_FEATURE_MISSING_VALUE_POLICY_VERSION,
+    MODEL_FEATURE_TRANSFORMATION_POLICY_VERSION,
     ModelFeatureGameV1,
+    ModelFeatureSourceV1,
     ModelFeatureSetContractError,
     ModelFeatureSetV1,
+)
+from app.model_feature_set.handler import (
+    MODEL_FEATURE_SET_PHASE_INPUT_CONTRACT,
+    ModelFeatureSetPhaseHandler,
+    ModelFeatureSetPhaseHandlerError,
+)
+from app.model_feature_set.repository import (
+    ModelFeatureSetAttemptEvidenceV1,
+    ModelFeatureSetAttemptOutcome,
+    ModelFeatureSetIntegrityError,
+    ModelFeatureSetNotFoundError,
+    ModelFeatureSetPersistenceConflict,
+    ModelFeatureSetRepository,
+    ModelFeatureSetRepositoryError,
+    PersistedModelFeatureSetV1,
 )
 from app.model_feature_set.schema import (
     FEATURE_INDEX_V1,
@@ -31,15 +57,35 @@ __all__ = [
     "MODEL_FEATURE_NAMES_V1",
     "MODEL_FEATURE_SCHEMA_CHECKSUM",
     "MODEL_FEATURE_SCHEMA_VERSION",
+    "MODEL_FEATURE_ENCODING_POLICY_VERSION",
+    "MODEL_FEATURE_MISSING_VALUE_POLICY_VERSION",
+    "MODEL_FEATURE_TRANSFORMATION_POLICY_VERSION",
+    "MODEL_FEATURE_SET_ATTEMPT_MANIFEST_CONTRACT",
     "MODEL_FEATURE_SET_ARTIFACT_RELPATH",
     "MODEL_FEATURE_SET_CONTRACT_VERSION",
+    "MODEL_FEATURE_SET_PHASE_INPUT_CONTRACT",
     "ModelFeatureGameV1",
+    "ModelFeatureSourceV1",
     "ModelFeatureSetArtifactV1",
+    "ModelFeatureSetAttemptEvidenceV1",
+    "ModelFeatureSetAttemptOutcome",
     "ModelFeatureSetBuildError",
     "ModelFeatureSetContractError",
+    "ModelFeatureSetIntegrityError",
+    "ModelFeatureSetNotFoundError",
+    "ModelFeatureSetPersistenceConflict",
+    "ModelFeatureSetPhaseHandler",
+    "ModelFeatureSetPhaseHandlerError",
+    "ModelFeatureSetRepository",
+    "ModelFeatureSetRepositoryError",
     "ModelFeatureSetV1",
+    "PersistedModelFeatureSetV1",
     "build_model_feature_game",
     "build_model_feature_set",
     "model_feature_set_artifact_relpath",
+    "create_model_feature_set_attempt_manifest",
+    "publish_model_feature_set_attempt_manifest",
+    "verify_model_feature_set_artifact",
+    "verify_model_feature_set_attempt_manifest",
     "write_model_feature_set_artifact",
 ]

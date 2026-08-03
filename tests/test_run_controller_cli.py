@@ -93,7 +93,7 @@ def test_cli_start_show_json_and_duplicate_without_executing_network(
     assert configured.service_auth_token not in serialized
 
 
-def test_production_controller_registers_first_four_phases(tmp_path: Path) -> None:
+def test_production_controller_registers_first_seven_phases(tmp_path: Path) -> None:
     configured = _settings(tmp_path / "handlers.db")
 
     controller = build_controller(
@@ -106,6 +106,9 @@ def test_production_controller_registers_first_four_phases(tmp_path: Path) -> No
         PipelinePhaseKey.GAME_STATE,
         PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY,
         PipelinePhaseKey.ODDS_WEATHER,
+        PipelinePhaseKey.DATA_QUALITY,
+        PipelinePhaseKey.MATCHUP_PACKET,
+        PipelinePhaseKey.MODEL_FEATURE_SET,
     )
 
 

@@ -20,6 +20,29 @@ from app.baseball_intelligence import (  # noqa: E402
 )
 from app.daily_slate.handler import DailySlatePhaseHandler  # noqa: E402
 from app.game_state.handler import GameStatePhaseHandler  # noqa: E402
+from app.data_quality import (  # noqa: E402
+    DATA_QUALITY_ATTEMPT_MANIFEST_CONTRACT,
+    DATA_QUALITY_CONTRACT_VERSION,
+    DATA_QUALITY_PHASE_INPUT_CONTRACT,
+    DataQualityPhaseHandler,
+    DataQualityPolicyV1,
+)
+from app.matchup_packet import (  # noqa: E402
+    MATCHUP_PACKET_ASSEMBLY_POLICY_VERSION,
+    MATCHUP_PACKET_ATTEMPT_MANIFEST_CONTRACT,
+    MATCHUP_PACKET_CONTRACT_VERSION,
+    MATCHUP_PACKET_PHASE_INPUT_CONTRACT,
+    MatchupPacketPhaseHandler,
+)
+from app.model_feature_set import (  # noqa: E402
+    MODEL_FEATURE_ENCODING_POLICY_VERSION,
+    MODEL_FEATURE_MISSING_VALUE_POLICY_VERSION,
+    MODEL_FEATURE_SET_ATTEMPT_MANIFEST_CONTRACT,
+    MODEL_FEATURE_SET_CONTRACT_VERSION,
+    MODEL_FEATURE_SET_PHASE_INPUT_CONTRACT,
+    MODEL_FEATURE_TRANSFORMATION_POLICY_VERSION,
+    ModelFeatureSetPhaseHandler,
+)
 from app.odds_weather import (  # noqa: E402
     ODDS_WEATHER_ATTEMPT_MANIFEST_CONTRACT,
     ODDS_WEATHER_CONTRACT_VERSION,
@@ -108,6 +131,33 @@ def _safe_configuration_metadata(configured_settings: Settings) -> dict[str, Any
             "source_mode": "provider_acquisition_and_retained_sqlite",
             "weather_contract_version": WEATHER_FORECAST_CONTRACT_VERSION,
         },
+        "data_quality": {
+            "attempt_manifest_version": DATA_QUALITY_ATTEMPT_MANIFEST_CONTRACT,
+            "contract_version": DATA_QUALITY_CONTRACT_VERSION,
+            "input_contract_version": DATA_QUALITY_PHASE_INPUT_CONTRACT,
+            "network_enabled": False,
+            "policy_version": DataQualityPolicyV1().policy_version,
+            "source_mode": "retained_sqlite",
+        },
+        "matchup_packet": {
+            "assembly_policy_version": MATCHUP_PACKET_ASSEMBLY_POLICY_VERSION,
+            "attempt_manifest_version": MATCHUP_PACKET_ATTEMPT_MANIFEST_CONTRACT,
+            "contract_version": MATCHUP_PACKET_CONTRACT_VERSION,
+            "input_contract_version": MATCHUP_PACKET_PHASE_INPUT_CONTRACT,
+            "network_enabled": False,
+            "source_mode": "retained_sqlite",
+        },
+        "model_feature_set": {
+            "attempt_manifest_version": MODEL_FEATURE_SET_ATTEMPT_MANIFEST_CONTRACT,
+            "contract_version": MODEL_FEATURE_SET_CONTRACT_VERSION,
+            "encoding_policy_version": MODEL_FEATURE_ENCODING_POLICY_VERSION,
+            "feature_version": FEATURE_VERSION_V3,
+            "input_contract_version": MODEL_FEATURE_SET_PHASE_INPUT_CONTRACT,
+            "missing_value_policy_version": MODEL_FEATURE_MISSING_VALUE_POLICY_VERSION,
+            "network_enabled": False,
+            "source_mode": "retained_sqlite",
+            "transformation_policy_version": MODEL_FEATURE_TRANSFORMATION_POLICY_VERSION,
+        },
         "odds": {
             "enabled": bool(configured_settings.odds_api_key),
             "format": configured_settings.odds_format,
@@ -135,6 +185,9 @@ def build_controller(
     configured_settings: Settings = settings,
     clock: Callable[[], datetime] | None = None,
     odds_weather_handler: PhaseHandler | None = None,
+    data_quality_handler: PhaseHandler | None = None,
+    matchup_packet_handler: PhaseHandler | None = None,
+    model_feature_set_handler: PhaseHandler | None = None,
 ) -> ManualRunController:
     database = Database(
         database_path,
@@ -184,6 +237,30 @@ def build_controller(
             secret_values=secret_values,
             **odds_weather_options,
         )
+    retained_phase_options: dict[str, Any] = {}
+    if clock is not None:
+        retained_phase_options["clock"] = clock
+    if data_quality_handler is None:
+        data_quality_handler = DataQualityPhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        )
+    if matchup_packet_handler is None:
+        matchup_packet_handler = MatchupPacketPhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        )
+    if model_feature_set_handler is None:
+        model_feature_set_handler = ModelFeatureSetPhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        )
     controller_options: dict[str, Any] = {}
     if clock is not None:
         controller_options["clock"] = clock
@@ -198,6 +275,9 @@ def build_controller(
                 baseball_intelligence_handler
             ),
             PipelinePhaseKey.ODDS_WEATHER: odds_weather_handler,
+            PipelinePhaseKey.DATA_QUALITY: data_quality_handler,
+            PipelinePhaseKey.MATCHUP_PACKET: matchup_packet_handler,
+            PipelinePhaseKey.MODEL_FEATURE_SET: model_feature_set_handler,
         },
         **controller_options,
     )
@@ -211,7 +291,7 @@ def _add_common_database_argument(
         "--database",
         type=Path,
         default=configured_settings.database_path,
-        help="schema-v11 SQLite database path",
+        help="schema-v12 SQLite database path",
     )
 
 
@@ -220,7 +300,7 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
         prog="run_controller",
         description=(
             "Initialize, inspect, and manually resume Daily MLB pipeline runs; "
-            "phases 1-4 can execute; Phase 4 persists retained provider evidence"
+            "phases 1-7 can execute with immutable retained evidence"
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -242,9 +322,8 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
     resume = commands.add_parser(
         "resume",
         help=(
-            "resume persisted work; DAILY_SLATE, GAME_STATE, and "
-            "BASEBALL_INTELLIGENCE_ASSEMBLY and ODDS_WEATHER can execute and "
-            "the controller blocks safely at DATA_QUALITY"
+            "resume persisted work through MODEL_FEATURE_SET; the controller "
+            "blocks safely at PREDICTIONS"
         ),
     )
     _add_common_database_argument(resume, configured_settings)

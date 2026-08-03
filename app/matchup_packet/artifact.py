@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import hashlib
-import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from uuid import uuid4
 
-from app.artifacts import resolve_contained_path, validate_artifact_relpath
 from app.matchup_packet.contracts import MatchupPacketContractError, MatchupPacketV1
+from app.pre_model_evidence import PreModelArtifactV1, publish_canonical_bytes, verify_canonical_bytes
 from app.redaction import redact_value
 
 MATCHUP_PACKET_ARTIFACT_RELPATH = (
@@ -20,6 +17,7 @@ class MatchupPacketArtifactV1:
     relpath: str
     checksum: str
     byte_count: int
+    created: bool = field(default=False, compare=False, repr=False)
 
 
 def matchup_packet_artifact_relpath(packet: MatchupPacketV1) -> str:
@@ -34,7 +32,6 @@ def write_matchup_packet_artifact(
     secret_values: tuple[str, ...] = (),
 ) -> MatchupPacketArtifactV1:
     selected_relpath = matchup_packet_artifact_relpath(packet) if relpath is None else relpath
-    safe_relpath = validate_artifact_relpath(selected_relpath)
     payload = packet.as_dict()
     if redact_value(
         payload,
@@ -44,17 +41,23 @@ def write_matchup_packet_artifact(
         raise MatchupPacketContractError(
             "MatchupPacket artifact contains credential-bearing material"
         )
-    content = packet.canonical_json_bytes()
-    destination = resolve_contained_path(artifact_root, safe_relpath)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
-    try:
-        temporary.write_bytes(content)
-        os.replace(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
+    artifact = publish_canonical_bytes(
+        artifact_root, selected_relpath, packet.canonical_json_bytes()
+    )
     return MatchupPacketArtifactV1(
-        relpath=safe_relpath,
-        checksum=hashlib.sha256(content).hexdigest(),
-        byte_count=len(content),
+        artifact.relpath, artifact.checksum, artifact.byte_count, artifact.created
+    )
+
+
+def verify_matchup_packet_artifact(
+    packet: MatchupPacketV1,
+    artifact: MatchupPacketArtifactV1,
+    artifact_root: Path,
+) -> None:
+    if artifact.relpath != matchup_packet_artifact_relpath(packet):
+        raise MatchupPacketContractError("Matchup Packet artifact path identity mismatch")
+    verify_canonical_bytes(
+        artifact_root,
+        PreModelArtifactV1(artifact.relpath, artifact.checksum, artifact.byte_count),
+        packet.canonical_json_bytes(),
     )

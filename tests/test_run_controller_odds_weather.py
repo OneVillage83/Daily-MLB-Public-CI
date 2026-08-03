@@ -189,7 +189,7 @@ def _phase4_pending_controller(tmp_path, monkeypatch, *, fail_first=False):
     return controller, configured, handler, run_id, calls
 
 
-def test_production_controller_registers_exactly_phases_one_through_four(tmp_path) -> None:
+def test_production_controller_registers_exactly_phases_one_through_seven(tmp_path) -> None:
     configured = _settings(tmp_path / "controller.db", tmp_path / "artifacts")
     controller = build_controller(
         configured.database_path,
@@ -202,8 +202,11 @@ def test_production_controller_registers_exactly_phases_one_through_four(tmp_pat
         PipelinePhaseKey.GAME_STATE,
         PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY,
         PipelinePhaseKey.ODDS_WEATHER,
+        PipelinePhaseKey.DATA_QUALITY,
+        PipelinePhaseKey.MATCHUP_PACKET,
+        PipelinePhaseKey.MODEL_FEATURE_SET,
     )
-    assert PipelinePhaseKey.DATA_QUALITY not in controller.handlers
+    assert PipelinePhaseKey.PREDICTIONS not in controller.handlers
     metadata = _safe_configuration_metadata(configured)["odds_weather"]
     assert metadata == {
         "attempt_manifest_version": "DSE_ODDS_WEATHER_ATTEMPT_MANIFEST_V1",
@@ -219,7 +222,7 @@ def test_production_controller_registers_exactly_phases_one_through_four(tmp_pat
     }
 
 
-def test_controller_executes_phase4_and_blocks_safely_at_data_quality(
+def test_controller_executes_pre_model_chain_and_blocks_safely_at_predictions(
     tmp_path,
     monkeypatch,
     capsys,
@@ -230,11 +233,11 @@ def test_controller_executes_phase4_and_blocks_safely_at_data_quality(
     )
     with pytest.raises(ManualRunExecutionBlocked) as blocked:
         controller.resume(run_id)
-    assert blocked.value.phase_key is PipelinePhaseKey.DATA_QUALITY
+    assert blocked.value.phase_key is PipelinePhaseKey.PREDICTIONS
 
     summary = controller.show(run_id)
     phase4 = summary.phases[3]
-    data_quality = summary.phases[4]
+    data_quality, matchup_packet, model_feature_set = summary.phases[4:7]
     persisted = handler.repository.get_for_run_attempt(run_id, 1)
 
     assert summary.run.status is PipelineRunStatus.RUNNING
@@ -246,14 +249,21 @@ def test_controller_executes_phase4_and_blocks_safely_at_data_quality(
     assert phase4.input_checksum is not None
     assert phase4.output_checksum == persisted.snapshot.checksum
     assert phase4.artifact_relpath == persisted.artifact.relpath
-    assert data_quality.status is PipelinePhaseStatus.PENDING
-    assert data_quality.attempt_count == 0
-    assert all(item.status is PipelinePhaseStatus.PENDING for item in summary.phases[4:])
+    assert all(
+        phase.status in {
+            PipelinePhaseStatus.SUCCEEDED,
+            PipelinePhaseStatus.SUCCEEDED_WITH_WARNINGS,
+            PipelinePhaseStatus.DEGRADED,
+        }
+        for phase in (data_quality, matchup_packet, model_feature_set)
+    )
+    assert all(phase.attempt_count == 1 for phase in summary.phases[4:7])
+    assert all(item.status is PipelinePhaseStatus.PENDING for item in summary.phases[7:])
     first_calls = dict(calls)
 
     with pytest.raises(ManualRunExecutionBlocked) as second:
         controller.resume(run_id)
-    assert second.value.phase_key is PipelinePhaseKey.DATA_QUALITY
+    assert second.value.phase_key is PipelinePhaseKey.PREDICTIONS
     assert calls == first_calls
     assert controller.show(run_id).phases[3].attempt_count == 1
     assert len(handler.repository.list_attempt_evidence(run_id)) == 1
@@ -265,12 +275,12 @@ def test_controller_executes_phase4_and_blocks_safely_at_data_quality(
     )
     error = capsys.readouterr().err
     assert exit_code == EXIT_BLOCKED
-    assert "data_quality" in error
+    assert "predictions" in error
     assert configured.odds_api_key not in error
     assert configured.service_auth_token not in error
 
 
-def test_phase4_failure_retry_preserves_attempt_one_and_then_blocks_data_quality(
+def test_phase4_failure_retry_preserves_attempt_one_and_then_blocks_predictions(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -293,7 +303,7 @@ def test_phase4_failure_retry_preserves_attempt_one_and_then_blocks_data_quality
 
     with pytest.raises(ManualRunExecutionBlocked) as blocked:
         controller.resume(run_id)
-    assert blocked.value.phase_key is PipelinePhaseKey.DATA_QUALITY
+    assert blocked.value.phase_key is PipelinePhaseKey.PREDICTIONS
     succeeded = controller.show(run_id)
     attempt2 = handler.repository.get_attempt_evidence(run_id, 2)
     latest = handler.repository.get_latest_for_run(run_id)
@@ -308,7 +318,15 @@ def test_phase4_failure_retry_preserves_attempt_one_and_then_blocks_data_quality
     assert attempt2.outcome is OddsWeatherAttemptOutcome.ASSEMBLED
     assert latest is not None and latest.phase_attempt == 2
     assert calls == {"odds": 2, "nws": 1, "openweather": 1}
-    assert succeeded.phases[4].status is PipelinePhaseStatus.PENDING
+    assert all(
+        phase.status in {
+            PipelinePhaseStatus.SUCCEEDED,
+            PipelinePhaseStatus.SUCCEEDED_WITH_WARNINGS,
+            PipelinePhaseStatus.DEGRADED,
+        }
+        for phase in succeeded.phases[4:7]
+    )
+    assert succeeded.phases[7].status is PipelinePhaseStatus.PENDING
 
 
 def test_controller_summary_json_contains_phase4_evidence(tmp_path, monkeypatch) -> None:
