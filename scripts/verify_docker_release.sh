@@ -209,7 +209,7 @@ import sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 schema = payload["schema"]
 integrity = payload["integrity"]
-assert schema["version"] == 11
+assert schema["version"] == 12
 assert schema["user_version"] == 12
 assert schema["fingerprint"] == schema["expected_fingerprint"]
 assert integrity["ok"] is True
