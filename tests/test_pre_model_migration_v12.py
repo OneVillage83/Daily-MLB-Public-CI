@@ -41,8 +41,8 @@ from app.pre_model_migration import (
 
 V11_CHECKSUM = "a54865d8b5623e96c4f571d6c9d7f899e9ced0d1911128b5a874b41e29df75dd"
 V11_FINGERPRINT = "5b9635e1aac05d98fd61dadaf2ac5d435e4aaae9214c79501b5dd642673c75b8"
-V12_CHECKSUM = "1408c940cea49c84c68c87a9d350a852d038671e9867acec534440435d60d5ce"
-V12_FINGERPRINT = "15e30a24bb578ce691ef5b9063ce61fe8d3e2a09708236de55390ccef9ed8581"
+V12_CHECKSUM = "eb2e8118e692c3f1597e2dfa487691a8a56c76bb7513b857a41f4db409b54d22"
+V12_FINGERPRINT = "4825e8f17fdd7a2a39835f3e60cbbf53a52bf912006d6a72e88e99308ff64422"
 
 TABLES = {
     "data_quality_attempt_evidence",
@@ -141,6 +141,44 @@ def test_v12_object_statement_inventory_is_explicit() -> None:
     assert len(PRE_MODEL_SCHEMA_V12_INDEX_STATEMENTS) == 11
     assert len(PRE_MODEL_SCHEMA_V12_VALIDATION_TRIGGER_STATEMENTS) == 15
     assert len(PRE_MODEL_SCHEMA_V12_IMMUTABILITY_TRIGGER_STATEMENTS) == 24
+
+
+def test_v12_player_lineage_and_first_seal_rules_are_schema_owned(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "lineage-v12.db")
+    with database.connect() as connection:
+        source_columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(model_feature_set_source_features)"
+            ).fetchall()
+        }
+        assert {
+            "canonical_player_id",
+            "feature_snapshot_id",
+            "feature_checksum",
+        } <= source_columns
+        source_trigger = str(
+            connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='model_feature_set_source_validate_insert'"
+            ).fetchone()[0]
+        )
+        assert "feature.canonical_player_id=NEW.canonical_player_id" in source_trigger
+        assert "feature.created_at<=snapshot.observed_at" in source_trigger
+        for table in (
+            "data_quality_snapshots",
+            "matchup_packet_snapshots",
+            "model_feature_set_snapshots",
+        ):
+            trigger = str(
+                connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                    (f"{table}_reject_semantic_update",),
+                ).fetchone()[0]
+            )
+            assert "OLD.sealed_at IS NOT NULL" in trigger
+            assert "NEW.phase_input_checksum IS NOT OLD.phase_input_checksum" in trigger
 
 
 def test_injected_v12_ddl_failure_rolls_back_to_exact_v11(

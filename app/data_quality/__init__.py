@@ -9,7 +9,6 @@ from app.data_quality.attempt_manifest import DATA_QUALITY_ATTEMPT_MANIFEST_CONT
 from app.data_quality.handler import (
     DATA_QUALITY_PHASE_INPUT_CONTRACT,
     DataQualityPhaseHandler,
-    DataQualityPolicyV1,
 )
 from app.data_quality.repository import (
     DataQualityAttemptEvidenceV1,
@@ -26,6 +25,7 @@ from app.data_quality.contracts import (
     DATA_QUALITY_POLICY_VERSION,
     DataQualityContractError,
     DataQualityDisposition,
+    DataQualityPolicyV1,
     DataQualityGameV1,
     DataQualityV1,
     QualityDomain,

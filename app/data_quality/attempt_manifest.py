@@ -56,13 +56,19 @@ def create_data_quality_attempt_manifest(
 def publish_data_quality_attempt_manifest(
     manifest: DataQualityAttemptManifestV1,
     artifact_root: Path,
+    *,
+    secret_values: Iterable[str] = (),
 ) -> DataQualityAttemptManifestArtifactV1:
-    return publish_manifest(manifest, artifact_root, "data_quality")
+    return publish_manifest(
+        manifest, artifact_root, "data_quality", secret_values=secret_values
+    )
 
 
 def verify_data_quality_attempt_manifest(
     manifest: DataQualityAttemptManifestV1,
     artifact: DataQualityAttemptManifestArtifactV1,
     artifact_root: Path,
+    *,
+    secret_values: Iterable[str] = (),
 ) -> None:
-    verify_manifest(manifest, artifact, artifact_root)
+    verify_manifest(manifest, artifact, artifact_root, secret_values=secret_values)

@@ -56,13 +56,19 @@ def create_matchup_packet_attempt_manifest(
 def publish_matchup_packet_attempt_manifest(
     manifest: MatchupPacketAttemptManifestV1,
     artifact_root: Path,
+    *,
+    secret_values: Iterable[str] = (),
 ) -> MatchupPacketAttemptManifestArtifactV1:
-    return publish_manifest(manifest, artifact_root, "matchup_packet")
+    return publish_manifest(
+        manifest, artifact_root, "matchup_packet", secret_values=secret_values
+    )
 
 
 def verify_matchup_packet_attempt_manifest(
     manifest: MatchupPacketAttemptManifestV1,
     artifact: MatchupPacketAttemptManifestArtifactV1,
     artifact_root: Path,
+    *,
+    secret_values: Iterable[str] = (),
 ) -> None:
-    verify_manifest(manifest, artifact, artifact_root)
+    verify_manifest(manifest, artifact, artifact_root, secret_values=secret_values)

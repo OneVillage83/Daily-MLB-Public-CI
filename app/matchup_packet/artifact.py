@@ -53,6 +53,8 @@ def verify_matchup_packet_artifact(
     packet: MatchupPacketV1,
     artifact: MatchupPacketArtifactV1,
     artifact_root: Path,
+    *,
+    secret_values: tuple[str, ...] = (),
 ) -> None:
     if artifact.relpath != matchup_packet_artifact_relpath(packet):
         raise MatchupPacketContractError("Matchup Packet artifact path identity mismatch")
@@ -61,3 +63,9 @@ def verify_matchup_packet_artifact(
         PreModelArtifactV1(artifact.relpath, artifact.checksum, artifact.byte_count),
         packet.canonical_json_bytes(),
     )
+    if redact_value(
+        packet.as_dict(), secret_values, preserve_field_names=("key",)
+    ) != packet.as_dict():
+        raise MatchupPacketContractError(
+            "MatchupPacket artifact contains credential-bearing material"
+        )

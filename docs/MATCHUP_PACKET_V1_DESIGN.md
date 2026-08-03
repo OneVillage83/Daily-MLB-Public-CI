@@ -1,5 +1,15 @@
 # MatchupPacket V1 Design
 
+## Historical and failed-attempt integrity
+
+Snapshot reconstruction is anchored to the exact stored Data Quality and
+Phase 1–4 snapshot IDs/checksums. It does not traverse a latest Data Quality
+snapshot. An `assembly_failed` manifest is built from already-resolved context
+and upstream identities and never invokes packet assembly a second time.
+Attempt manifests enforce the exact Matchup Packet profile and upstream order;
+artifact and manifest reads reject configured secrets and linked/substituted
+files.
+
 **Status:** production persisted in schema v12
 **Controller phase:** `MATCHUP_PACKET` (phase 6 of 15)  
 **Upstream:** `DailySlateV1` → `GameStateV1` → `BaseballIntelligenceAssemblyV1` → `OddsWeatherV1` → `DataQualityV1`  

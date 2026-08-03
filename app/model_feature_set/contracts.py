@@ -41,10 +41,16 @@ MODEL_FEATURE_ENCODING_POLICY_VERSION = "DSE_MODEL_FEATURE_ENCODING_V1"
 
 @dataclass(frozen=True, slots=True)
 class ModelFeatureSourceV1:
+    canonical_player_id: str
     feature_snapshot_id: str
     feature_checksum: str
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "canonical_player_id",
+            _required_text(self.canonical_player_id, "canonical_player_id"),
+        )
         object.__setattr__(
             self,
             "feature_snapshot_id",
@@ -58,6 +64,7 @@ class ModelFeatureSourceV1:
 
     def as_dict(self) -> dict[str, str]:
         return {
+            "canonical_player_id": self.canonical_player_id,
             "feature_checksum": self.feature_checksum,
             "feature_snapshot_id": self.feature_snapshot_id,
         }
@@ -189,10 +196,18 @@ class ModelFeatureGameV1:
         sources = tuple(
             sorted(
                 set(self.source_features),
-                key=lambda value: (value.feature_snapshot_id, value.feature_checksum),
+                key=lambda value: (
+                    value.canonical_player_id,
+                    value.feature_snapshot_id,
+                    value.feature_checksum,
+                ),
             )
         )
         object.__setattr__(self, "source_features", sources)
+        if not self.market_context and self.market_reference_checksum is not None:
+            raise ModelFeatureSetContractError(
+                "empty market context cannot carry a market reference checksum"
+            )
         if self.market_context and self.market_reference_checksum != self.market_context_checksum:
             raise ModelFeatureSetContractError(
                 "market reference checksum must identify the separate market context"

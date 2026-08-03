@@ -8,6 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from app.data_quality.repository import (
+    DataQualityUpstreamV1,
     DataQualityRepository,
     PersistedDataQualityV1,
     data_quality_warning_payload,
@@ -27,7 +28,7 @@ from app.matchup_packet.attempt_manifest import (
     publish_matchup_packet_attempt_manifest,
     verify_matchup_packet_attempt_manifest,
 )
-from app.matchup_packet.contracts import MatchupPacketV1
+from app.matchup_packet.contracts import MatchupPacketContractError, MatchupPacketV1
 from app.pre_model_evidence import (
     PreModelArtifactV1,
     PreModelEvidenceError,
@@ -138,9 +139,41 @@ class MatchupPacketRepository:
         identities = (*chain.identities(), PreModelUpstreamIdentityV1("data_quality", quality.snapshot_id, quality.snapshot.checksum))
         return quality, identities
 
-    def assemble_for_run(self, run_id: str, *, observed_at: datetime) -> MatchupPacketV1:
-        quality, _ = self._upstream(run_id)
-        chain = self.data_quality.resolve_upstream(run_id)
+    def resolve_upstream_by_snapshot_ids(
+        self,
+        run_id: str,
+        *,
+        data_quality_snapshot_id: str,
+        daily_slate_snapshot_id: str,
+        game_state_snapshot_id: str,
+        baseball_intelligence_snapshot_id: str,
+        odds_weather_snapshot_id: str,
+    ) -> tuple[PersistedDataQualityV1, DataQualityUpstreamV1, tuple[PreModelUpstreamIdentityV1, ...]]:
+        quality = self.data_quality.get_by_snapshot_id(data_quality_snapshot_id)
+        if quality.run_id != validate_run_id(run_id):
+            raise MatchupPacketIntegrityError("historical Data Quality run mismatch")
+        chain = self.data_quality.resolve_upstream_by_snapshot_ids(
+            run_id,
+            daily_slate_snapshot_id=daily_slate_snapshot_id,
+            game_state_snapshot_id=game_state_snapshot_id,
+            baseball_intelligence_snapshot_id=baseball_intelligence_snapshot_id,
+            odds_weather_snapshot_id=odds_weather_snapshot_id,
+        )
+        identities = (
+            *chain.identities(),
+            PreModelUpstreamIdentityV1(
+                "data_quality", quality.snapshot_id, quality.snapshot.checksum
+            ),
+        )
+        return quality, chain, identities
+
+    @staticmethod
+    def assemble_from_exact_upstream(
+        quality: PersistedDataQualityV1,
+        chain: DataQualityUpstreamV1,
+        *,
+        observed_at: datetime,
+    ) -> MatchupPacketV1:
         return assemble_matchup_packet(
             slate=chain.slate.slate,
             game_state=chain.state.state,
@@ -148,6 +181,13 @@ class MatchupPacketRepository:
             odds_weather=chain.odds_weather.snapshot,
             data_quality=quality.snapshot,
             observed_at=observed_at,
+        )
+
+    def assemble_for_run(self, run_id: str, *, observed_at: datetime) -> MatchupPacketV1:
+        quality, _ = self._upstream(run_id)
+        chain = self.data_quality.resolve_upstream(run_id)
+        return self.assemble_from_exact_upstream(
+            quality, chain, observed_at=observed_at
         )
 
     @staticmethod
@@ -240,7 +280,9 @@ class MatchupPacketRepository:
         try:
             with self.database.connect() as connection:
                 self._active(connection, run_id, phase_attempt, packet.requested_date, packet.as_of_time)
-            manifest_artifact = publish_matchup_packet_attempt_manifest(manifest, self.artifact_root)
+            manifest_artifact = publish_matchup_packet_attempt_manifest(
+                manifest, self.artifact_root, secret_values=self.secret_values
+            )
             packet_artifact = write_matchup_packet_artifact(packet, self.artifact_root, secret_values=self.secret_values)
             snapshot_id = f"matchup-packet:{packet.checksum}"
             chain = self.data_quality.resolve_upstream(run_id)
@@ -385,6 +427,8 @@ class MatchupPacketRepository:
         observed_at: datetime,
         outcome: MatchupPacketAttemptOutcome | str,
         warnings: Iterable[Mapping[str, object]],
+        quality: PersistedDataQualityV1 | None = None,
+        upstream_identities: tuple[PreModelUpstreamIdentityV1, ...] | None = None,
     ) -> MatchupPacketAttemptEvidenceV1:
         selected = MatchupPacketAttemptOutcome(outcome)
         if selected is MatchupPacketAttemptOutcome.ASSEMBLED:
@@ -405,18 +449,42 @@ class MatchupPacketRepository:
             raise MatchupPacketPersistenceConflict(
                 "conflicting failed Matchup Packet"
             )
-        packet = self.assemble_for_run(run_id, observed_at=observed_at)
-        _, identities = self._upstream(run_id)
+        if quality is None or upstream_identities is None:
+            quality, identities = self._upstream(run_id)
+        else:
+            identities = tuple(upstream_identities)
+            if (
+                quality.run_id != validate_run_id(run_id)
+                or identities[-1].phase_key != "data_quality"
+                or identities[-1].snapshot_id != quality.snapshot_id
+                or identities[-1].checksum != quality.snapshot.checksum
+            ):
+                raise MatchupPacketIntegrityError(
+                    "failed-attempt upstream identity mismatch"
+                )
+        observed = aware_utc(observed_at, "observed_at")
         now = self._now()
-        manifest = self._manifest(
-            run_id=run_id, attempt=phase_attempt, packet=packet,
-            phase_input_checksum=phase_input_checksum, identities=identities,
-            outcome=selected, snapshot_checksum=None, warnings=safe_warnings, now=now,
+        manifest = create_matchup_packet_attempt_manifest(
+            run_id=run_id,
+            phase_attempt=phase_attempt,
+            requested_date=quality.snapshot.requested_date,
+            as_of_time=quality.snapshot.as_of_time,
+            observed_at=observed,
+            phase_input_checksum=phase_input_checksum,
+            upstream=identities,
+            outcome=selected.value,
+            snapshot_checksum=None,
+            warnings=safe_warnings,
+            created_at=now,
+            completed_at=now,
+            secret_values=self.secret_values,
         )
-        artifact = publish_matchup_packet_attempt_manifest(manifest, self.artifact_root)
+        artifact = publish_matchup_packet_attempt_manifest(
+            manifest, self.artifact_root, secret_values=self.secret_values
+        )
         try:
             with self.database.connect(write=True) as connection:
-                self._active(connection, run_id, phase_attempt, packet.requested_date, packet.as_of_time)
+                self._active(connection, run_id, phase_attempt, quality.snapshot.requested_date, quality.snapshot.as_of_time)
                 self._insert_attempt(connection, manifest, artifact)
         except sqlite3.IntegrityError as exc:
             existing = self.get_attempt_evidence(run_id, phase_attempt)
@@ -461,6 +529,7 @@ class MatchupPacketRepository:
             manifest,
             PreModelArtifactV1(str(row["evidence_manifest_relpath"]), str(row["evidence_manifest_checksum"]), int(row["evidence_manifest_byte_count"])),
             self.artifact_root,
+            secret_values=self.secret_values,
         )
         return manifest
 
@@ -491,15 +560,41 @@ class MatchupPacketRepository:
         return row
 
     def _verify(self, row: sqlite3.Row) -> PersistedMatchupPacketV1:
-        packet = self.assemble_for_run(str(row["run_id"]), observed_at=_time(row["observed_at"], "observed_at"))
+        quality, chain, identities = self.resolve_upstream_by_snapshot_ids(
+            str(row["run_id"]),
+            data_quality_snapshot_id=str(row["upstream_data_quality_snapshot_id"]),
+            daily_slate_snapshot_id=str(row["upstream_daily_slate_snapshot_id"]),
+            game_state_snapshot_id=str(row["upstream_game_state_snapshot_id"]),
+            baseball_intelligence_snapshot_id=str(row["upstream_baseball_intelligence_snapshot_id"]),
+            odds_weather_snapshot_id=str(row["upstream_odds_weather_snapshot_id"]),
+        )
+        stored = tuple(
+            str(row[f"upstream_{key}_checksum"])
+            for key in (
+                "daily_slate", "game_state", "baseball_intelligence",
+                "odds_weather", "data_quality",
+            )
+        )
+        if stored != tuple(value.checksum for value in identities):
+            raise MatchupPacketIntegrityError("historical upstream checksum lineage mismatch")
+        packet = self.assemble_from_exact_upstream(
+            quality,
+            chain,
+            observed_at=_time(row["observed_at"], "observed_at"),
+        )
         if str(row["snapshot_id"]) != f"matchup-packet:{packet.checksum}" or str(row["canonical_json"]) != packet.canonical_json_bytes().decode("utf-8"):
             raise MatchupPacketIntegrityError("Matchup Packet canonical evidence mismatch")
         with self.database.connect() as connection:
             self._verify_games(connection, str(row["snapshot_id"]), packet)
         artifact = MatchupPacketArtifactV1(str(row["artifact_relpath"]), str(row["artifact_checksum"]), int(row["artifact_byte_count"]))
         try:
-            verify_matchup_packet_artifact(packet, artifact, self.artifact_root)
-        except PreModelEvidenceError as exc:
+            verify_matchup_packet_artifact(
+                packet,
+                artifact,
+                self.artifact_root,
+                secret_values=self.secret_values,
+            )
+        except (PreModelEvidenceError, MatchupPacketContractError) as exc:
             raise MatchupPacketIntegrityError(
                 "Matchup Packet artifact verification failed"
             ) from exc

@@ -12,10 +12,10 @@ checksum, temporal, artifact, or relational conflicts raise and fail the phase;
 ordinary incomplete evidence remains an explicit issue and disposition.
 
 The accepted dispositions are `ready`, `degraded`, and `insufficient`.
-`insufficient` is not a deletion instruction: the game remains persisted and
-the handler returns `DEGRADED` with `continue_pipeline=True`. A valid snapshot
-with noncritical issues returns `SUCCEEDED_WITH_WARNINGS`; a clear snapshot
-returns `SUCCEEDED`.
+Neither degraded nor insufficient is a deletion instruction: the game remains
+persisted and the handler returns `DEGRADED` with `continue_pipeline=True` when
+either disposition is present. An info-only valid snapshot returns
+`SUCCEEDED_WITH_WARNINGS`; a snapshot with no issue returns `SUCCEEDED`.
 
 Stable issue codes are:
 
@@ -44,9 +44,21 @@ date, as-of time, fixed assessment observation time, and all four upstream
 snapshot IDs/checksums. Secrets, paths, URLs, and runtime identities are
 excluded.
 
+`DataQualityPolicyV1` is the assessment authority, not checksum-only metadata.
+The assessment engine uses its exact supported-market inventory and stores its
+validated policy version in canonical and relational snapshot evidence. Replay
+uses the same immutable policy; changing supported markets changes both the
+input identity and the missing-market assessment behavior.
+
 Persistence uses phase-specific attempt, snapshot, game, and issue tables.
 Artifacts use
 `data_quality/snapshots/<checksum>/data_quality_v1.json`; manifests use
 `data_quality/attempts/<run_id>/attempt_<NNNN>.json`. Both are canonical,
 atomic, content verified, immutable, and credential-free. A confirmed
 zero-game upstream chain produces a valid empty sealed snapshot.
+
+Historical reconstruction resolves the four snapshot IDs stored on the
+selected Data Quality row and verifies their checksums and complete lineage. It
+never resolves a historical snapshot through the latest snapshot for the run.
+Writing `assessment_failed` evidence uses only already-resolved upstream and
+context identities; it never invokes the failed assessment again.

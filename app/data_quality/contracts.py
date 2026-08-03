@@ -42,6 +42,31 @@ class QualityDomain(StrEnum):
     WEATHER = "weather"
 
 
+@dataclass(frozen=True, slots=True)
+class DataQualityPolicyV1:
+    policy_version: str = DATA_QUALITY_POLICY_VERSION
+    supported_markets: tuple[str, ...] = ("h2h", "spreads", "totals")
+    network_enabled: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "policy_version", _required_text(self.policy_version, "policy_version")
+        )
+        markets = tuple(_required_text(value, "supported market") for value in self.supported_markets)
+        if not markets or len(set(markets)) != len(markets):
+            raise DataQualityContractError("supported markets must be unique and nonempty")
+        if self.network_enabled is not False:
+            raise DataQualityContractError("Data Quality policy must remain zero-network")
+        object.__setattr__(self, "supported_markets", markets)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "network_enabled": self.network_enabled,
+            "policy_version": self.policy_version,
+            "supported_markets": list(self.supported_markets),
+        }
+
+
 def _required_text(value: object, name: str) -> str:
     if not isinstance(value, str) or not value or value != value.strip():
         raise DataQualityContractError(f"{name} must be a non-empty trimmed string")
@@ -263,8 +288,9 @@ class DataQualityV1:
             "upstream_odds_weather_checksum",
         ):
             object.__setattr__(self, name, _sha256(getattr(self, name), name))
-        if self.policy_version != DATA_QUALITY_POLICY_VERSION:
-            raise DataQualityContractError("unsupported Data Quality policy_version")
+        object.__setattr__(
+            self, "policy_version", _required_text(self.policy_version, "policy_version")
+        )
         if self.contract_version != DATA_QUALITY_CONTRACT_VERSION:
             raise DataQualityContractError("unsupported Data Quality contract_version")
         if self.sport != "MLB" or self.league != "MLB":

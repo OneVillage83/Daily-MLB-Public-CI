@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 from collections.abc import Iterable, Mapping
 from dataclasses import InitVar, dataclass
 from datetime import datetime, timezone
@@ -17,6 +19,25 @@ from app.redaction import redact_value
 
 class PreModelEvidenceError(RuntimeError):
     pass
+
+
+_MANIFEST_PROFILES: dict[str, tuple[str, frozenset[str], tuple[str, ...]]] = {
+    "data_quality": (
+        "DSE_DATA_QUALITY_ATTEMPT_MANIFEST_V1",
+        frozenset({"assembled", "input_failed", "assessment_failed", "persistence_failed"}),
+        ("daily_slate", "game_state", "baseball_intelligence_assembly", "odds_weather"),
+    ),
+    "matchup_packet": (
+        "DSE_MATCHUP_PACKET_ATTEMPT_MANIFEST_V1",
+        frozenset({"assembled", "input_failed", "assembly_failed", "persistence_failed"}),
+        ("daily_slate", "game_state", "baseball_intelligence_assembly", "odds_weather", "data_quality"),
+    ),
+    "model_feature_set": (
+        "DSE_MODEL_FEATURE_SET_ATTEMPT_MANIFEST_V1",
+        frozenset({"assembled", "input_failed", "transformation_failed", "persistence_failed"}),
+        ("data_quality", "matchup_packet"),
+    ),
+}
 
 
 def aware_utc(value: datetime, field: str) -> datetime:
@@ -103,24 +124,39 @@ class PreModelAttemptManifestV1:
     secret_values: InitVar[Iterable[str]] = ()
 
     def __post_init__(self, secret_values: Iterable[str]) -> None:
-        if not self.contract_version or not self.phase_key:
-            raise PreModelEvidenceError("manifest contract and phase are required")
+        profile = _MANIFEST_PROFILES.get(self.phase_key)
+        if profile is None:
+            raise PreModelEvidenceError("manifest phase is unsupported")
+        contract, outcomes, upstream_phases = profile
+        if self.contract_version != contract:
+            raise PreModelEvidenceError("manifest contract does not match phase")
         validate_run_id(self.run_id)
-        if self.phase_attempt < 1:
+        if isinstance(self.phase_attempt, bool) or not isinstance(self.phase_attempt, int) or self.phase_attempt < 1:
             raise PreModelEvidenceError("phase_attempt must be positive")
         parse_requested_date(self.requested_date)
         object.__setattr__(self, "as_of_time", aware_utc(self.as_of_time, "as_of_time"))
         object.__setattr__(self, "observed_at", aware_utc(self.observed_at, "observed_at"))
         object.__setattr__(self, "created_at", aware_utc(self.created_at, "created_at"))
         object.__setattr__(self, "completed_at", aware_utc(self.completed_at, "completed_at"))
+        if self.completed_at < self.created_at:
+            raise PreModelEvidenceError("completed_at cannot precede created_at")
         require_checksum(self.phase_input_checksum, "phase_input_checksum")
         if self.snapshot_checksum is not None:
             require_checksum(self.snapshot_checksum, "snapshot_checksum")
         upstream = tuple(self.upstream)
-        if len({value.phase_key for value in upstream}) != len(upstream):
-            raise PreModelEvidenceError("upstream phases must be unique")
+        if tuple(value.phase_key for value in upstream) != upstream_phases:
+            raise PreModelEvidenceError("manifest upstream phases are not exact and ordered")
         object.__setattr__(self, "upstream", upstream)
-        warnings = tuple(dict(value) for value in self.warnings)
+        if self.outcome not in outcomes:
+            raise PreModelEvidenceError("manifest outcome is unsupported for phase")
+        if (self.outcome == "assembled") != (self.snapshot_checksum is not None):
+            raise PreModelEvidenceError("manifest outcome/snapshot checksum identity is invalid")
+        try:
+            warnings = tuple(
+                json.loads(canonical_json_bytes(dict(value))) for value in self.warnings
+            )
+        except (TypeError, ValueError) as exc:
+            raise PreModelEvidenceError("manifest warnings are not canonical JSON objects") from exc
         object.__setattr__(self, "warnings", warnings)
         payload = self.as_dict()
         configured = tuple(str(value) for value in secret_values if str(value))
@@ -174,7 +210,7 @@ def publish_canonical_bytes(
     created = False
     try:
         created = atomic_create_bytes(destination, content)
-        observed = destination.read_bytes()
+        observed = _read_owned_bytes(destination)
         if observed != content:
             raise PreModelEvidenceError(
                 "immutable artifact conflicts with canonical bytes"
@@ -182,14 +218,18 @@ def publish_canonical_bytes(
     except Exception:
         if created:
             try:
-                retained = destination.read_bytes()
-            except OSError:
+                retained = _read_owned_bytes(destination)
+            except (OSError, PreModelEvidenceError):
                 retained = b""
             if (
                 len(retained) == len(content)
                 and hashlib.sha256(retained).hexdigest() == checksum
             ):
-                destination.unlink(missing_ok=True)
+                try:
+                    if _safe_file_identity(destination).st_nlink == 1:
+                        destination.unlink(missing_ok=True)
+                except (OSError, PreModelEvidenceError):
+                    pass
         raise
     return PreModelArtifactV1(
         relpath=safe_relpath,
@@ -206,7 +246,7 @@ def verify_canonical_bytes(
 ) -> None:
     path = resolve_contained_path(artifact_root, artifact.relpath)
     try:
-        observed = path.read_bytes()
+        observed = _read_owned_bytes(path)
     except OSError as exc:
         raise PreModelEvidenceError("immutable artifact is missing or unreadable") from exc
     if (
@@ -222,19 +262,23 @@ def cleanup_owned_artifact(artifact_root: Path, artifact: PreModelArtifactV1) ->
         return
     path = resolve_contained_path(artifact_root, artifact.relpath)
     try:
-        observed = path.read_bytes()
-    except OSError:
+        observed = _read_owned_bytes(path)
+    except (OSError, PreModelEvidenceError):
         return
     if (
         len(observed) == artifact.byte_count
         and hashlib.sha256(observed).hexdigest() == artifact.checksum
     ):
-        path.unlink(missing_ok=True)
+        try:
+            if _safe_file_identity(path).st_nlink == 1:
+                path.unlink(missing_ok=True)
+        except OSError:
+            return
 
 
 def manifest_relpath(phase_directory: str, run_id: str, phase_attempt: int) -> str:
     validate_run_id(run_id)
-    if phase_attempt < 1:
+    if isinstance(phase_attempt, bool) or not isinstance(phase_attempt, int) or phase_attempt < 1:
         raise PreModelEvidenceError("phase_attempt must be positive")
     return f"{phase_directory}/attempts/{run_id}/attempt_{phase_attempt:04d}.json"
 
@@ -243,7 +287,10 @@ def publish_manifest(
     manifest: PreModelAttemptManifestV1,
     artifact_root: Path,
     phase_directory: str,
+    *,
+    secret_values: Iterable[str] = (),
 ) -> PreModelArtifactV1:
+    _validate_manifest_secrets(manifest, secret_values)
     return publish_canonical_bytes(
         artifact_root,
         manifest_relpath(phase_directory, manifest.run_id, manifest.phase_attempt),
@@ -255,8 +302,57 @@ def verify_manifest(
     manifest: PreModelAttemptManifestV1,
     artifact: PreModelArtifactV1,
     artifact_root: Path,
+    *,
+    secret_values: Iterable[str] = (),
 ) -> None:
-    verify_canonical_bytes(artifact_root, artifact, manifest.canonical_json_bytes())
+    _validate_manifest_secrets(manifest, secret_values)
+    expected = manifest.canonical_json_bytes()
+    verify_canonical_bytes(artifact_root, artifact, expected)
+    path = resolve_contained_path(artifact_root, artifact.relpath)
+    retained = _read_owned_bytes(path)
+    try:
+        parsed = json.loads(retained.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PreModelEvidenceError("retained manifest is not canonical UTF-8 JSON") from exc
+    if not isinstance(parsed, dict) or canonical_json_bytes(parsed) != retained or parsed != manifest.as_dict():
+        raise PreModelEvidenceError("retained manifest is not exact canonical evidence")
+    configured = tuple(str(value) for value in secret_values if str(value))
+    if redact_value(parsed, configured, preserve_field_names=("bookmaker_key", "market_key")) != parsed:
+        raise PreModelEvidenceError("retained manifest contains credential-bearing material")
+
+
+def _validate_manifest_secrets(
+    manifest: PreModelAttemptManifestV1,
+    secret_values: Iterable[str],
+) -> None:
+    payload = manifest.as_dict()
+    configured = tuple(str(value) for value in secret_values if str(value))
+    if redact_value(payload, configured, preserve_field_names=("bookmaker_key", "market_key")) != payload:
+        raise PreModelEvidenceError("attempt manifest contains credential-bearing material")
+
+
+def _safe_file_identity(path: Path) -> os.stat_result:
+    link_metadata = path.lstat()
+    if stat.S_ISLNK(link_metadata.st_mode):
+        raise PreModelEvidenceError("immutable artifact cannot be a symbolic link")
+    metadata = path.stat()
+    if not stat.S_ISREG(metadata.st_mode):
+        raise PreModelEvidenceError("immutable artifact is not a regular file")
+    if hasattr(metadata, "st_nlink") and metadata.st_nlink != 1:
+        raise PreModelEvidenceError("immutable artifact must have exactly one hard link")
+    return metadata
+
+
+def _read_owned_bytes(path: Path) -> bytes:
+    before = _safe_file_identity(path)
+    observed = path.read_bytes()
+    after = _safe_file_identity(path)
+    identity_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_nlink")
+    if any(getattr(before, name, None) != getattr(after, name, None) for name in identity_fields):
+        raise PreModelEvidenceError("immutable artifact changed while being verified")
+    if len(observed) != after.st_size:
+        raise PreModelEvidenceError("immutable artifact byte count changed while being verified")
+    return observed
 
 
 def row_checksum(payload: Mapping[str, object]) -> str:

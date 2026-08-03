@@ -25,7 +25,9 @@ from app.data_quality.attempt_manifest import (
     verify_data_quality_attempt_manifest,
 )
 from app.data_quality.contracts import (
+    DataQualityContractError,
     DataQualityDisposition,
+    DataQualityPolicyV1,
     DataQualityV1,
 )
 from app.data_quality.engine import DataQualityAssessmentResultV1, assess_data_quality
@@ -146,9 +148,9 @@ def data_quality_warning_payload(snapshot: DataQualityV1) -> tuple[dict[str, obj
 
 
 def data_quality_state(snapshot: DataQualityV1) -> str:
-    if snapshot.insufficient_game_count:
+    if snapshot.insufficient_game_count or snapshot.degraded_game_count:
         return "degraded"
-    if snapshot.degraded_game_count or data_quality_warning_payload(snapshot):
+    if data_quality_warning_payload(snapshot):
         return "warning"
     return "clear"
 
@@ -161,11 +163,13 @@ class DataQualityRepository:
         artifact_root: Path,
         secret_values: Iterable[str] = (),
         clock: Callable[[], datetime] = _utc_now,
+        policy: DataQualityPolicyV1 = DataQualityPolicyV1(),
     ) -> None:
         self.database = database
         self.artifact_root = Path(artifact_root)
         self.secret_values = tuple(str(value) for value in secret_values if str(value))
         self.clock = clock
+        self.policy = policy
         self.daily_slate = DailySlateRepository(
             database, secret_values=self.secret_values, clock=clock
         )
@@ -199,6 +203,42 @@ class DataQualityRepository:
         odds_weather = self.odds_weather.get_latest_for_run(safe_run_id)
         if slate is None or state is None or bia is None or odds_weather is None:
             raise DataQualityIntegrityError("Data Quality requires sealed phases 1 through 4")
+        return self._validate_upstream(
+            safe_run_id, DataQualityUpstreamV1(slate, state, bia, odds_weather)
+        )
+
+    def resolve_upstream_by_snapshot_ids(
+        self,
+        run_id: str,
+        *,
+        daily_slate_snapshot_id: str,
+        game_state_snapshot_id: str,
+        baseball_intelligence_snapshot_id: str,
+        odds_weather_snapshot_id: str,
+    ) -> DataQualityUpstreamV1:
+        """Resolve immutable historical lineage by the IDs stored on its snapshot."""
+
+        safe_run_id = validate_run_id(run_id)
+        upstream = DataQualityUpstreamV1(
+            self.daily_slate.get_daily_slate_snapshot(daily_slate_snapshot_id),
+            self.game_state.get_game_state_snapshot(game_state_snapshot_id),
+            self.baseball_intelligence.get_by_snapshot_id(
+                baseball_intelligence_snapshot_id
+            ),
+            self.odds_weather.get_by_snapshot_id(odds_weather_snapshot_id),
+        )
+        return self._validate_upstream(safe_run_id, upstream)
+
+    @staticmethod
+    def _validate_upstream(
+        run_id: str, upstream: DataQualityUpstreamV1
+    ) -> DataQualityUpstreamV1:
+        slate = upstream.slate
+        state = upstream.state
+        bia = upstream.baseball_intelligence
+        odds_weather = upstream.odds_weather
+        if any(value.run_id != run_id for value in (slate, state, bia, odds_weather)):
+            raise DataQualityIntegrityError("upstream run identity is inconsistent")
         requested = {
             slate.slate.requested_date,
             state.state.requested_date,
@@ -213,7 +253,16 @@ class DataQualityRepository:
         }
         if len(requested) != 1 or len(as_of) != 1:
             raise DataQualityIntegrityError("upstream date/as-of lineage is inconsistent")
-        return DataQualityUpstreamV1(slate, state, bia, odds_weather)
+        if (
+            state.upstream_daily_slate_snapshot_id != slate.snapshot_id
+            or bia.upstream_daily_slate_snapshot_id != slate.snapshot_id
+            or bia.upstream_game_state_snapshot_id != state.snapshot_id
+            or odds_weather.upstream_daily_slate_snapshot_id != slate.snapshot_id
+            or odds_weather.upstream_game_state_snapshot_id != state.snapshot_id
+            or odds_weather.upstream_baseball_intelligence_snapshot_id != bia.snapshot_id
+        ):
+            raise DataQualityIntegrityError("upstream snapshot lineage is inconsistent")
+        return upstream
 
     def assess_for_run(
         self, run_id: str, *, observed_at: datetime
@@ -225,6 +274,7 @@ class DataQualityRepository:
             baseball_intelligence=upstream.baseball_intelligence.assembly,
             odds_weather=upstream.odds_weather.snapshot,
             observed_at=observed_at,
+            policy=self.policy,
         )
         return result, upstream
 
@@ -311,6 +361,7 @@ class DataQualityRepository:
             baseball_intelligence=upstream.baseball_intelligence.assembly,
             odds_weather=upstream.odds_weather.snapshot,
             observed_at=snapshot.observed_at,
+            policy=self.policy,
         ).snapshot
         if replay.canonical_json_bytes() != snapshot.canonical_json_bytes():
             raise DataQualityIntegrityError("Data Quality result is not reproducible")
@@ -340,7 +391,7 @@ class DataQualityRepository:
                     snapshot.as_of_time,
                 )
             manifest_artifact = publish_data_quality_attempt_manifest(
-                manifest, self.artifact_root
+                manifest, self.artifact_root, secret_values=self.secret_values
             )
             snapshot_artifact = write_data_quality_artifact(
                 snapshot, self.artifact_root, secret_values=self.secret_values
@@ -597,6 +648,7 @@ class DataQualityRepository:
         observed_at: datetime,
         outcome: DataQualityAttemptOutcome | str,
         warnings: Iterable[Mapping[str, object]],
+        upstream: DataQualityUpstreamV1 | None = None,
     ) -> DataQualityAttemptEvidenceV1:
         selected_outcome = DataQualityAttemptOutcome(outcome)
         if selected_outcome is DataQualityAttemptOutcome.ASSEMBLED:
@@ -615,36 +667,36 @@ class DataQualityRepository:
             ):
                 return existing
             raise DataQualityPersistenceConflict("conflicting failed attempt")
-        upstream = self.resolve_upstream(run_id)
-        placeholder = assess_data_quality(
-            slate=upstream.slate.slate,
-            game_state=upstream.state.state,
-            baseball_intelligence=upstream.baseball_intelligence.assembly,
-            odds_weather=upstream.odds_weather.snapshot,
-            observed_at=observed_at,
-        ).snapshot
+        upstream = self.resolve_upstream(run_id) if upstream is None else upstream
+        self._validate_upstream(validate_run_id(run_id), upstream)
+        observed = aware_utc(observed_at, "observed_at")
         now = self._now()
-        manifest = self._manifest(
+        manifest = create_data_quality_attempt_manifest(
             run_id=run_id,
             phase_attempt=phase_attempt,
-            snapshot=placeholder,
-            upstream=upstream,
+            requested_date=upstream.slate.slate.requested_date,
+            as_of_time=upstream.slate.slate.as_of_time,
+            observed_at=observed,
             phase_input_checksum=phase_input_checksum,
-            outcome=selected_outcome,
+            upstream=upstream.identities(),
+            outcome=selected_outcome.value,
             snapshot_checksum=None,
             warnings=safe_warnings,
             created_at=now,
             completed_at=now,
+            secret_values=self.secret_values,
         )
-        artifact = publish_data_quality_attempt_manifest(manifest, self.artifact_root)
+        artifact = publish_data_quality_attempt_manifest(
+            manifest, self.artifact_root, secret_values=self.secret_values
+        )
         try:
             with self.database.connect(write=True) as connection:
                 self._active_phase(
                     connection,
                     run_id,
                     phase_attempt,
-                    placeholder.requested_date,
-                    placeholder.as_of_time,
+                    upstream.slate.slate.requested_date,
+                    upstream.slate.slate.as_of_time,
                 )
                 self._insert_attempt(connection, manifest, artifact)
         except sqlite3.IntegrityError as exc:
@@ -703,6 +755,7 @@ class DataQualityRepository:
                 int(row["evidence_manifest_byte_count"]),
             ),
             self.artifact_root,
+            secret_values=self.secret_values,
         )
         return manifest
 
@@ -756,13 +809,39 @@ class DataQualityRepository:
 
     def _verify_snapshot(self, row: sqlite3.Row) -> PersistedDataQualityV1:
         run_id = str(row["run_id"])
-        upstream = self.resolve_upstream(run_id)
+        upstream = self.resolve_upstream_by_snapshot_ids(
+            run_id,
+            daily_slate_snapshot_id=str(row["upstream_daily_slate_snapshot_id"]),
+            game_state_snapshot_id=str(row["upstream_game_state_snapshot_id"]),
+            baseball_intelligence_snapshot_id=str(row["upstream_baseball_intelligence_snapshot_id"]),
+            odds_weather_snapshot_id=str(row["upstream_odds_weather_snapshot_id"]),
+        )
+        expected_checksums = (
+            upstream.slate.slate.checksum,
+            upstream.state.state.checksum,
+            upstream.baseball_intelligence.assembly.checksum,
+            upstream.odds_weather.snapshot.checksum,
+        )
+        stored_checksums = tuple(
+            str(row[name])
+            for name in (
+                "upstream_daily_slate_checksum",
+                "upstream_game_state_checksum",
+                "upstream_baseball_intelligence_checksum",
+                "upstream_odds_weather_checksum",
+            )
+        )
+        if stored_checksums != expected_checksums:
+            raise DataQualityIntegrityError("historical upstream checksum lineage mismatch")
+        if str(row["policy_version"]) != self.policy.policy_version:
+            raise DataQualityIntegrityError("historical Data Quality policy is unavailable")
         snapshot = assess_data_quality(
             slate=upstream.slate.slate,
             game_state=upstream.state.state,
             baseball_intelligence=upstream.baseball_intelligence.assembly,
             odds_weather=upstream.odds_weather.snapshot,
             observed_at=_parse_time(row["observed_at"], "observed_at"),
+            policy=self.policy,
         ).snapshot
         if (
             str(row["snapshot_id"]) != f"data-quality:{snapshot.checksum}"
@@ -778,8 +857,13 @@ class DataQualityRepository:
             int(row["artifact_byte_count"]),
         )
         try:
-            verify_data_quality_artifact(snapshot, artifact, self.artifact_root)
-        except PreModelEvidenceError as exc:
+            verify_data_quality_artifact(
+                snapshot,
+                artifact,
+                self.artifact_root,
+                secret_values=self.secret_values,
+            )
+        except (PreModelEvidenceError, DataQualityContractError) as exc:
             raise DataQualityIntegrityError(
                 "Data Quality artifact verification failed"
             ) from exc

@@ -358,10 +358,11 @@ PRE_MODEL_SCHEMA_V12_TABLE_STATEMENTS = (
         snapshot_id TEXT NOT NULL,
         source_game_id TEXT NOT NULL,
         ordinal INTEGER NOT NULL CHECK (ordinal>=1),
+        canonical_player_id TEXT NOT NULL,
         feature_snapshot_id TEXT NOT NULL,
         feature_checksum TEXT NOT NULL CHECK ({_sha('feature_checksum')}),
         PRIMARY KEY(snapshot_id,source_game_id,ordinal),
-        UNIQUE(snapshot_id,source_game_id,feature_snapshot_id),
+        UNIQUE(snapshot_id,source_game_id,canonical_player_id,feature_snapshot_id),
         FOREIGN KEY(snapshot_id,source_game_id) REFERENCES model_feature_set_games(snapshot_id,source_game_id) ON DELETE RESTRICT,
         FOREIGN KEY(feature_snapshot_id) REFERENCES stats_feature_snapshots(feature_snapshot_id) ON DELETE RESTRICT
     )
@@ -380,7 +381,7 @@ PRE_MODEL_SCHEMA_V12_INDEX_STATEMENTS = (
     "CREATE INDEX idx_mfs_attempt_run_date ON model_feature_set_attempt_evidence(run_id,requested_date,outcome)",
     "CREATE INDEX idx_mfs_snapshot_lineage ON model_feature_set_snapshots(upstream_matchup_packet_snapshot_id,upstream_matchup_packet_checksum)",
     "CREATE INDEX idx_mfs_game_identity ON model_feature_set_games(source_game_id,snapshot_id)",
-    "CREATE INDEX idx_mfs_source_feature_lookup ON model_feature_set_source_features(feature_snapshot_id,feature_checksum,snapshot_id)",
+    "CREATE INDEX idx_mfs_source_feature_lookup ON model_feature_set_source_features(canonical_player_id,feature_snapshot_id,feature_checksum,snapshot_id)",
 )
 
 
@@ -445,10 +446,14 @@ PRE_MODEL_SCHEMA_V12_VALIDATION_TRIGGER_STATEMENTS = (
     """
     CREATE TRIGGER data_quality_snapshot_validate_seal BEFORE UPDATE OF sealed_at ON data_quality_snapshots BEGIN
       SELECT CASE WHEN OLD.sealed_at IS NOT NULL OR NEW.sealed_at IS NULL OR length(trim(NEW.sealed_at))=0 THEN RAISE(ABORT,'Data Quality seal is one-time') END;
-      SELECT CASE WHEN (SELECT count(*) FROM data_quality_games WHERE snapshot_id=OLD.snapshot_id)<>OLD.game_count
-        OR (SELECT count(*) FROM data_quality_issues WHERE snapshot_id=OLD.snapshot_id)<>OLD.issue_count
-        OR (OLD.game_count>0 AND ((SELECT min(ordinal) FROM data_quality_games WHERE snapshot_id=OLD.snapshot_id)<>1 OR (SELECT max(ordinal) FROM data_quality_games WHERE snapshot_id=OLD.snapshot_id)<>OLD.game_count))
-        OR EXISTS (SELECT 1 FROM data_quality_games game WHERE game.snapshot_id=OLD.snapshot_id AND (SELECT count(*) FROM data_quality_issues issue WHERE issue.snapshot_id=game.snapshot_id AND issue.source_game_id=game.source_game_id)<>game.issue_count)
+      SELECT CASE WHEN (SELECT count(*) FROM data_quality_games WHERE snapshot_id=NEW.snapshot_id)<>NEW.game_count
+        OR (SELECT count(*) FROM data_quality_issues WHERE snapshot_id=NEW.snapshot_id)<>NEW.issue_count
+        OR (NEW.game_count>0 AND ((SELECT min(ordinal) FROM data_quality_games WHERE snapshot_id=NEW.snapshot_id)<>1 OR (SELECT max(ordinal) FROM data_quality_games WHERE snapshot_id=NEW.snapshot_id)<>NEW.game_count))
+        OR EXISTS (SELECT 1 FROM data_quality_games game WHERE game.snapshot_id=NEW.snapshot_id AND (SELECT count(*) FROM data_quality_issues issue WHERE issue.snapshot_id=game.snapshot_id AND issue.source_game_id=game.source_game_id)<>game.issue_count)
+        OR NEW.quality_state<>(CASE
+          WHEN EXISTS (SELECT 1 FROM data_quality_games WHERE snapshot_id=NEW.snapshot_id AND disposition IN ('degraded','insufficient')) THEN 'degraded'
+          WHEN NEW.issue_count>0 THEN 'warning'
+          ELSE 'clear' END)
         THEN RAISE(ABORT,'Data Quality snapshot children are incomplete') END;
     END
     """,
@@ -485,8 +490,8 @@ PRE_MODEL_SCHEMA_V12_VALIDATION_TRIGGER_STATEMENTS = (
     """
     CREATE TRIGGER matchup_packet_snapshot_validate_seal BEFORE UPDATE OF sealed_at ON matchup_packet_snapshots BEGIN
       SELECT CASE WHEN OLD.sealed_at IS NOT NULL OR NEW.sealed_at IS NULL OR length(trim(NEW.sealed_at))=0 THEN RAISE(ABORT,'Matchup Packet seal is one-time') END;
-      SELECT CASE WHEN (SELECT count(*) FROM matchup_packet_games WHERE snapshot_id=OLD.snapshot_id)<>OLD.game_count
-        OR (OLD.game_count>0 AND ((SELECT min(ordinal) FROM matchup_packet_games WHERE snapshot_id=OLD.snapshot_id)<>1 OR (SELECT max(ordinal) FROM matchup_packet_games WHERE snapshot_id=OLD.snapshot_id)<>OLD.game_count))
+      SELECT CASE WHEN (SELECT count(*) FROM matchup_packet_games WHERE snapshot_id=NEW.snapshot_id)<>NEW.game_count
+        OR (NEW.game_count>0 AND ((SELECT min(ordinal) FROM matchup_packet_games WHERE snapshot_id=NEW.snapshot_id)<>1 OR (SELECT max(ordinal) FROM matchup_packet_games WHERE snapshot_id=NEW.snapshot_id)<>NEW.game_count))
         THEN RAISE(ABORT,'Matchup Packet children are incomplete') END;
     END
     """,
@@ -527,14 +532,58 @@ PRE_MODEL_SCHEMA_V12_VALIDATION_TRIGGER_STATEMENTS = (
     """
     CREATE TRIGGER model_feature_set_source_validate_insert BEFORE INSERT ON model_feature_set_source_features BEGIN
       SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM model_feature_set_games game JOIN model_feature_set_snapshots snapshot ON snapshot.snapshot_id=game.snapshot_id WHERE game.snapshot_id=NEW.snapshot_id AND game.source_game_id=NEW.source_game_id AND snapshot.sealed_at IS NULL) THEN RAISE(ABORT,'Feature source requires unsealed game parent') END;
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM model_feature_set_games game
+        JOIN model_feature_set_snapshots snapshot ON snapshot.snapshot_id=game.snapshot_id
+        JOIN stats_feature_snapshots feature ON feature.feature_snapshot_id=NEW.feature_snapshot_id
+        WHERE game.snapshot_id=NEW.snapshot_id AND game.source_game_id=NEW.source_game_id
+          AND feature.canonical_player_id=NEW.canonical_player_id
+          AND feature.feature_checksum=NEW.feature_checksum
+          AND feature.entity_kind='player' AND feature.feature_version='DSE_MLB_STATS_FEATURES_V3'
+          AND feature.feature_as_of=snapshot.requested_date
+          AND feature.completeness_state IN ('complete','degraded')
+          AND feature.created_at<=snapshot.observed_at
+          AND json_extract(game.canonical_json,'$.source_features[' || (NEW.ordinal-1) || '].canonical_player_id')=NEW.canonical_player_id
+          AND json_extract(game.canonical_json,'$.source_features[' || (NEW.ordinal-1) || '].feature_snapshot_id')=NEW.feature_snapshot_id
+          AND json_extract(game.canonical_json,'$.source_features[' || (NEW.ordinal-1) || '].feature_checksum')=NEW.feature_checksum
+      ) THEN RAISE(ABORT,'Feature source violates canonical player or retained V3 lineage') END;
     END
     """,
     """
     CREATE TRIGGER model_feature_set_snapshot_validate_seal BEFORE UPDATE OF sealed_at ON model_feature_set_snapshots BEGIN
       SELECT CASE WHEN OLD.sealed_at IS NOT NULL OR NEW.sealed_at IS NULL OR length(trim(NEW.sealed_at))=0 THEN RAISE(ABORT,'Model Feature Set seal is one-time') END;
-      SELECT CASE WHEN (SELECT count(*) FROM model_feature_set_games WHERE snapshot_id=OLD.snapshot_id)<>OLD.game_count
-        OR (SELECT count(*) FROM model_feature_set_market_contexts WHERE snapshot_id=OLD.snapshot_id)<>OLD.game_count
-        OR (OLD.game_count>0 AND ((SELECT min(ordinal) FROM model_feature_set_games WHERE snapshot_id=OLD.snapshot_id)<>1 OR (SELECT max(ordinal) FROM model_feature_set_games WHERE snapshot_id=OLD.snapshot_id)<>OLD.game_count))
+      SELECT CASE WHEN (SELECT count(*) FROM model_feature_set_games WHERE snapshot_id=NEW.snapshot_id)<>NEW.game_count
+        OR (SELECT count(*) FROM model_feature_set_market_contexts WHERE snapshot_id=NEW.snapshot_id)<>NEW.game_count
+        OR (NEW.game_count>0 AND ((SELECT min(ordinal) FROM model_feature_set_games WHERE snapshot_id=NEW.snapshot_id)<>1 OR (SELECT max(ordinal) FROM model_feature_set_games WHERE snapshot_id=NEW.snapshot_id)<>NEW.game_count))
+        OR EXISTS (
+          SELECT 1 FROM model_feature_set_games game WHERE game.snapshot_id=NEW.snapshot_id AND (
+            (SELECT count(*) FROM model_feature_set_source_features source WHERE source.snapshot_id=game.snapshot_id AND source.source_game_id=game.source_game_id)<>json_array_length(json_extract(game.canonical_json,'$.source_features'))
+            OR EXISTS (
+              SELECT 1 FROM model_feature_set_source_features source
+              WHERE source.snapshot_id=game.snapshot_id AND source.source_game_id=game.source_game_id
+                AND (source.ordinal<1 OR source.ordinal>json_array_length(json_extract(game.canonical_json,'$.source_features'))
+                  OR json_extract(game.canonical_json,'$.source_features[' || (source.ordinal-1) || '].canonical_player_id')<>source.canonical_player_id
+                  OR json_extract(game.canonical_json,'$.source_features[' || (source.ordinal-1) || '].feature_snapshot_id')<>source.feature_snapshot_id
+                  OR json_extract(game.canonical_json,'$.source_features[' || (source.ordinal-1) || '].feature_checksum')<>source.feature_checksum)
+            )
+          )
+        )
+        OR json_array_length(NEW.selected_feature_inventory_json)<>
+          (SELECT count(*) FROM (
+            SELECT canonical_player_id,feature_snapshot_id,feature_checksum
+            FROM model_feature_set_source_features WHERE snapshot_id=NEW.snapshot_id
+            GROUP BY canonical_player_id,feature_snapshot_id,feature_checksum
+          ))
+        OR EXISTS (
+          SELECT 1 FROM json_each(NEW.selected_feature_inventory_json) inventory
+          WHERE NOT EXISTS (
+            SELECT 1 FROM model_feature_set_source_features source
+            WHERE source.snapshot_id=NEW.snapshot_id
+              AND source.canonical_player_id=json_extract(inventory.value,'$.canonical_player_id')
+              AND source.feature_snapshot_id=json_extract(inventory.value,'$.feature_snapshot_id')
+              AND source.feature_checksum=json_extract(inventory.value,'$.feature_checksum')
+          )
+        )
         THEN RAISE(ABORT,'Model Feature Set children are incomplete') END;
     END
     """,
@@ -563,13 +612,46 @@ PRE_MODEL_SCHEMA_V12_IMMUTABILITY_TRIGGER_STATEMENTS = tuple(
     )
 ) + tuple(
     statement
-    for table in (
-        "data_quality_snapshots",
-        "matchup_packet_snapshots",
-        "model_feature_set_snapshots",
-    )
+    for table, semantic_columns in {
+        "data_quality_snapshots": (
+            "snapshot_id", "run_id", "phase_key", "phase_attempt", "requested_date",
+            "as_of_time", "observed_at", "contract_version", "policy_version",
+            "phase_input_checksum", "upstream_daily_slate_snapshot_id",
+            "upstream_daily_slate_checksum", "upstream_game_state_snapshot_id",
+            "upstream_game_state_checksum", "upstream_baseball_intelligence_snapshot_id",
+            "upstream_baseball_intelligence_checksum", "upstream_odds_weather_snapshot_id",
+            "upstream_odds_weather_checksum", "snapshot_checksum", "quality_state",
+            "warnings_json", "warning_count", "canonical_json", "game_count",
+            "issue_count", "artifact_relpath", "artifact_checksum", "artifact_byte_count",
+            "created_at",
+        ),
+        "matchup_packet_snapshots": (
+            "snapshot_id", "run_id", "phase_key", "phase_attempt", "requested_date",
+            "as_of_time", "observed_at", "contract_version", "assembly_policy_version",
+            "phase_input_checksum", "upstream_daily_slate_snapshot_id",
+            "upstream_daily_slate_checksum", "upstream_game_state_snapshot_id",
+            "upstream_game_state_checksum", "upstream_baseball_intelligence_snapshot_id",
+            "upstream_baseball_intelligence_checksum", "upstream_odds_weather_snapshot_id",
+            "upstream_odds_weather_checksum", "upstream_data_quality_snapshot_id",
+            "upstream_data_quality_checksum", "packet_checksum", "warnings_json",
+            "warning_count", "canonical_json", "game_count", "artifact_relpath",
+            "artifact_checksum", "artifact_byte_count", "created_at",
+        ),
+        "model_feature_set_snapshots": (
+            "snapshot_id", "run_id", "phase_key", "phase_attempt", "requested_date",
+            "as_of_time", "observed_at", "contract_version", "schema_version",
+            "schema_checksum", "transformation_policy_version",
+            "missing_value_policy_version", "encoding_policy_version", "feature_version",
+            "phase_input_checksum", "upstream_data_quality_snapshot_id",
+            "upstream_data_quality_checksum", "upstream_matchup_packet_snapshot_id",
+            "upstream_matchup_packet_checksum", "selected_feature_inventory_json",
+            "selected_feature_inventory_checksum", "feature_set_checksum", "warnings_json",
+            "warning_count", "canonical_json", "game_count", "artifact_relpath",
+            "artifact_checksum", "artifact_byte_count", "created_at",
+        ),
+    }.items()
     for statement in (
-        f"CREATE TRIGGER {table}_reject_semantic_update BEFORE UPDATE ON {table} WHEN NEW.sealed_at IS OLD.sealed_at OR OLD.sealed_at IS NOT NULL BEGIN SELECT RAISE(ABORT,'Pre-model snapshot evidence is immutable'); END",
+        f"CREATE TRIGGER {table}_reject_semantic_update BEFORE UPDATE ON {table} WHEN OLD.sealed_at IS NOT NULL OR NEW.sealed_at IS OLD.sealed_at OR {' OR '.join(f'NEW.{column} IS NOT OLD.{column}' for column in semantic_columns)} BEGIN SELECT RAISE(ABORT,'Pre-model snapshot evidence is immutable'); END",
         f"CREATE TRIGGER {table}_reject_delete BEFORE DELETE ON {table} BEGIN SELECT RAISE(ABORT,'Pre-model snapshots cannot be deleted'); END",
     )
 )

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.daily_slate.contracts import canonical_sha256
 from app.database import Database
+from app.data_quality.repository import PersistedDataQualityV1
 from app.identifiers import parse_requested_date, validate_run_id
 from app.matchup_packet.repository import (
     MATCHUP_PACKET_ASSEMBLY_POLICY_VERSION,
@@ -13,6 +14,7 @@ from app.matchup_packet.repository import (
     MatchupPacketRepository,
 )
 from app.redaction import redact_text
+from app.pre_model_evidence import PreModelUpstreamIdentityV1
 from app.run_controller.contracts import PipelinePhaseKey, PipelinePhaseStatus
 from app.run_controller.service import PhaseExecutionContext, PhaseExecutionResult
 
@@ -50,7 +52,7 @@ class MatchupPacketPhaseHandler:
     def _context(context: PhaseExecutionContext) -> datetime:
         if context.phase_key is not PipelinePhaseKey.MATCHUP_PACKET:
             raise MatchupPacketPhaseHandlerError("handler requires MATCHUP_PACKET phase")
-        if context.attempt_number < 1:
+        if isinstance(context.attempt_number, bool) or not isinstance(context.attempt_number, int) or context.attempt_number < 1:
             raise MatchupPacketPhaseHandlerError("phase attempt must be positive")
         validate_run_id(context.run_id)
         parse_requested_date(context.requested_date)
@@ -65,8 +67,12 @@ class MatchupPacketPhaseHandler:
             raise MatchupPacketPhaseHandlerError("handler clock must be aware")
         return value.astimezone(timezone.utc)
 
-    def _input_checksum(self, run_id: str, observed_at: datetime) -> str:
-        quality, identities = self.repository._upstream(run_id)
+    def _input_checksum(
+        self,
+        quality: PersistedDataQualityV1,
+        identities: tuple[PreModelUpstreamIdentityV1, ...],
+        observed_at: datetime,
+    ) -> str:
         return canonical_sha256(
             {
                 "as_of_time": quality.snapshot.as_of_time.isoformat(),
@@ -84,13 +90,13 @@ class MatchupPacketPhaseHandler:
 
     def __call__(self, context: PhaseExecutionContext) -> PhaseExecutionResult:
         context_as_of = self._context(context)
-        quality, _ = self.repository._upstream(context.run_id)
+        quality, identities = self.repository._upstream(context.run_id)
         if quality.snapshot.requested_date != context.requested_date or quality.snapshot.as_of_time != context_as_of:
             raise MatchupPacketPhaseHandlerError("context does not match Data Quality")
         observed_at = self._observed()
         if observed_at < quality.snapshot.observed_at:
             raise MatchupPacketPhaseHandlerError("packet boundary precedes Data Quality")
-        input_checksum = self._input_checksum(context.run_id, observed_at)
+        input_checksum = self._input_checksum(quality, identities, observed_at)
         try:
             packet = self.repository.assemble_for_run(context.run_id, observed_at=observed_at)
         except Exception as exc:
@@ -102,6 +108,8 @@ class MatchupPacketPhaseHandler:
                     observed_at=observed_at,
                     outcome=MatchupPacketAttemptOutcome.ASSEMBLY_FAILED,
                     warnings=self._warning("matchup_packet_assembly_failed", exc),
+                    quality=quality,
+                    upstream_identities=identities,
                 )
             except Exception as retained_exc:
                 exc.add_note(f"failed-attempt evidence error: {type(retained_exc).__name__}")
@@ -122,6 +130,8 @@ class MatchupPacketPhaseHandler:
                     observed_at=observed_at,
                     outcome=MatchupPacketAttemptOutcome.PERSISTENCE_FAILED,
                     warnings=self._warning("matchup_packet_persistence_failed", exc),
+                    quality=quality,
+                    upstream_identities=identities,
                 )
             except Exception as retained_exc:
                 exc.add_note(f"failed-attempt evidence error: {type(retained_exc).__name__}")

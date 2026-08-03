@@ -27,6 +27,7 @@ from app.model_feature_set.contracts import (
     MODEL_FEATURE_ENCODING_POLICY_VERSION,
     MODEL_FEATURE_MISSING_VALUE_POLICY_VERSION,
     MODEL_FEATURE_TRANSFORMATION_POLICY_VERSION,
+    ModelFeatureSetContractError,
     ModelFeatureSetV1,
     ModelFeatureSourceV1,
 )
@@ -114,7 +115,40 @@ def selected_feature_inventory(feature_set: ModelFeatureSetV1) -> tuple[ModelFea
     return tuple(
         sorted(
             {source for game in feature_set.games for source in game.source_features},
-            key=lambda value: (value.feature_snapshot_id, value.feature_checksum),
+            key=lambda value: (
+                value.canonical_player_id,
+                value.feature_snapshot_id,
+                value.feature_checksum,
+            ),
+        )
+    )
+
+
+def selected_feature_inventory_from_packet(
+    packet: PersistedMatchupPacketV1,
+) -> tuple[ModelFeatureSourceV1, ...]:
+    return tuple(
+        sorted(
+            {
+                ModelFeatureSourceV1(
+                    canonical_player_id=player.canonical_player_id,
+                    feature_snapshot_id=feature_snapshot_id,
+                    feature_checksum=player.feature.feature_checksum,
+                )
+                for game in packet.packet.games
+                for team in (
+                    game.baseball_intelligence.away,
+                    game.baseball_intelligence.home,
+                )
+                for player in team.players
+                if player.feature is not None and player.canonical_player_id is not None
+                for feature_snapshot_id in player.equivalent_feature_snapshot_ids
+            },
+            key=lambda value: (
+                value.canonical_player_id,
+                value.feature_snapshot_id,
+                value.feature_checksum,
+            ),
         )
     )
 
@@ -159,21 +193,72 @@ class ModelFeatureSetRepository:
             PreModelUpstreamIdentityV1("matchup_packet", packet.snapshot_id, packet.packet.checksum),
         )
 
+    def resolve_upstream_by_snapshot_ids(
+        self,
+        run_id: str,
+        *,
+        data_quality_snapshot_id: str,
+        matchup_packet_snapshot_id: str,
+    ) -> tuple[PersistedMatchupPacketV1, PreModelUpstreamIdentityV1, PreModelUpstreamIdentityV1]:
+        safe_run_id = validate_run_id(run_id)
+        packet = self.matchup_packet.get_by_snapshot_id(matchup_packet_snapshot_id)
+        quality = self.matchup_packet.data_quality.get_by_snapshot_id(
+            data_quality_snapshot_id
+        )
+        if packet.run_id != safe_run_id or quality.run_id != safe_run_id:
+            raise ModelFeatureSetIntegrityError("historical upstream run mismatch")
+        if packet.packet.upstream_data_quality_checksum != quality.snapshot.checksum:
+            raise ModelFeatureSetIntegrityError("historical packet/Data Quality lineage mismatch")
+        return (
+            packet,
+            PreModelUpstreamIdentityV1(
+                "data_quality", quality.snapshot_id, quality.snapshot.checksum
+            ),
+            PreModelUpstreamIdentityV1(
+                "matchup_packet", packet.snapshot_id, packet.packet.checksum
+            ),
+        )
+
+    def resolve_selected_inventory(
+        self, packet: PersistedMatchupPacketV1
+    ) -> tuple[ModelFeatureSourceV1, ...]:
+        inventory = selected_feature_inventory_from_packet(packet)
+        self._verify_selected_inventory(inventory, packet)
+        return inventory
+
+    def build_from_exact_packet(
+        self, packet: PersistedMatchupPacketV1, *, observed_at: datetime
+    ) -> ModelFeatureSetV1:
+        expected_inventory = self.resolve_selected_inventory(packet)
+        feature_set = build_model_feature_set(packet.packet, observed_at=observed_at)
+        if selected_feature_inventory(feature_set) != expected_inventory:
+            raise ModelFeatureSetIntegrityError("transformation changed selected feature lineage")
+        return feature_set
+
     def build_for_run(self, run_id: str, *, observed_at: datetime) -> ModelFeatureSetV1:
         packet, _, _ = self._upstream(run_id)
-        feature_set = build_model_feature_set(packet.packet, observed_at=observed_at)
+        feature_set = self.build_from_exact_packet(packet, observed_at=observed_at)
         if feature_set.upstream_data_quality_checksum is None:
             raise ModelFeatureSetIntegrityError("Model Feature Set must bind Data Quality")
-        self._verify_selected_features(feature_set, packet)
         return feature_set
 
     def _verify_selected_features(self, feature_set: ModelFeatureSetV1, packet: PersistedMatchupPacketV1) -> None:
         inventory = selected_feature_inventory(feature_set)
+        expected = selected_feature_inventory_from_packet(packet)
+        if inventory != expected:
+            raise ModelFeatureSetIntegrityError("selected feature inventory disagrees with Matchup Packet players")
+        self._verify_selected_inventory(inventory, packet)
+
+    def _verify_selected_inventory(
+        self,
+        inventory: tuple[ModelFeatureSourceV1, ...],
+        packet: PersistedMatchupPacketV1,
+    ) -> None:
         with self.database.connect() as connection:
             for source in inventory:
                 row = connection.execute(
                     """
-                    SELECT feature_checksum,feature_version,entity_kind,feature_as_of,
+                    SELECT canonical_player_id,feature_checksum,feature_version,entity_kind,feature_as_of,
                            completeness_state,created_at
                     FROM stats_feature_snapshots WHERE feature_snapshot_id=?
                     """,
@@ -182,10 +267,11 @@ class ModelFeatureSetRepository:
                 if row is None:
                     raise ModelFeatureSetIntegrityError("referenced feature snapshot is missing")
                 if (
-                    str(row["feature_checksum"]) != source.feature_checksum
+                    str(row["canonical_player_id"]) != source.canonical_player_id
+                    or str(row["feature_checksum"]) != source.feature_checksum
                     or str(row["feature_version"]) != FEATURE_VERSION_V3
                     or str(row["entity_kind"]) != "player"
-                    or str(row["feature_as_of"]) != feature_set.requested_date
+                    or str(row["feature_as_of"]) != packet.packet.requested_date
                     or str(row["completeness_state"]) not in {"complete", "degraded"}
                     or _time(row["created_at"], "feature created_at") > packet.packet.observed_at
                 ):
@@ -272,7 +358,9 @@ class ModelFeatureSetRepository:
         try:
             with self.database.connect() as connection:
                 self._active(connection, run_id, phase_attempt, feature_set.requested_date, feature_set.as_of_time)
-            manifest_artifact = publish_model_feature_set_attempt_manifest(manifest, self.artifact_root)
+            manifest_artifact = publish_model_feature_set_attempt_manifest(
+                manifest, self.artifact_root, secret_values=self.secret_values
+            )
             feature_artifact = write_model_feature_set_artifact(feature_set, self.artifact_root, secret_values=self.secret_values)
             snapshot_id = f"model-feature-set:{feature_set.checksum}"
             with self.database.connect(write=True) as connection:
@@ -383,8 +471,15 @@ class ModelFeatureSetRepository:
             )
             for source_ordinal, source in enumerate(game.source_features, 1):
                 connection.execute(
-                    "INSERT INTO model_feature_set_source_features VALUES (?,?,?,?,?)",
-                    (snapshot_id, game.source_game_id, source_ordinal, source.feature_snapshot_id, source.feature_checksum),
+                    "INSERT INTO model_feature_set_source_features VALUES (?,?,?,?,?,?)",
+                    (
+                        snapshot_id,
+                        game.source_game_id,
+                        source_ordinal,
+                        source.canonical_player_id,
+                        source.feature_snapshot_id,
+                        source.feature_checksum,
+                    ),
                 )
 
     @staticmethod
@@ -408,9 +503,29 @@ class ModelFeatureSetRepository:
                 )
             ):
                 raise ModelFeatureSetIntegrityError("market context is not independently preserved")
-            sources = connection.execute("SELECT feature_snapshot_id,feature_checksum FROM model_feature_set_source_features WHERE snapshot_id=? AND source_game_id=? ORDER BY ordinal", (snapshot_id, game.source_game_id)).fetchall()
-            if tuple((str(value[0]), str(value[1])) for value in sources) != tuple((value.feature_snapshot_id, value.feature_checksum) for value in game.source_features):
+            sources = connection.execute("SELECT canonical_player_id,feature_snapshot_id,feature_checksum FROM model_feature_set_source_features WHERE snapshot_id=? AND source_game_id=? ORDER BY ordinal", (snapshot_id, game.source_game_id)).fetchall()
+            if tuple((str(value[0]), str(value[1]), str(value[2])) for value in sources) != tuple((value.canonical_player_id, value.feature_snapshot_id, value.feature_checksum) for value in game.source_features):
                 raise ModelFeatureSetIntegrityError("selected feature lineage mismatch")
+        retained_inventory = tuple(
+            ModelFeatureSourceV1(
+                canonical_player_id=str(value[0]),
+                feature_snapshot_id=str(value[1]),
+                feature_checksum=str(value[2]),
+            )
+            for value in connection.execute(
+                """
+                SELECT canonical_player_id,feature_snapshot_id,feature_checksum
+                FROM model_feature_set_source_features WHERE snapshot_id=?
+                GROUP BY canonical_player_id,feature_snapshot_id,feature_checksum
+                ORDER BY canonical_player_id,feature_snapshot_id,feature_checksum
+                """,
+                (snapshot_id,),
+            ).fetchall()
+        )
+        if retained_inventory != selected_feature_inventory(feature_set):
+            raise ModelFeatureSetIntegrityError(
+                "top-level selected feature inventory does not match source children"
+            )
 
     def _existing(self, run_id: str, attempt: int, checksum: str, feature_set: ModelFeatureSetV1) -> PersistedModelFeatureSetV1 | None:
         try:
@@ -419,7 +534,21 @@ class ModelFeatureSetRepository:
             return None
         return existing if existing.phase_input_checksum == checksum and existing.feature_set.canonical_json_bytes() == feature_set.canonical_json_bytes() else None
 
-    def persist_failed_attempt(self, *, run_id: str, phase_attempt: int, phase_input_checksum: str, observed_at: datetime, outcome: ModelFeatureSetAttemptOutcome | str, warnings: Iterable[Mapping[str, object]]) -> ModelFeatureSetAttemptEvidenceV1:
+    def persist_failed_attempt(
+        self,
+        *,
+        run_id: str,
+        phase_attempt: int,
+        phase_input_checksum: str,
+        observed_at: datetime,
+        outcome: ModelFeatureSetAttemptOutcome | str,
+        warnings: Iterable[Mapping[str, object]],
+        packet_snapshot: PersistedMatchupPacketV1 | None = None,
+        selected_inventory: tuple[ModelFeatureSourceV1, ...] | None = None,
+        upstream_identities: tuple[
+            PreModelUpstreamIdentityV1, PreModelUpstreamIdentityV1
+        ] | None = None,
+    ) -> ModelFeatureSetAttemptEvidenceV1:
         selected = ModelFeatureSetAttemptOutcome(outcome)
         if selected is ModelFeatureSetAttemptOutcome.ASSEMBLED:
             raise ValueError("failed outcome cannot be assembled")
@@ -439,17 +568,52 @@ class ModelFeatureSetRepository:
             raise ModelFeatureSetPersistenceConflict(
                 "conflicting failed Model Feature Set"
             )
-        feature_set = self.build_for_run(run_id, observed_at=observed_at)
-        _, quality, packet = self._upstream(run_id)
-        inventory = selected_feature_inventory(feature_set)
+        if packet_snapshot is None:
+            packet_snapshot, quality, packet = self._upstream(run_id)
+        else:
+            if upstream_identities is None:
+                raise ModelFeatureSetIntegrityError(
+                    "exact failed-attempt upstream identities are required"
+                )
+            quality, packet = upstream_identities
+            if (
+                quality.phase_key != "data_quality"
+                or packet.phase_key != "matchup_packet"
+                or packet.snapshot_id != packet_snapshot.snapshot_id
+                or packet.checksum != packet_snapshot.packet.checksum
+            ):
+                raise ModelFeatureSetIntegrityError(
+                    "failed-attempt upstream identity mismatch"
+                )
+        resolved_inventory = self.resolve_selected_inventory(packet_snapshot)
+        inventory = resolved_inventory if selected_inventory is None else tuple(selected_inventory)
+        if inventory != resolved_inventory:
+            raise ModelFeatureSetIntegrityError("failed-attempt selected inventory mismatch")
         inventory_json = [value.as_dict() for value in inventory]
         inventory_checksum = selected_feature_inventory_checksum(inventory)
         now = self._now()
-        manifest = self._manifest(run_id=run_id, attempt=phase_attempt, feature_set=feature_set, phase_input_checksum=phase_input_checksum, identities=(quality, packet), outcome=selected, snapshot_checksum=None, warnings=safe_warnings, now=now)
-        artifact = publish_model_feature_set_attempt_manifest(manifest, self.artifact_root)
+        observed = aware_utc(observed_at, "observed_at")
+        manifest = create_model_feature_set_attempt_manifest(
+            run_id=run_id,
+            phase_attempt=phase_attempt,
+            requested_date=packet_snapshot.packet.requested_date,
+            as_of_time=packet_snapshot.packet.as_of_time,
+            observed_at=observed,
+            phase_input_checksum=phase_input_checksum,
+            upstream=(quality, packet),
+            outcome=selected.value,
+            snapshot_checksum=None,
+            warnings=safe_warnings,
+            created_at=now,
+            completed_at=now,
+            secret_values=self.secret_values,
+        )
+        artifact = publish_model_feature_set_attempt_manifest(
+            manifest, self.artifact_root, secret_values=self.secret_values
+        )
         try:
             with self.database.connect(write=True) as connection:
-                self._active(connection, run_id, phase_attempt, feature_set.requested_date, feature_set.as_of_time)
+                self._active(connection, run_id, phase_attempt, packet_snapshot.packet.requested_date, packet_snapshot.packet.as_of_time)
                 self._insert_attempt(connection, manifest, artifact, inventory_json, inventory_checksum)
         except sqlite3.IntegrityError as exc:
             existing = self.get_attempt_evidence(run_id, phase_attempt)
@@ -482,7 +646,16 @@ class ModelFeatureSetRepository:
         if row is None:
             raise ModelFeatureSetNotFoundError("Model Feature Set attempt not found")
         manifest = self._manifest_from_row(row)
-        verify_model_feature_set_attempt_manifest(manifest, PreModelArtifactV1(str(row["evidence_manifest_relpath"]), str(row["evidence_manifest_checksum"]), int(row["evidence_manifest_byte_count"])), self.artifact_root)
+        verify_model_feature_set_attempt_manifest(
+            manifest,
+            PreModelArtifactV1(
+                str(row["evidence_manifest_relpath"]),
+                str(row["evidence_manifest_checksum"]),
+                int(row["evidence_manifest_byte_count"]),
+            ),
+            self.artifact_root,
+            secret_values=self.secret_values,
+        )
         return manifest
 
     def get_attempt_evidence(self, run_id: str, attempt: int) -> ModelFeatureSetAttemptEvidenceV1:
@@ -492,7 +665,15 @@ class ModelFeatureSetRepository:
             raise ModelFeatureSetNotFoundError("Model Feature Set attempt not found")
         manifest = self.get_attempt_manifest(run_id, attempt)
         raw_inventory = json_array(str(row["selected_feature_inventory_json"]), "selected feature inventory")
-        inventory = tuple(ModelFeatureSourceV1(str(value["feature_snapshot_id"]), str(value["feature_checksum"])) for value in raw_inventory if isinstance(value, Mapping))
+        inventory = tuple(
+            ModelFeatureSourceV1(
+                canonical_player_id=str(value["canonical_player_id"]),
+                feature_snapshot_id=str(value["feature_snapshot_id"]),
+                feature_checksum=str(value["feature_checksum"]),
+            )
+            for value in raw_inventory
+            if isinstance(value, Mapping)
+        )
         if selected_feature_inventory_checksum(inventory) != str(row["selected_feature_inventory_checksum"]):
             raise ModelFeatureSetIntegrityError("selected feature inventory checksum mismatch")
         return ModelFeatureSetAttemptEvidenceV1(
@@ -516,7 +697,19 @@ class ModelFeatureSetRepository:
         return row
 
     def _verify(self, row: sqlite3.Row) -> PersistedModelFeatureSetV1:
-        feature_set = self.build_for_run(str(row["run_id"]), observed_at=_time(row["observed_at"], "observed_at"))
+        packet, quality_identity, packet_identity = self.resolve_upstream_by_snapshot_ids(
+            str(row["run_id"]),
+            data_quality_snapshot_id=str(row["upstream_data_quality_snapshot_id"]),
+            matchup_packet_snapshot_id=str(row["upstream_matchup_packet_snapshot_id"]),
+        )
+        if (
+            str(row["upstream_data_quality_checksum"]) != quality_identity.checksum
+            or str(row["upstream_matchup_packet_checksum"]) != packet_identity.checksum
+        ):
+            raise ModelFeatureSetIntegrityError("historical upstream checksum lineage mismatch")
+        feature_set = self.build_from_exact_packet(
+            packet, observed_at=_time(row["observed_at"], "observed_at")
+        )
         if str(row["snapshot_id"]) != f"model-feature-set:{feature_set.checksum}" or str(row["canonical_json"]) != feature_set.canonical_json_bytes().decode("utf-8"):
             raise ModelFeatureSetIntegrityError("Model Feature Set canonical evidence mismatch")
         with self.database.connect() as connection:
@@ -524,9 +717,12 @@ class ModelFeatureSetRepository:
         artifact = ModelFeatureSetArtifactV1(str(row["artifact_relpath"]), str(row["artifact_checksum"]), int(row["artifact_byte_count"]))
         try:
             verify_model_feature_set_artifact(
-                feature_set, artifact, self.artifact_root
+                feature_set,
+                artifact,
+                self.artifact_root,
+                secret_values=self.secret_values,
             )
-        except PreModelEvidenceError as exc:
+        except (PreModelEvidenceError, ModelFeatureSetContractError) as exc:
             raise ModelFeatureSetIntegrityError(
                 "Model Feature Set artifact verification failed"
             ) from exc

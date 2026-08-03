@@ -1,5 +1,15 @@
 # ModelFeatureSet V1 — Pre-Persistence Handoff
 
+## Current persisted integrity correction
+
+Selected V3 lineage includes canonical player identity in contracts,
+manifests, canonical artifacts, relational children, indexes, and seal
+verification. The handler resolves and verifies exact player feature references
+before calculating the input checksum, then enters one transformation boundary.
+A transformation failure retains immutable evidence from that selection without
+rebuilding. Historical reads use exact stored Matchup Packet and Data Quality
+snapshot IDs; wrong-player substitution fails closed.
+
 **Private branch:** `rc/model-feature-set-v1-direct-20260727`  
 **Private draft PR:** #17  
 **Base:** `rc/matchup-packet-v1-direct-20260727`  

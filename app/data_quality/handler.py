@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.daily_slate.contracts import canonical_sha256
-from app.data_quality.contracts import DATA_QUALITY_POLICY_VERSION
+from app.data_quality.contracts import DataQualityDisposition, DataQualityPolicyV1
 from app.data_quality.engine import DataQualityAssessmentError
 from app.data_quality.repository import (
     DataQualityAttemptOutcome,
     DataQualityRepository,
     data_quality_warning_payload,
+    DataQualityUpstreamV1,
 )
 from app.database import Database
 from app.identifiers import parse_requested_date, validate_run_id
@@ -24,20 +24,6 @@ DATA_QUALITY_PHASE_INPUT_CONTRACT = "DSE_DATA_QUALITY_PHASE_INPUT_V1"
 
 class DataQualityPhaseHandlerError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class DataQualityPolicyV1:
-    policy_version: str = DATA_QUALITY_POLICY_VERSION
-    supported_markets: tuple[str, ...] = ("h2h", "spreads", "totals")
-    network_enabled: bool = False
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "network_enabled": self.network_enabled,
-            "policy_version": self.policy_version,
-            "supported_markets": list(self.supported_markets),
-        }
 
 
 def _utc_now() -> datetime:
@@ -63,13 +49,14 @@ class DataQualityPhaseHandler:
             artifact_root=artifact_root,
             secret_values=self.secret_values,
             clock=clock,
+            policy=policy,
         )
 
     @staticmethod
     def _validate_context(context: PhaseExecutionContext) -> datetime:
         if context.phase_key is not PipelinePhaseKey.DATA_QUALITY:
             raise DataQualityPhaseHandlerError("handler requires DATA_QUALITY phase")
-        if context.attempt_number < 1:
+        if isinstance(context.attempt_number, bool) or not isinstance(context.attempt_number, int) or context.attempt_number < 1:
             raise DataQualityPhaseHandlerError("phase attempt must be positive")
         validate_run_id(context.run_id)
         parse_requested_date(context.requested_date)
@@ -87,8 +74,12 @@ class DataQualityPhaseHandler:
             raise DataQualityPhaseHandlerError("handler clock must be timezone-aware")
         return value.astimezone(timezone.utc)
 
-    def _input_checksum(self, context: PhaseExecutionContext, observed_at: datetime) -> str:
-        upstream = self.repository.resolve_upstream(context.run_id)
+    def _input_checksum(
+        self,
+        context: PhaseExecutionContext,
+        observed_at: datetime,
+        upstream: DataQualityUpstreamV1,
+    ) -> str:
         return canonical_sha256(
             {
                 "as_of_time": upstream.slate.slate.as_of_time.isoformat(),
@@ -130,7 +121,7 @@ class DataQualityPhaseHandler:
             raise DataQualityPhaseHandlerError(
                 "assessment boundary cannot precede upstream evidence"
             )
-        input_checksum = self._input_checksum(context, observed_at)
+        input_checksum = self._input_checksum(context, observed_at, upstream)
         try:
             result, _ = self.repository.assess_for_run(
                 context.run_id, observed_at=observed_at
@@ -145,6 +136,7 @@ class DataQualityPhaseHandler:
                         observed_at=observed_at,
                         outcome=DataQualityAttemptOutcome.ASSESSMENT_FAILED,
                         warnings=self._failure_warning("data_quality_assessment_failed", exc),
+                        upstream=upstream,
                     )
                 except Exception as retained_exc:
                     exc.add_note(f"failed-attempt evidence error: {type(retained_exc).__name__}")
@@ -165,12 +157,16 @@ class DataQualityPhaseHandler:
                     observed_at=observed_at,
                     outcome=DataQualityAttemptOutcome.PERSISTENCE_FAILED,
                     warnings=self._failure_warning("data_quality_persistence_failed", exc),
+                    upstream=upstream,
                 )
             except Exception as retained_exc:
                 exc.add_note(f"failed-attempt evidence error: {type(retained_exc).__name__}")
             raise
         warnings = data_quality_warning_payload(persisted.snapshot)
-        if persisted.snapshot.insufficient_game_count:
+        if any(
+            game.disposition in {DataQualityDisposition.DEGRADED, DataQualityDisposition.INSUFFICIENT}
+            for game in persisted.snapshot.games
+        ):
             status = PipelinePhaseStatus.DEGRADED
         elif warnings:
             status = PipelinePhaseStatus.SUCCEEDED_WITH_WARNINGS

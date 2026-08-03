@@ -58,6 +58,8 @@ def verify_data_quality_artifact(
     snapshot: DataQualityV1,
     artifact: DataQualityArtifactV1,
     artifact_root: Path,
+    *,
+    secret_values: tuple[str, ...] = (),
 ) -> None:
     if artifact.relpath != data_quality_artifact_relpath(snapshot):
         raise DataQualityContractError("Data Quality artifact path identity mismatch")
@@ -68,3 +70,7 @@ def verify_data_quality_artifact(
         ),
         snapshot.canonical_json_bytes(),
     )
+    if redact_value(snapshot.as_dict(), secret_values) != snapshot.as_dict():
+        raise DataQualityContractError(
+            "Data Quality artifact contains credential-bearing material"
+        )

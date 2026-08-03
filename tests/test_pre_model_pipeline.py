@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from app.data_quality import DataQualityIntegrityError, DataQualityRepository
+from app.data_quality.engine import DataQualityAssessmentError
 from app.database import Database
 from app.matchup_packet import MatchupPacketIntegrityError, MatchupPacketRepository
 from app.model_feature_set import (
     MODEL_FEATURE_NAMES_V1,
     ModelFeatureSetIntegrityError,
     ModelFeatureSetRepository,
+    ModelFeatureSourceV1,
 )
 from app.run_controller.contracts import PipelinePhaseKey, PipelinePhaseStatus
 from app.run_controller.repository import PipelineRunRepository
@@ -79,6 +82,16 @@ def test_one_game_pre_model_chain_persists_reconstructs_and_blocks_predictions(
     packet = packet_repository.get_latest_for_run(run_id)
     feature_set = feature_repository.get_latest_for_run(run_id)
     assert quality is not None and packet is not None and feature_set is not None
+    quality_phase = controller.show(run_id).phases[
+        list(PipelinePhaseKey).index(PipelinePhaseKey.DATA_QUALITY)
+    ]
+    assert quality.snapshot.degraded_game_count + quality.snapshot.insufficient_game_count > 0
+    assert quality_phase.status is PipelinePhaseStatus.DEGRADED
+    with reopened_database.connect() as connection:
+        assert connection.execute(
+            "SELECT quality_state FROM data_quality_snapshots WHERE snapshot_id=?",
+            (quality.snapshot_id,),
+        ).fetchone()[0] == "degraded"
     assert len(quality.snapshot.games) == len(packet.packet.games) == len(feature_set.feature_set.games) == 1
     assert packet.packet.upstream_data_quality_checksum == quality.snapshot.checksum
     assert feature_set.feature_set.upstream_data_quality_checksum == quality.snapshot.checksum
@@ -162,6 +175,60 @@ def test_one_game_pre_model_chain_persists_reconstructs_and_blocks_predictions(
             repository.get_by_snapshot_id(persisted.snapshot_id)
         artifact_path.write_bytes(original)
         assert repository.get_by_snapshot_id(persisted.snapshot_id) == persisted
+
+    def latest_must_not_run(*args, **kwargs):
+        raise AssertionError("historical reconstruction used latest evidence")
+
+    monkeypatch.setattr(
+        quality_repository.daily_slate,
+        "get_latest_daily_slate_for_run",
+        latest_must_not_run,
+    )
+    monkeypatch.setattr(
+        quality_repository.game_state,
+        "get_latest_game_state_for_run",
+        latest_must_not_run,
+    )
+    monkeypatch.setattr(
+        quality_repository.baseball_intelligence,
+        "get_latest_for_run",
+        latest_must_not_run,
+    )
+    monkeypatch.setattr(
+        quality_repository.odds_weather,
+        "get_latest_for_run",
+        latest_must_not_run,
+    )
+    monkeypatch.setattr(
+        packet_repository.data_quality,
+        "get_latest_for_run",
+        latest_must_not_run,
+    )
+    monkeypatch.setattr(
+        feature_repository.matchup_packet,
+        "get_latest_for_run",
+        latest_must_not_run,
+    )
+    assert quality_repository.get_by_snapshot_id(quality.snapshot_id) == quality
+    assert packet_repository.get_by_snapshot_id(packet.snapshot_id) == packet
+    assert feature_repository.get_by_snapshot_id(feature_set.snapshot_id) == feature_set
+
+    inventory = feature_repository.resolve_selected_inventory(packet)
+    assert len(inventory) >= 2
+    player_a, player_b = inventory[:2]
+    wrong_player = ModelFeatureSourceV1(
+        canonical_player_id=player_a.canonical_player_id,
+        feature_snapshot_id=player_b.feature_snapshot_id,
+        feature_checksum=player_b.feature_checksum,
+    )
+    corrupted = tuple(
+        wrong_player if value == player_a else value for value in inventory
+    )
+    with pytest.raises(ModelFeatureSetIntegrityError, match="disagrees"):
+        feature_repository._verify_selected_features(
+            replace(feature_set.feature_set, games=(replace(feature_set.feature_set.games[0], source_features=corrupted),)),
+            packet,
+        )
 
 
 def test_zero_game_chain_uses_no_provider_and_blocks_predictions(tmp_path: Path) -> None:
@@ -310,3 +377,198 @@ def test_each_pre_model_phase_retry_preserves_failed_attempt_and_upstream(
         for value in succeeded.phases[: list(PipelinePhaseKey).index(phase_key)]
     ) == upstream_attempts
     assert calls == {"odds": 1, "nws": 1, "openweather": 1}
+
+
+@pytest.mark.parametrize(
+    "phase_key,method_name,error_type,expected_outcome",
+    (
+        (
+            PipelinePhaseKey.DATA_QUALITY,
+            "assess_for_run",
+            DataQualityAssessmentError,
+            "assessment_failed",
+        ),
+        (
+            PipelinePhaseKey.MATCHUP_PACKET,
+            "assemble_for_run",
+            RuntimeError,
+            "assembly_failed",
+        ),
+        (
+            PipelinePhaseKey.MODEL_FEATURE_SET,
+            "build_from_exact_packet",
+            RuntimeError,
+            "transformation_failed",
+        ),
+    ),
+)
+def test_true_transform_failure_retains_manifest_without_rerunning_failed_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase_key: PipelinePhaseKey,
+    method_name: str,
+    error_type: type[Exception],
+    expected_outcome: str,
+) -> None:
+    controller, _, _, run_id, _ = _phase4_pending_controller(tmp_path, monkeypatch)
+    repository = controller.handlers[phase_key].repository
+    original = getattr(repository, method_name)
+    calls = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise error_type("deterministic true transform failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(repository, method_name, fail_once)
+    with pytest.raises(ManualRunExecutionError) as failed:
+        controller.resume(run_id)
+    assert failed.value.phase_key is phase_key
+    first = repository.get_attempt_evidence(run_id, 1)
+    assert first.outcome.value == expected_outcome
+    assert first.snapshot_checksum is None
+    assert repository.get_attempt_manifest(run_id, 1).outcome == expected_outcome
+    assert calls == 1
+
+    with pytest.raises(ManualRunExecutionBlocked) as blocked:
+        controller.resume(run_id)
+    assert blocked.value.phase_key is PipelinePhaseKey.PREDICTIONS
+    assert repository.get_attempt_evidence(run_id, 1) == first
+    assert repository.get_attempt_evidence(run_id, 2).outcome.value == "assembled"
+
+
+def test_first_seal_rejects_semantic_mutation_and_incomplete_feature_sources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, configured, _, run_id, _ = _phase4_pending_controller(
+        tmp_path, monkeypatch
+    )
+    with pytest.raises(ManualRunExecutionBlocked):
+        controller.resume(run_id)
+
+    cases: dict[str, tuple[str, tuple[tuple[str, object], ...]]] = {
+        "data_quality_snapshots": (
+            "data_quality",
+            (
+                ("canonical_json", "{}"),
+                ("snapshot_checksum", "b" * 64),
+                ("upstream_odds_weather_snapshot_id", "odds-weather:other"),
+                ("upstream_odds_weather_checksum", "b" * 64),
+                ("phase_input_checksum", "b" * 64),
+                ("artifact_relpath", "data_quality/snapshots/other/data_quality_v1.json"),
+                ("artifact_checksum", "b" * 64),
+                ("artifact_byte_count", 1),
+                ("game_count", 2),
+                ("issue_count", 999),
+                ("quality_state", "clear"),
+                ("policy_version", "DSE_DATA_QUALITY_POLICY_MUTATED"),
+            ),
+        ),
+        "matchup_packet_snapshots": (
+            "matchup_packet",
+            (
+                ("canonical_json", "{}"),
+                ("packet_checksum", "b" * 64),
+                ("upstream_data_quality_snapshot_id", "data-quality:other"),
+                ("upstream_data_quality_checksum", "b" * 64),
+                ("phase_input_checksum", "b" * 64),
+                ("artifact_relpath", "matchup_packet/snapshots/other/matchup_packet_v1.json"),
+                ("artifact_checksum", "b" * 64),
+                ("artifact_byte_count", 1),
+                ("game_count", 2),
+                ("warning_count", 999),
+                ("assembly_policy_version", "DSE_MATCHUP_PACKET_POLICY_MUTATED"),
+            ),
+        ),
+        "model_feature_set_snapshots": (
+            "model_feature_set",
+            (
+                ("canonical_json", "{}"),
+                ("feature_set_checksum", "b" * 64),
+                ("upstream_matchup_packet_snapshot_id", "matchup-packet:other"),
+                ("upstream_matchup_packet_checksum", "b" * 64),
+                ("phase_input_checksum", "b" * 64),
+                ("artifact_relpath", "model_feature_set/snapshots/other/model_feature_set_v1.json"),
+                ("artifact_checksum", "b" * 64),
+                ("artifact_byte_count", 1),
+                ("game_count", 2),
+                ("warning_count", 999),
+                ("selected_feature_inventory_checksum", "b" * 64),
+            ),
+        ),
+    }
+
+    database = Database(configured.database_path)
+    with database.connect(write=True) as connection:
+        for table, (prefix, mutations) in cases.items():
+            snapshot_id = str(
+                connection.execute(
+                    f"SELECT snapshot_id FROM {table} WHERE run_id=?", (run_id,)
+                ).fetchone()[0]
+            )
+            trigger_names = (
+                f"{prefix}_snapshot_validate_seal",
+                f"{table}_reject_semantic_update",
+            )
+            trigger_sql = {
+                name: str(
+                    connection.execute(
+                        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                        (name,),
+                    ).fetchone()[0]
+                )
+                for name in trigger_names
+            }
+            for name in trigger_names:
+                connection.execute(f"DROP TRIGGER {name}")
+            connection.execute(
+                f"UPDATE {table} SET sealed_at=NULL WHERE snapshot_id=?", (snapshot_id,)
+            )
+            for sql in trigger_sql.values():
+                connection.execute(sql)
+
+            for column, value in mutations:
+                with pytest.raises(sqlite3.IntegrityError):
+                    connection.execute(
+                        f"UPDATE {table} SET {column}=?, sealed_at=? WHERE snapshot_id=?",
+                        (value, "2026-08-02T00:00:00+00:00", snapshot_id),
+                    )
+                assert connection.execute(
+                    f"SELECT sealed_at FROM {table} WHERE snapshot_id=?",
+                    (snapshot_id,),
+                ).fetchone()[0] is None
+
+        feature_snapshot_id = str(
+            connection.execute(
+                "SELECT snapshot_id FROM model_feature_set_snapshots WHERE run_id=?",
+                (run_id,),
+            ).fetchone()[0]
+        )
+        source_count = int(
+            connection.execute(
+                "SELECT count(*) FROM model_feature_set_source_features WHERE snapshot_id=?",
+                (feature_snapshot_id,),
+            ).fetchone()[0]
+        )
+        assert source_count > 0
+        delete_trigger = "model_feature_set_source_features_reject_delete"
+        delete_sql = str(
+            connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                (delete_trigger,),
+            ).fetchone()[0]
+        )
+        connection.execute(f"DROP TRIGGER {delete_trigger}")
+        connection.execute(
+            "DELETE FROM model_feature_set_source_features WHERE rowid=(SELECT min(rowid) FROM model_feature_set_source_features WHERE snapshot_id=?)",
+            (feature_snapshot_id,),
+        )
+        connection.execute(delete_sql)
+        with pytest.raises(sqlite3.IntegrityError, match="children are incomplete"):
+            connection.execute(
+                "UPDATE model_feature_set_snapshots SET sealed_at=? WHERE snapshot_id=?",
+                ("2026-08-02T00:00:00+00:00", feature_snapshot_id),
+            )

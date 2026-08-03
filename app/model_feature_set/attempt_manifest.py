@@ -56,13 +56,19 @@ def create_model_feature_set_attempt_manifest(
 def publish_model_feature_set_attempt_manifest(
     manifest: ModelFeatureSetAttemptManifestV1,
     artifact_root: Path,
+    *,
+    secret_values: Iterable[str] = (),
 ) -> ModelFeatureSetAttemptManifestArtifactV1:
-    return publish_manifest(manifest, artifact_root, "model_feature_set")
+    return publish_manifest(
+        manifest, artifact_root, "model_feature_set", secret_values=secret_values
+    )
 
 
 def verify_model_feature_set_attempt_manifest(
     manifest: ModelFeatureSetAttemptManifestV1,
     artifact: ModelFeatureSetAttemptManifestArtifactV1,
     artifact_root: Path,
+    *,
+    secret_values: Iterable[str] = (),
 ) -> None:
-    verify_manifest(manifest, artifact, artifact_root)
+    verify_manifest(manifest, artifact, artifact_root, secret_values=secret_values)

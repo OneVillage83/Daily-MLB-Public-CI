@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 
 from app.data_quality.artifact import (
     data_quality_artifact_relpath,
+    verify_data_quality_artifact,
     write_data_quality_artifact,
 )
 from app.data_quality.contracts import (
@@ -19,6 +21,7 @@ from app.data_quality.contracts import (
     QualityIssueSeverity,
     QualityIssueV1,
 )
+from app.pre_model_evidence import PreModelEvidenceError
 
 AS_OF = datetime(2026, 7, 27, 14, 0, tzinfo=timezone.utc)
 OBSERVED = datetime(2026, 7, 27, 14, 15, tzinfo=timezone.utc)
@@ -126,6 +129,35 @@ def test_zero_game_snapshot_is_valid() -> None:
     assert snapshot.ready_game_count == 0
     assert snapshot.degraded_game_count == 0
     assert snapshot.insufficient_game_count == 0
+
+
+def test_standalone_artifact_verifier_rejects_configured_secret_retained_string(
+    tmp_path: Path,
+) -> None:
+    secret = "configured-retained-secret"
+    issue = QualityIssueV1(
+        code="fixture_secret_boundary",
+        domain=QualityDomain.GAME_STATE,
+        severity=QualityIssueSeverity.INFO,
+        message=f"safe prefix {secret} safe suffix",
+    )
+    snapshot = _snapshot(games=(_game(issues=(issue,)),))
+    artifact = write_data_quality_artifact(snapshot, tmp_path)
+    with pytest.raises(DataQualityContractError, match="credential-bearing"):
+        verify_data_quality_artifact(
+            snapshot, artifact, tmp_path, secret_values=(secret,)
+        )
+
+
+def test_phase_snapshot_artifact_verifier_rejects_hard_link(tmp_path: Path) -> None:
+    snapshot = _snapshot()
+    artifact = write_data_quality_artifact(snapshot, tmp_path)
+    try:
+        os.link(tmp_path / artifact.relpath, tmp_path / "snapshot-hard-link.json")
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"hard links unavailable: {exc}")
+    with pytest.raises(PreModelEvidenceError, match="hard link"):
+        verify_data_quality_artifact(snapshot, artifact, tmp_path)
 
 
 def test_duplicate_game_identity_is_rejected() -> None:

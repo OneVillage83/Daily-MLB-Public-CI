@@ -1,5 +1,17 @@
 # Data Quality V1 Handoff
 
+## External integrity correction
+
+Historical assessment reads resolve the exact four upstream snapshot
+IDs/checksums stored on that assessment, never latest run state.
+`assessment_failed` evidence uses already-resolved upstream/context identity
+and does not invoke the failed assessment again. Standalone manifests and
+snapshot artifacts reject configured secrets, noncanonical retained bytes,
+symbolic links, and hard-linked final files. Status is deterministic: no issues
+is `SUCCEEDED`, info-only issues is `SUCCEEDED_WITH_WARNINGS`, and any degraded
+or insufficient game is `DEGRADED`. The immutable policy actively controls
+supported-market assessment behavior.
+
 Phase 5 is implemented end to end on the pre-model persistence sprint branch.
 The production handler verifies the complete sealed Phase 1–4 chain, fixes one
 UTC observation time, assesses without acquisition, persists through

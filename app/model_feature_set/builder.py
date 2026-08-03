@@ -639,6 +639,7 @@ def build_model_feature_game(game: MatchupPacketGameV1) -> ModelFeatureGameV1:
         sorted(
             {
                 ModelFeatureSourceV1(
+                    canonical_player_id=player.canonical_player_id,
                     feature_snapshot_id=feature_snapshot_id,
                     feature_checksum=player.feature.feature_checksum,
                 )
@@ -647,7 +648,7 @@ def build_model_feature_game(game: MatchupPacketGameV1) -> ModelFeatureGameV1:
                     game.baseball_intelligence.home,
                 )
                 for player in team.players
-                if player.feature is not None
+                if player.feature is not None and player.canonical_player_id is not None
                 for feature_snapshot_id in player.equivalent_feature_snapshot_ids
             },
             key=lambda value: value.feature_snapshot_id,

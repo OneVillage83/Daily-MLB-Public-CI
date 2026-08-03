@@ -11,11 +11,13 @@ from app.model_feature_set.contracts import (
     MODEL_FEATURE_ENCODING_POLICY_VERSION,
     MODEL_FEATURE_MISSING_VALUE_POLICY_VERSION,
     MODEL_FEATURE_TRANSFORMATION_POLICY_VERSION,
+    ModelFeatureSourceV1,
 )
+from app.matchup_packet.repository import PersistedMatchupPacketV1
+from app.pre_model_evidence import PreModelUpstreamIdentityV1
 from app.model_feature_set.repository import (
     ModelFeatureSetAttemptOutcome,
     ModelFeatureSetRepository,
-    selected_feature_inventory,
     selected_feature_inventory_checksum,
 )
 from app.model_feature_set.schema import (
@@ -62,7 +64,7 @@ class ModelFeatureSetPhaseHandler:
     def _context(context: PhaseExecutionContext) -> datetime:
         if context.phase_key is not PipelinePhaseKey.MODEL_FEATURE_SET:
             raise ModelFeatureSetPhaseHandlerError("handler requires MODEL_FEATURE_SET phase")
-        if context.attempt_number < 1:
+        if isinstance(context.attempt_number, bool) or not isinstance(context.attempt_number, int) or context.attempt_number < 1:
             raise ModelFeatureSetPhaseHandlerError("phase attempt must be positive")
         validate_run_id(context.run_id)
         parse_requested_date(context.requested_date)
@@ -77,13 +79,16 @@ class ModelFeatureSetPhaseHandler:
             raise ModelFeatureSetPhaseHandlerError("handler clock must be aware")
         return value.astimezone(timezone.utc)
 
-    def _input_checksum(self, run_id: str, observed_at: datetime) -> str:
-        feature_set = self.repository.build_for_run(run_id, observed_at=observed_at)
-        inventory = selected_feature_inventory(feature_set)
-        packet, quality, _ = self.repository._upstream(run_id)
+    def _input_checksum(
+        self,
+        packet: PersistedMatchupPacketV1,
+        quality: PreModelUpstreamIdentityV1,
+        inventory: tuple[ModelFeatureSourceV1, ...],
+        observed_at: datetime,
+    ) -> str:
         return canonical_sha256(
             {
-                "as_of_time": feature_set.as_of_time.isoformat(),
+                "as_of_time": packet.packet.as_of_time.isoformat(),
                 "contract_version": MODEL_FEATURE_SET_PHASE_INPUT_CONTRACT,
                 "encoding_policy_version": MODEL_FEATURE_ENCODING_POLICY_VERSION,
                 "feature_contract_version": MODEL_FEATURE_SET_CONTRACT_VERSION,
@@ -92,7 +97,7 @@ class ModelFeatureSetPhaseHandler:
                 "feature_version": FEATURE_VERSION_V3,
                 "missing_value_policy_version": MODEL_FEATURE_MISSING_VALUE_POLICY_VERSION,
                 "observed_at": observed_at.isoformat(),
-                "requested_date": feature_set.requested_date,
+                "requested_date": packet.packet.requested_date,
                 "selected_feature_inventory": [value.as_dict() for value in inventory],
                 "selected_feature_inventory_checksum": selected_feature_inventory_checksum(inventory),
                 "transformation_policy_version": MODEL_FEATURE_TRANSFORMATION_POLICY_VERSION,
@@ -109,15 +114,18 @@ class ModelFeatureSetPhaseHandler:
 
     def __call__(self, context: PhaseExecutionContext) -> PhaseExecutionResult:
         context_as_of = self._context(context)
-        packet, _, _ = self.repository._upstream(context.run_id)
+        packet, quality, packet_identity = self.repository._upstream(context.run_id)
         if packet.packet.requested_date != context.requested_date or packet.packet.as_of_time != context_as_of:
             raise ModelFeatureSetPhaseHandlerError("context does not match Matchup Packet")
         observed_at = self._observed()
         if observed_at < packet.packet.observed_at:
             raise ModelFeatureSetPhaseHandlerError("feature boundary precedes Matchup Packet")
-        input_checksum = self._input_checksum(context.run_id, observed_at)
+        inventory = self.repository.resolve_selected_inventory(packet)
+        input_checksum = self._input_checksum(packet, quality, inventory, observed_at)
         try:
-            feature_set = self.repository.build_for_run(context.run_id, observed_at=observed_at)
+            feature_set = self.repository.build_from_exact_packet(
+                packet, observed_at=observed_at
+            )
         except Exception as exc:
             try:
                 self.repository.persist_failed_attempt(
@@ -127,6 +135,9 @@ class ModelFeatureSetPhaseHandler:
                     observed_at=observed_at,
                     outcome=ModelFeatureSetAttemptOutcome.TRANSFORMATION_FAILED,
                     warnings=self._warning("model_feature_set_transformation_failed", exc),
+                    packet_snapshot=packet,
+                    selected_inventory=inventory,
+                    upstream_identities=(quality, packet_identity),
                 )
             except Exception as retained_exc:
                 exc.add_note(f"failed-attempt evidence error: {type(retained_exc).__name__}")
@@ -147,6 +158,9 @@ class ModelFeatureSetPhaseHandler:
                     observed_at=observed_at,
                     outcome=ModelFeatureSetAttemptOutcome.PERSISTENCE_FAILED,
                     warnings=self._warning("model_feature_set_persistence_failed", exc),
+                    packet_snapshot=packet,
+                    selected_inventory=inventory,
+                    upstream_identities=(quality, packet_identity),
                 )
             except Exception as retained_exc:
                 exc.add_note(f"failed-attempt evidence error: {type(retained_exc).__name__}")

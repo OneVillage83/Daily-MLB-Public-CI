@@ -7,7 +7,7 @@ from app.baseball_intelligence.contracts import (
     TeamBaseballIntelligenceV1,
     TeamIntelligenceCoverageV1,
 )
-from app.data_quality.contracts import QualityIssueSeverity
+from app.data_quality.contracts import DataQualityPolicyV1, QualityIssueSeverity
 from app.data_quality.engine import (
     _odds_issues,
     _schedule_issues,
@@ -363,6 +363,20 @@ def test_missing_supported_market_and_stale_market_are_warnings() -> None:
     )
     assert {"spreads_market_missing", "stale_odds_markets_present"} <= _codes(issues)
     assert all(issue.severity is QualityIssueSeverity.WARNING for issue in issues)
+
+
+def test_supported_market_policy_changes_assessment_behavior() -> None:
+    game = _odds_weather_game(odds=_available_odds(markets=("h2h",), stale=0))
+    default_codes = {issue.code for issue in _odds_issues(game)}
+    h2h_only = DataQualityPolicyV1(
+        policy_version="DSE_DATA_QUALITY_POLICY_H2H_ONLY_TEST_V1",
+        supported_markets=("h2h",),
+    )
+    selected_codes = {issue.code for issue in _odds_issues(game, h2h_only)}
+    assert "spreads_market_missing" in default_codes
+    assert "totals_market_missing" in default_codes
+    assert "spreads_market_missing" not in selected_codes
+    assert "totals_market_missing" not in selected_codes
 
 
 def test_weather_unavailable_is_warning() -> None:

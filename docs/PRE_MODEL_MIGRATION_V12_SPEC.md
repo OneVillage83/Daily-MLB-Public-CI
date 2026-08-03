@@ -3,8 +3,8 @@
 Migration name: `pre_model_pipeline_v1_temporal_persistence`
 Target version: 12
 Formal statement count: 148
-Migration checksum: `1408c940cea49c84c68c87a9d350a852d038671e9867acec534440435d60d5ce`
-Schema fingerprint: `15e30a24bb578ce691ef5b9063ce61fe8d3e2a09708236de55390ccef9ed8581`
+Migration checksum: `eb2e8118e692c3f1597e2dfa487691a8a56c76bb7513b857a41f4db409b54d22`
+Schema fingerprint: `4825e8f17fdd7a2a39835f3e60cbbf53a52bf912006d6a72e88e99308ff64422`
 
 All schema v1–v11 statement bytes, migration names, checksums, order, and
 fingerprints remain frozen. V12 rebuilds only the two existing tables whose
@@ -39,7 +39,23 @@ Data Quality stores ordered per-game assessments and per-game ordered issues.
 Matchup Packet stores one ordered canonical packet per upstream slate game.
 Model Feature Set stores one ordered predictive vector per packet game, one
 separate factual market-context row per game, and ordered exact retained V3
-feature lineage. No EAV scalar-feature table or universal phase payload exists.
+feature lineage. Every source lineage row binds `canonical_player_id`,
+`feature_snapshot_id`, and `feature_checksum`; its insertion and first seal
+verify the exact player, V3 version/date/completeness/PIT evidence, canonical
+game payload, contiguous ordinal, and global selected inventory. No EAV
+scalar-feature table or universal phase payload exists.
+
+The three snapshot immutability triggers allow exactly one pre-seal update:
+`sealed_at` from NULL to a non-NULL aware timestamp. All semantic columns must
+remain byte-identical during that update. The seal validators read NEW values,
+reconcile game/issue/market/source counts and ordinals, and reject incomplete or
+extra source-feature lineage. After sealing, all updates and deletes fail.
+
+Phase-specific attempt manifests enforce their exact phase key, contract,
+outcome set, ordered upstream phase inventory, positive non-Boolean attempt,
+canonical UTC timestamps, completion ordering, and assembled/snapshot checksum
+rule. Publication and retained-byte verification reject configured secrets,
+symbolic links, and files whose exposed link count is not exactly one.
 
 Fresh installation and exact frozen-v11 upgrade produce the same fingerprint.
 Upgrade uses the established verified backup, diagnostic, transactional DDL,

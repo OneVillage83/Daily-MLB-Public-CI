@@ -53,6 +53,8 @@ def verify_model_feature_set_artifact(
     feature_set: ModelFeatureSetV1,
     artifact: ModelFeatureSetArtifactV1,
     artifact_root: Path,
+    *,
+    secret_values: tuple[str, ...] = (),
 ) -> None:
     if artifact.relpath != model_feature_set_artifact_relpath(feature_set):
         raise ModelFeatureSetContractError("Model Feature Set artifact path identity mismatch")
@@ -61,3 +63,9 @@ def verify_model_feature_set_artifact(
         PreModelArtifactV1(artifact.relpath, artifact.checksum, artifact.byte_count),
         feature_set.canonical_json_bytes(),
     )
+    if redact_value(
+        feature_set.as_dict(), secret_values, preserve_field_names=("key",)
+    ) != feature_set.as_dict():
+        raise ModelFeatureSetContractError(
+            "ModelFeatureSet artifact contains credential-bearing material"
+        )

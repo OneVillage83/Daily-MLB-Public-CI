@@ -93,9 +93,23 @@ feature names.
 Schema v12 persists predictive game JSON/checksums separately from
 `model_feature_set_market_contexts` and exact selected V3 lineage in
 `model_feature_set_source_features`. Baseball Intelligence is authoritative for
-the snapshot IDs: the repository validates each referenced retained V3 row,
-checksum, completeness state, requested date, and PIT creation boundary. It
-never substitutes a newer global feature row.
+the snapshot IDs and canonical players: every source reference binds
+`canonical_player_id`, `feature_snapshot_id`, and `feature_checksum`. The
+repository validates those values against the exact Matchup Packet player and
+retained V3 row, including entity kind, feature version/date, completeness, and
+PIT creation boundary. An internally valid snapshot belonging to another
+player is rejected. It never substitutes a newer global feature row.
+
+An empty market-context mapping requires a null market reference. A nonempty
+mapping requires the exact separate market-context checksum; unrelated
+references are rejected.
+
+Phase input selection resolves the exact Matchup Packet, Data Quality, and
+selected player feature inventory before entering the transformation boundary.
+The transformation runs once. `transformation_failed` manifests use that
+already-validated inventory and never rerun the failed build. Historical reads
+resolve the exact stored packet/Data Quality snapshot IDs rather than latest
+run state.
 
 This preserves:
 

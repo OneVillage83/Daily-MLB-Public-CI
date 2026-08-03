@@ -1,5 +1,12 @@
 # MatchupPacket V1 — Pre-Persistence Handoff
 
+## Current persisted integrity correction
+
+Exact historical upstream resolution, one-pass assembly failure evidence,
+phase-specific manifest validation, configured-secret retained-byte checks,
+and shared hard-link rejection are implemented. Failed packet assembly retains
+an immutable manifest without rerunning the assembly that raised.
+
 **Private branch:** `rc/matchup-packet-v1-direct-20260727`  
 **Private draft PR:** #15  
 **Base:** `rc/data-quality-v1-direct-20260727`  
