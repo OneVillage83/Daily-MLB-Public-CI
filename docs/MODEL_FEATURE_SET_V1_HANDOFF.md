@@ -10,6 +10,15 @@ A transformation failure retains immutable evidence from that selection without
 rebuilding. Historical reads use exact stored Matchup Packet and Data Quality
 snapshot IDs; wrong-player substitution fails closed.
 
+Phase input now has an explicit two-step boundary: derive the selected player
+inventory solely from the sealed packet, compute the input checksum, then
+validate each reference against retained V3 stats rows. Missing, wrong-player,
+wrong-checksum/version/kind/date/completeness, or late PIT evidence persists
+`input_failed` with the exact packet-derived inventory marked `unverified` and
+never enters transformation. `transformation_failed` and `persistence_failed`
+require the exact validated inventory. Failed writers do not rerun selection,
+validation, or transformation.
+
 **Private branch:** `rc/model-feature-set-v1-direct-20260727`  
 **Private draft PR:** #17  
 **Base:** `rc/matchup-packet-v1-direct-20260727`  

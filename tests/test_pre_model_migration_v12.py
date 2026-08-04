@@ -41,8 +41,8 @@ from app.pre_model_migration import (
 
 V11_CHECKSUM = "a54865d8b5623e96c4f571d6c9d7f899e9ced0d1911128b5a874b41e29df75dd"
 V11_FINGERPRINT = "5b9635e1aac05d98fd61dadaf2ac5d435e4aaae9214c79501b5dd642673c75b8"
-V12_CHECKSUM = "eb2e8118e692c3f1597e2dfa487691a8a56c76bb7513b857a41f4db409b54d22"
-V12_FINGERPRINT = "4825e8f17fdd7a2a39835f3e60cbbf53a52bf912006d6a72e88e99308ff64422"
+V12_CHECKSUM = "9409445202fc362377f112dc546bacf087820b0f1fb608b08b1a542afa4950d0"
+V12_FINGERPRINT = "f597210e59f941e3e0bcdd5583dea597ee9cbbcb598a45fc23abe18144f52a22"
 
 TABLES = {
     "data_quality_attempt_evidence",
@@ -148,6 +148,24 @@ def test_v12_player_lineage_and_first_seal_rules_are_schema_owned(
 ) -> None:
     database = Database(tmp_path / "lineage-v12.db")
     with database.connect() as connection:
+        for table in (
+            "data_quality_attempt_evidence",
+            "data_quality_snapshots",
+        ):
+            policy_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    f"PRAGMA table_info({table})"
+                ).fetchall()
+            }
+            assert {"policy_version", "policy_json", "policy_checksum"} <= policy_columns
+        attempt_columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(model_feature_set_attempt_evidence)"
+            ).fetchall()
+        }
+        assert "inventory_validation_state" in attempt_columns
         source_columns = {
             str(row[1])
             for row in connection.execute(
@@ -179,6 +197,18 @@ def test_v12_player_lineage_and_first_seal_rules_are_schema_owned(
             )
             assert "OLD.sealed_at IS NOT NULL" in trigger
             assert "NEW.phase_input_checksum IS NOT OLD.phase_input_checksum" in trigger
+        data_quality_insert = str(
+            connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='data_quality_snapshot_validate_insert'"
+            ).fetchone()[0]
+        )
+        assert "attempt.policy_checksum=NEW.policy_checksum" in data_quality_insert
+        model_feature_insert = str(
+            connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='model_feature_set_snapshot_validate_insert'"
+            ).fetchone()[0]
+        )
+        assert "attempt.inventory_validation_state='validated'" in model_feature_insert
 
 
 def test_injected_v12_ddl_failure_rolls_back_to_exact_v11(

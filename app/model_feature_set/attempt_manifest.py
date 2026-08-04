@@ -12,6 +12,7 @@ from app.pre_model_evidence import (
     publish_manifest,
     verify_manifest,
 )
+from app.model_feature_set.contracts import ModelFeatureSourceV1
 
 MODEL_FEATURE_SET_ATTEMPT_MANIFEST_CONTRACT = "DSE_MODEL_FEATURE_SET_ATTEMPT_MANIFEST_V1"
 ModelFeatureSetAttemptManifestV1: TypeAlias = PreModelAttemptManifestV1
@@ -32,6 +33,9 @@ def create_model_feature_set_attempt_manifest(
     warnings: tuple[Mapping[str, object], ...],
     created_at: datetime,
     completed_at: datetime,
+    selected_feature_inventory: tuple[ModelFeatureSourceV1, ...],
+    selected_feature_inventory_checksum: str,
+    inventory_validation_state: str,
     secret_values: Iterable[str] = (),
 ) -> ModelFeatureSetAttemptManifestV1:
     return PreModelAttemptManifestV1(
@@ -49,6 +53,13 @@ def create_model_feature_set_attempt_manifest(
         warnings=warnings,
         created_at=created_at,
         completed_at=completed_at,
+        phase_input_evidence={
+            "inventory_validation_state": inventory_validation_state,
+            "selected_feature_inventory": [
+                value.as_dict() for value in selected_feature_inventory
+            ],
+            "selected_feature_inventory_checksum": selected_feature_inventory_checksum,
+        },
         secret_values=secret_values,
     )
 

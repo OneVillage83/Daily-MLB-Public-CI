@@ -10,6 +10,7 @@ from app.data_quality.contracts import (
     DATA_QUALITY_POLICY_VERSION,
     DataQualityDisposition,
     DataQualityGameV1,
+    DataQualityPolicyV1,
     DataQualityV1,
     QualityDomain,
     QualityIssueSeverity,
@@ -209,7 +210,7 @@ def _quality_snapshot(
         upstream_baseball_intelligence_checksum=bia.checksum,
         upstream_odds_weather_checksum=upstream_odds_weather_checksum or ow.checksum,
         games=games,
-        policy_version=DATA_QUALITY_POLICY_VERSION,
+        policy=DataQualityPolicyV1(policy_version=DATA_QUALITY_POLICY_VERSION),
     )
 
 

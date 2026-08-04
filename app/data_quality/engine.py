@@ -767,7 +767,7 @@ def assess_data_quality(
             upstream_baseball_intelligence_checksum=baseball_intelligence.checksum,
             upstream_odds_weather_checksum=odds_weather.checksum,
             games=tuple(games),
-            policy_version=policy.policy_version,
+            policy=policy,
         )
     except DataQualityContractError as exc:
         raise DataQualityAssessmentError(

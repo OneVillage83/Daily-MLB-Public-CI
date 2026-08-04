@@ -3,8 +3,8 @@
 Migration name: `pre_model_pipeline_v1_temporal_persistence`
 Target version: 12
 Formal statement count: 148
-Migration checksum: `eb2e8118e692c3f1597e2dfa487691a8a56c76bb7513b857a41f4db409b54d22`
-Schema fingerprint: `4825e8f17fdd7a2a39835f3e60cbbf53a52bf912006d6a72e88e99308ff64422`
+Migration checksum: `9409445202fc362377f112dc546bacf087820b0f1fb608b08b1a542afa4950d0`
+Schema fingerprint: `f597210e59f941e3e0bcdd5583dea597ee9cbbcb598a45fc23abe18144f52a22`
 
 All schema v1–v11 statement bytes, migration names, checksums, order, and
 fingerprints remain frozen. V12 rebuilds only the two existing tables whose
@@ -36,6 +36,9 @@ relative artifact paths are exact checksum-derived identities. Parent/child
 foreign keys include run and attempt ownership to prevent cross-attempt mixing.
 
 Data Quality stores ordered per-game assessments and per-game ordered issues.
+Its attempt and snapshot rows also retain canonical `policy_json`, explicit
+`policy_version`, and `policy_checksum`; insert/seal validation binds the
+attempt, relational snapshot, and canonical snapshot policy identities.
 Matchup Packet stores one ordered canonical packet per upstream slate game.
 Model Feature Set stores one ordered predictive vector per packet game, one
 separate factual market-context row per game, and ordered exact retained V3
@@ -56,6 +59,10 @@ outcome set, ordered upstream phase inventory, positive non-Boolean attempt,
 canonical UTC timestamps, completion ordering, and assembled/snapshot checksum
 rule. Publication and retained-byte verification reject configured secrets,
 symbolic links, and files whose exposed link count is not exactly one.
+Model Feature Set attempt evidence additionally records whether its exact
+packet-derived selected inventory is `unverified` (`input_failed`) or
+`validated` (all later outcomes), preventing failed input from being relabeled
+as transformation-ready evidence.
 
 Fresh installation and exact frozen-v11 upgrade produce the same fingerprint.
 Upgrade uses the established verified backup, diagnostic, transactional DDL,

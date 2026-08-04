@@ -12,6 +12,7 @@ from app.pre_model_evidence import (
     publish_manifest,
     verify_manifest,
 )
+from app.data_quality.contracts import DataQualityPolicyV1
 
 DATA_QUALITY_ATTEMPT_MANIFEST_CONTRACT = "DSE_DATA_QUALITY_ATTEMPT_MANIFEST_V1"
 DataQualityAttemptManifestV1: TypeAlias = PreModelAttemptManifestV1
@@ -32,6 +33,7 @@ def create_data_quality_attempt_manifest(
     warnings: tuple[Mapping[str, object], ...],
     created_at: datetime,
     completed_at: datetime,
+    policy: DataQualityPolicyV1,
     secret_values: Iterable[str] = (),
 ) -> DataQualityAttemptManifestV1:
     return PreModelAttemptManifestV1(
@@ -49,6 +51,7 @@ def create_data_quality_attempt_manifest(
         warnings=warnings,
         created_at=created_at,
         completed_at=completed_at,
+        phase_input_evidence={"policy": policy.as_dict()},
         secret_values=secret_values,
     )
 

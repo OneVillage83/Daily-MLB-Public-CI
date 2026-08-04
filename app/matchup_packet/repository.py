@@ -197,14 +197,24 @@ class MatchupPacketRepository:
         attempt: int,
         requested_date: str,
         as_of_time: datetime,
+        *,
+        allow_context_mismatch: bool = False,
     ) -> None:
+        context_predicate = (
+            "" if allow_context_mismatch else "AND run.requested_date=? AND run.as_of_time=?"
+        )
+        parameters: tuple[object, ...] = (
+            (run_id, attempt)
+            if allow_context_mismatch
+            else (run_id, attempt, requested_date, as_of_time.isoformat())
+        )
         if connection.execute(
-            """
+            f"""
             SELECT 1 FROM pipeline_runs run JOIN pipeline_run_phases phase ON phase.run_id=run.run_id
-            WHERE run.run_id=? AND run.requested_date=? AND run.as_of_time=?
-              AND phase.phase_key='matchup_packet' AND phase.status='running' AND phase.attempt_count=?
+            WHERE run.run_id=? AND phase.phase_key='matchup_packet'
+              AND phase.status='running' AND phase.attempt_count=? {context_predicate}
             """,
-            (run_id, requested_date, as_of_time.isoformat(), attempt),
+            parameters,
         ).fetchone() is None:
             raise MatchupPacketPersistenceConflict("Matchup Packet attempt is not active")
 
@@ -234,6 +244,7 @@ class MatchupPacketRepository:
             warnings=warnings,
             created_at=now,
             completed_at=now,
+            assembly_policy_version=MATCHUP_PACKET_ASSEMBLY_POLICY_VERSION,
             secret_values=self.secret_values,
         )
 
@@ -427,13 +438,25 @@ class MatchupPacketRepository:
         observed_at: datetime,
         outcome: MatchupPacketAttemptOutcome | str,
         warnings: Iterable[Mapping[str, object]],
-        quality: PersistedDataQualityV1 | None = None,
-        upstream_identities: tuple[PreModelUpstreamIdentityV1, ...] | None = None,
+        requested_date: str,
+        as_of_time: datetime,
+        quality: PersistedDataQualityV1,
+        upstream_identities: tuple[PreModelUpstreamIdentityV1, ...],
     ) -> MatchupPacketAttemptEvidenceV1:
         selected = MatchupPacketAttemptOutcome(outcome)
         if selected is MatchupPacketAttemptOutcome.ASSEMBLED:
             raise ValueError("failed outcome cannot be assembled")
         safe_warnings = tuple(dict(value) for value in warnings)
+        identities = tuple(upstream_identities)
+        if (
+            quality.run_id != validate_run_id(run_id)
+            or identities[-1].phase_key != "data_quality"
+            or identities[-1].snapshot_id != quality.snapshot_id
+            or identities[-1].checksum != quality.snapshot.checksum
+        ):
+            raise MatchupPacketIntegrityError(
+                "failed-attempt upstream identity mismatch"
+            )
         try:
             existing = self.get_attempt_evidence(run_id, phase_attempt)
         except MatchupPacketNotFoundError:
@@ -444,31 +467,22 @@ class MatchupPacketRepository:
                 and existing.outcome is selected
                 and existing.warnings == safe_warnings
                 and existing.observed_at == aware_utc(observed_at, "observed_at")
+                and existing.requested_date == requested_date
+                and existing.as_of_time == aware_utc(as_of_time, "as_of_time")
+                and self.get_attempt_manifest(run_id, phase_attempt).upstream
+                == identities
             ):
                 return existing
             raise MatchupPacketPersistenceConflict(
                 "conflicting failed Matchup Packet"
             )
-        if quality is None or upstream_identities is None:
-            quality, identities = self._upstream(run_id)
-        else:
-            identities = tuple(upstream_identities)
-            if (
-                quality.run_id != validate_run_id(run_id)
-                or identities[-1].phase_key != "data_quality"
-                or identities[-1].snapshot_id != quality.snapshot_id
-                or identities[-1].checksum != quality.snapshot.checksum
-            ):
-                raise MatchupPacketIntegrityError(
-                    "failed-attempt upstream identity mismatch"
-                )
         observed = aware_utc(observed_at, "observed_at")
         now = self._now()
         manifest = create_matchup_packet_attempt_manifest(
             run_id=run_id,
             phase_attempt=phase_attempt,
-            requested_date=quality.snapshot.requested_date,
-            as_of_time=quality.snapshot.as_of_time,
+            requested_date=requested_date,
+            as_of_time=as_of_time,
             observed_at=observed,
             phase_input_checksum=phase_input_checksum,
             upstream=identities,
@@ -477,6 +491,7 @@ class MatchupPacketRepository:
             warnings=safe_warnings,
             created_at=now,
             completed_at=now,
+            assembly_policy_version=MATCHUP_PACKET_ASSEMBLY_POLICY_VERSION,
             secret_values=self.secret_values,
         )
         artifact = publish_matchup_packet_attempt_manifest(
@@ -484,11 +499,27 @@ class MatchupPacketRepository:
         )
         try:
             with self.database.connect(write=True) as connection:
-                self._active(connection, run_id, phase_attempt, quality.snapshot.requested_date, quality.snapshot.as_of_time)
+                self._active(
+                    connection,
+                    run_id,
+                    phase_attempt,
+                    requested_date,
+                    as_of_time,
+                    allow_context_mismatch=(selected is MatchupPacketAttemptOutcome.INPUT_FAILED),
+                )
                 self._insert_attempt(connection, manifest, artifact)
         except sqlite3.IntegrityError as exc:
             existing = self.get_attempt_evidence(run_id, phase_attempt)
-            if existing.phase_input_checksum == phase_input_checksum and existing.outcome is selected and existing.warnings == safe_warnings:
+            if (
+                existing.phase_input_checksum == phase_input_checksum
+                and existing.outcome is selected
+                and existing.warnings == safe_warnings
+                and existing.observed_at == observed
+                and existing.requested_date == requested_date
+                and existing.as_of_time == aware_utc(as_of_time, "as_of_time")
+                and self.get_attempt_manifest(run_id, phase_attempt).upstream
+                == identities
+            ):
                 return existing
             cleanup_owned_artifact(self.artifact_root, artifact)
             raise MatchupPacketPersistenceConflict("conflicting failed Matchup Packet") from exc
@@ -516,6 +547,7 @@ class MatchupPacketRepository:
             snapshot_checksum=None if row["snapshot_checksum"] is None else str(row["snapshot_checksum"]),
             warnings=tuple(dict(value) for value in json_array(str(row["warnings_json"]), "warnings")),
             created_at=_time(row["created_at"], "created_at"), completed_at=_time(row["completed_at"], "completed_at"),
+            assembly_policy_version=MATCHUP_PACKET_ASSEMBLY_POLICY_VERSION,
             secret_values=self.secret_values,
         )
 

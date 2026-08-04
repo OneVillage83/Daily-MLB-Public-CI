@@ -79,6 +79,7 @@ class ModelFeatureSetAttemptEvidenceV1:
     snapshot_checksum: str | None
     selected_feature_inventory: tuple[ModelFeatureSourceV1, ...]
     selected_feature_inventory_checksum: str
+    inventory_validation_state: str
     manifest: PreModelArtifactV1
     warnings: tuple[Mapping[str, object], ...]
     created_at: datetime
@@ -222,14 +223,45 @@ class ModelFeatureSetRepository:
     def resolve_selected_inventory(
         self, packet: PersistedMatchupPacketV1
     ) -> tuple[ModelFeatureSourceV1, ...]:
-        inventory = selected_feature_inventory_from_packet(packet)
-        self._verify_selected_inventory(inventory, packet)
+        inventory = self.derive_selected_inventory(packet)
+        self.validate_selected_inventory(inventory, packet)
         return inventory
 
+    @staticmethod
+    def derive_selected_inventory(
+        packet: PersistedMatchupPacketV1,
+    ) -> tuple[ModelFeatureSourceV1, ...]:
+        """Derive immutable packet-declared lineage without trusting the stats store."""
+
+        return selected_feature_inventory_from_packet(packet)
+
+    def validate_selected_inventory(
+        self,
+        inventory: tuple[ModelFeatureSourceV1, ...],
+        packet: PersistedMatchupPacketV1,
+    ) -> None:
+        expected = self.derive_selected_inventory(packet)
+        if tuple(inventory) != expected:
+            raise ModelFeatureSetIntegrityError(
+                "selected feature inventory disagrees with Matchup Packet players"
+            )
+        self._verify_selected_inventory(expected, packet)
+
     def build_from_exact_packet(
-        self, packet: PersistedMatchupPacketV1, *, observed_at: datetime
+        self,
+        packet: PersistedMatchupPacketV1,
+        *,
+        observed_at: datetime,
+        validated_inventory: tuple[ModelFeatureSourceV1, ...] | None = None,
     ) -> ModelFeatureSetV1:
-        expected_inventory = self.resolve_selected_inventory(packet)
+        if validated_inventory is None:
+            expected_inventory = self.resolve_selected_inventory(packet)
+        else:
+            expected_inventory = tuple(validated_inventory)
+            if expected_inventory != self.derive_selected_inventory(packet):
+                raise ModelFeatureSetIntegrityError(
+                    "validated inventory disagrees with Matchup Packet"
+                )
         feature_set = build_model_feature_set(packet.packet, observed_at=observed_at)
         if selected_feature_inventory(feature_set) != expected_inventory:
             raise ModelFeatureSetIntegrityError("transformation changed selected feature lineage")
@@ -247,7 +279,7 @@ class ModelFeatureSetRepository:
         expected = selected_feature_inventory_from_packet(packet)
         if inventory != expected:
             raise ModelFeatureSetIntegrityError("selected feature inventory disagrees with Matchup Packet players")
-        self._verify_selected_inventory(inventory, packet)
+        self.validate_selected_inventory(inventory, packet)
 
     def _verify_selected_inventory(
         self,
@@ -278,14 +310,30 @@ class ModelFeatureSetRepository:
                     raise ModelFeatureSetIntegrityError("referenced feature snapshot violates frozen PIT lineage")
 
     @staticmethod
-    def _active(connection: sqlite3.Connection, run_id: str, attempt: int, requested_date: str, as_of_time: datetime) -> None:
+    def _active(
+        connection: sqlite3.Connection,
+        run_id: str,
+        attempt: int,
+        requested_date: str,
+        as_of_time: datetime,
+        *,
+        allow_context_mismatch: bool = False,
+    ) -> None:
+        context_predicate = (
+            "" if allow_context_mismatch else "AND run.requested_date=? AND run.as_of_time=?"
+        )
+        parameters: tuple[object, ...] = (
+            (run_id, attempt)
+            if allow_context_mismatch
+            else (run_id, attempt, requested_date, as_of_time.isoformat())
+        )
         if connection.execute(
-            """
+            f"""
             SELECT 1 FROM pipeline_runs run JOIN pipeline_run_phases phase ON phase.run_id=run.run_id
-            WHERE run.run_id=? AND run.requested_date=? AND run.as_of_time=?
-              AND phase.phase_key='model_feature_set' AND phase.status='running' AND phase.attempt_count=?
+            WHERE run.run_id=? AND phase.phase_key='model_feature_set'
+              AND phase.status='running' AND phase.attempt_count=? {context_predicate}
             """,
-            (run_id, requested_date, as_of_time.isoformat(), attempt),
+            parameters,
         ).fetchone() is None:
             raise ModelFeatureSetPersistenceConflict("Model Feature Set attempt is not active")
 
@@ -302,12 +350,16 @@ class ModelFeatureSetRepository:
         warnings: tuple[Mapping[str, object], ...],
         now: datetime,
     ) -> ModelFeatureSetAttemptManifestV1:
+        inventory = selected_feature_inventory(feature_set)
         return create_model_feature_set_attempt_manifest(
             run_id=run_id, phase_attempt=attempt, requested_date=feature_set.requested_date,
             as_of_time=feature_set.as_of_time, observed_at=feature_set.observed_at,
             phase_input_checksum=phase_input_checksum, upstream=identities,
             outcome=outcome.value, snapshot_checksum=snapshot_checksum,
             warnings=warnings, created_at=now, completed_at=now,
+            selected_feature_inventory=inventory,
+            selected_feature_inventory_checksum=selected_feature_inventory_checksum(inventory),
+            inventory_validation_state="validated",
             secret_values=self.secret_values,
         )
 
@@ -365,7 +417,14 @@ class ModelFeatureSetRepository:
             snapshot_id = f"model-feature-set:{feature_set.checksum}"
             with self.database.connect(write=True) as connection:
                 self._active(connection, run_id, phase_attempt, feature_set.requested_date, feature_set.as_of_time)
-                self._insert_attempt(connection, manifest, manifest_artifact, inventory_json, inventory_checksum)
+                self._insert_attempt(
+                    connection,
+                    manifest,
+                    manifest_artifact,
+                    inventory_json,
+                    inventory_checksum,
+                    "validated",
+                )
                 connection.execute(
                     """
                     INSERT INTO model_feature_set_snapshots(
@@ -414,7 +473,14 @@ class ModelFeatureSetRepository:
                 cleanup_owned_artifact(self.artifact_root, PreModelArtifactV1(artifact.relpath, artifact.checksum, artifact.byte_count, artifact.created))
 
     @staticmethod
-    def _insert_attempt(connection: sqlite3.Connection, manifest: ModelFeatureSetAttemptManifestV1, artifact: PreModelArtifactV1, inventory: list[dict[str, str]], inventory_checksum: str) -> None:
+    def _insert_attempt(
+        connection: sqlite3.Connection,
+        manifest: ModelFeatureSetAttemptManifestV1,
+        artifact: PreModelArtifactV1,
+        inventory: list[dict[str, str]],
+        inventory_checksum: str,
+        inventory_validation_state: str,
+    ) -> None:
         upstream = {value.phase_key: value for value in manifest.upstream}
         connection.execute(
             """
@@ -423,9 +489,10 @@ class ModelFeatureSetRepository:
               upstream_data_quality_snapshot_id,upstream_data_quality_checksum,
               upstream_matchup_packet_snapshot_id,upstream_matchup_packet_checksum,
               selected_feature_inventory_json,selected_feature_inventory_checksum,
+              inventory_validation_state,
               outcome,snapshot_checksum,evidence_manifest_relpath,evidence_manifest_checksum,
               evidence_manifest_byte_count,warnings_json,warning_count,created_at,completed_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 manifest.run_id, manifest.phase_attempt, manifest.requested_date,
@@ -433,6 +500,7 @@ class ModelFeatureSetRepository:
                 manifest.phase_input_checksum, upstream["data_quality"].snapshot_id,
                 upstream["data_quality"].checksum, upstream["matchup_packet"].snapshot_id,
                 upstream["matchup_packet"].checksum, canonical_text(inventory), inventory_checksum,
+                inventory_validation_state,
                 manifest.outcome, manifest.snapshot_checksum, artifact.relpath, artifact.checksum,
                 artifact.byte_count, canonical_text(list(manifest.warnings)), len(manifest.warnings),
                 manifest.created_at.isoformat(), manifest.completed_at.isoformat(),
@@ -543,16 +611,44 @@ class ModelFeatureSetRepository:
         observed_at: datetime,
         outcome: ModelFeatureSetAttemptOutcome | str,
         warnings: Iterable[Mapping[str, object]],
-        packet_snapshot: PersistedMatchupPacketV1 | None = None,
-        selected_inventory: tuple[ModelFeatureSourceV1, ...] | None = None,
+        requested_date: str,
+        as_of_time: datetime,
+        packet_snapshot: PersistedMatchupPacketV1,
+        selected_inventory: tuple[ModelFeatureSourceV1, ...],
+        inventory_validation_state: str,
         upstream_identities: tuple[
             PreModelUpstreamIdentityV1, PreModelUpstreamIdentityV1
-        ] | None = None,
+        ],
     ) -> ModelFeatureSetAttemptEvidenceV1:
         selected = ModelFeatureSetAttemptOutcome(outcome)
         if selected is ModelFeatureSetAttemptOutcome.ASSEMBLED:
             raise ValueError("failed outcome cannot be assembled")
         safe_warnings = tuple(dict(value) for value in warnings)
+        quality, packet = upstream_identities
+        if (
+            quality.phase_key != "data_quality"
+            or packet.phase_key != "matchup_packet"
+            or packet.snapshot_id != packet_snapshot.snapshot_id
+            or packet.checksum != packet_snapshot.packet.checksum
+        ):
+            raise ModelFeatureSetIntegrityError(
+                "failed-attempt upstream identity mismatch"
+            )
+        inventory = tuple(selected_inventory)
+        if inventory != self.derive_selected_inventory(packet_snapshot):
+            raise ModelFeatureSetIntegrityError(
+                "failed-attempt inventory is not packet-derived"
+            )
+        expected_state = (
+            "unverified"
+            if selected is ModelFeatureSetAttemptOutcome.INPUT_FAILED
+            else "validated"
+        )
+        if inventory_validation_state != expected_state:
+            raise ModelFeatureSetIntegrityError(
+                "failed-attempt inventory validation state is inconsistent"
+            )
+        inventory_checksum = selected_feature_inventory_checksum(inventory)
         try:
             existing = self.get_attempt_evidence(run_id, phase_attempt)
         except ModelFeatureSetNotFoundError:
@@ -563,41 +659,25 @@ class ModelFeatureSetRepository:
                 and existing.outcome is selected
                 and existing.warnings == safe_warnings
                 and existing.observed_at == aware_utc(observed_at, "observed_at")
+                and existing.requested_date == requested_date
+                and existing.as_of_time == aware_utc(as_of_time, "as_of_time")
+                and existing.selected_feature_inventory == tuple(selected_inventory)
+                and existing.inventory_validation_state == inventory_validation_state
+                and self.get_attempt_manifest(run_id, phase_attempt).upstream
+                == (quality, packet)
             ):
                 return existing
             raise ModelFeatureSetPersistenceConflict(
                 "conflicting failed Model Feature Set"
             )
-        if packet_snapshot is None:
-            packet_snapshot, quality, packet = self._upstream(run_id)
-        else:
-            if upstream_identities is None:
-                raise ModelFeatureSetIntegrityError(
-                    "exact failed-attempt upstream identities are required"
-                )
-            quality, packet = upstream_identities
-            if (
-                quality.phase_key != "data_quality"
-                or packet.phase_key != "matchup_packet"
-                or packet.snapshot_id != packet_snapshot.snapshot_id
-                or packet.checksum != packet_snapshot.packet.checksum
-            ):
-                raise ModelFeatureSetIntegrityError(
-                    "failed-attempt upstream identity mismatch"
-                )
-        resolved_inventory = self.resolve_selected_inventory(packet_snapshot)
-        inventory = resolved_inventory if selected_inventory is None else tuple(selected_inventory)
-        if inventory != resolved_inventory:
-            raise ModelFeatureSetIntegrityError("failed-attempt selected inventory mismatch")
         inventory_json = [value.as_dict() for value in inventory]
-        inventory_checksum = selected_feature_inventory_checksum(inventory)
         now = self._now()
         observed = aware_utc(observed_at, "observed_at")
         manifest = create_model_feature_set_attempt_manifest(
             run_id=run_id,
             phase_attempt=phase_attempt,
-            requested_date=packet_snapshot.packet.requested_date,
-            as_of_time=packet_snapshot.packet.as_of_time,
+            requested_date=requested_date,
+            as_of_time=as_of_time,
             observed_at=observed,
             phase_input_checksum=phase_input_checksum,
             upstream=(quality, packet),
@@ -606,6 +686,9 @@ class ModelFeatureSetRepository:
             warnings=safe_warnings,
             created_at=now,
             completed_at=now,
+            selected_feature_inventory=inventory,
+            selected_feature_inventory_checksum=inventory_checksum,
+            inventory_validation_state=inventory_validation_state,
             secret_values=self.secret_values,
         )
         artifact = publish_model_feature_set_attempt_manifest(
@@ -613,11 +696,36 @@ class ModelFeatureSetRepository:
         )
         try:
             with self.database.connect(write=True) as connection:
-                self._active(connection, run_id, phase_attempt, packet_snapshot.packet.requested_date, packet_snapshot.packet.as_of_time)
-                self._insert_attempt(connection, manifest, artifact, inventory_json, inventory_checksum)
+                self._active(
+                    connection,
+                    run_id,
+                    phase_attempt,
+                    requested_date,
+                    as_of_time,
+                    allow_context_mismatch=(selected is ModelFeatureSetAttemptOutcome.INPUT_FAILED),
+                )
+                self._insert_attempt(
+                    connection,
+                    manifest,
+                    artifact,
+                    inventory_json,
+                    inventory_checksum,
+                    inventory_validation_state,
+                )
         except sqlite3.IntegrityError as exc:
             existing = self.get_attempt_evidence(run_id, phase_attempt)
-            if existing.phase_input_checksum == phase_input_checksum and existing.outcome is selected and existing.warnings == safe_warnings:
+            if (
+                existing.phase_input_checksum == phase_input_checksum
+                and existing.outcome is selected
+                and existing.warnings == safe_warnings
+                and existing.observed_at == observed
+                and existing.requested_date == requested_date
+                and existing.as_of_time == aware_utc(as_of_time, "as_of_time")
+                and existing.selected_feature_inventory == inventory
+                and existing.inventory_validation_state == inventory_validation_state
+                and self.get_attempt_manifest(run_id, phase_attempt).upstream
+                == (quality, packet)
+            ):
                 return existing
             cleanup_owned_artifact(self.artifact_root, artifact)
             raise ModelFeatureSetPersistenceConflict("conflicting failed Model Feature Set") from exc
@@ -631,6 +739,19 @@ class ModelFeatureSetRepository:
             PreModelUpstreamIdentityV1("data_quality", str(row["upstream_data_quality_snapshot_id"]), str(row["upstream_data_quality_checksum"])),
             PreModelUpstreamIdentityV1("matchup_packet", str(row["upstream_matchup_packet_snapshot_id"]), str(row["upstream_matchup_packet_checksum"])),
         )
+        raw_inventory = json_array(
+            str(row["selected_feature_inventory_json"]),
+            "selected feature inventory",
+        )
+        inventory = tuple(
+            ModelFeatureSourceV1(
+                canonical_player_id=str(value["canonical_player_id"]),
+                feature_snapshot_id=str(value["feature_snapshot_id"]),
+                feature_checksum=str(value["feature_checksum"]),
+            )
+            for value in raw_inventory
+            if isinstance(value, Mapping)
+        )
         return create_model_feature_set_attempt_manifest(
             run_id=str(row["run_id"]), phase_attempt=int(row["phase_attempt"]), requested_date=str(row["requested_date"]),
             as_of_time=_time(row["as_of_time"], "as_of_time"), observed_at=_time(row["observed_at"], "observed_at"),
@@ -638,6 +759,9 @@ class ModelFeatureSetRepository:
             snapshot_checksum=None if row["snapshot_checksum"] is None else str(row["snapshot_checksum"]),
             warnings=tuple(dict(value) for value in json_array(str(row["warnings_json"]), "warnings")),
             created_at=_time(row["created_at"], "created_at"), completed_at=_time(row["completed_at"], "completed_at"), secret_values=self.secret_values,
+            selected_feature_inventory=inventory,
+            selected_feature_inventory_checksum=str(row["selected_feature_inventory_checksum"]),
+            inventory_validation_state=str(row["inventory_validation_state"]),
         )
 
     def get_attempt_manifest(self, run_id: str, attempt: int) -> ModelFeatureSetAttemptManifestV1:
@@ -680,6 +804,7 @@ class ModelFeatureSetRepository:
             manifest.run_id, manifest.phase_attempt, manifest.requested_date, manifest.as_of_time,
             manifest.observed_at, manifest.phase_input_checksum, ModelFeatureSetAttemptOutcome(manifest.outcome),
             manifest.snapshot_checksum, inventory, str(row["selected_feature_inventory_checksum"]),
+            str(row["inventory_validation_state"]),
             PreModelArtifactV1(str(row["evidence_manifest_relpath"]), str(row["evidence_manifest_checksum"]), int(row["evidence_manifest_byte_count"])),
             manifest.warnings, manifest.created_at, manifest.completed_at,
         )

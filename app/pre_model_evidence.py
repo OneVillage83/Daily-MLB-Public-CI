@@ -5,7 +5,7 @@ import json
 import os
 import stat
 from collections.abc import Iterable, Mapping
-from dataclasses import InitVar, dataclass
+from dataclasses import InitVar, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -121,6 +121,7 @@ class PreModelAttemptManifestV1:
     warnings: tuple[Mapping[str, object], ...]
     created_at: datetime
     completed_at: datetime
+    phase_input_evidence: Mapping[str, object] = field(default_factory=dict)
     secret_values: InitVar[Iterable[str]] = ()
 
     def __post_init__(self, secret_values: Iterable[str]) -> None:
@@ -158,6 +159,18 @@ class PreModelAttemptManifestV1:
         except (TypeError, ValueError) as exc:
             raise PreModelEvidenceError("manifest warnings are not canonical JSON objects") from exc
         object.__setattr__(self, "warnings", warnings)
+        try:
+            input_evidence = json.loads(
+                canonical_json_bytes(dict(self.phase_input_evidence))
+            )
+        except (TypeError, ValueError) as exc:
+            raise PreModelEvidenceError(
+                "manifest phase_input_evidence is not canonical JSON"
+            ) from exc
+        if not isinstance(input_evidence, dict):
+            raise PreModelEvidenceError("manifest phase_input_evidence must be an object")
+        object.__setattr__(self, "phase_input_evidence", input_evidence)
+        self._validate_phase_input_evidence(input_evidence)
         payload = self.as_dict()
         configured = tuple(str(value) for value in secret_values if str(value))
         if redact_value(
@@ -169,6 +182,52 @@ class PreModelAttemptManifestV1:
                 "attempt manifest contains credential-bearing material"
             )
 
+    def _validate_phase_input_evidence(self, value: dict[str, object]) -> None:
+        if self.phase_key == "data_quality":
+            if set(value) != {"policy"} or not isinstance(value["policy"], dict):
+                raise PreModelEvidenceError("Data Quality manifest requires exact policy evidence")
+            policy = value["policy"]
+            if set(policy) != {
+                "checksum",
+                "network_enabled",
+                "policy_version",
+                "supported_markets",
+            }:
+                raise PreModelEvidenceError("Data Quality manifest policy is incomplete")
+            identity = {key: item for key, item in policy.items() if key != "checksum"}
+            if policy["checksum"] != canonical_sha256(identity):
+                raise PreModelEvidenceError("Data Quality manifest policy checksum mismatch")
+        elif self.phase_key == "matchup_packet":
+            if set(value) != {"assembly_policy_version"} or not isinstance(
+                value["assembly_policy_version"], str
+            ):
+                raise PreModelEvidenceError(
+                    "Matchup Packet manifest requires its assembly policy"
+                )
+        elif self.phase_key == "model_feature_set":
+            if set(value) != {
+                "inventory_validation_state",
+                "selected_feature_inventory",
+                "selected_feature_inventory_checksum",
+            }:
+                raise PreModelEvidenceError(
+                    "Model Feature Set manifest inventory evidence is incomplete"
+                )
+            inventory = value["selected_feature_inventory"]
+            state = value["inventory_validation_state"]
+            if not isinstance(inventory, list) or state not in {"unverified", "validated"}:
+                raise PreModelEvidenceError(
+                    "Model Feature Set manifest inventory state is invalid"
+                )
+            if value["selected_feature_inventory_checksum"] != canonical_sha256(inventory):
+                raise PreModelEvidenceError(
+                    "Model Feature Set manifest inventory checksum mismatch"
+                )
+            if (self.outcome == "input_failed") != (state == "unverified"):
+                raise PreModelEvidenceError(
+                    "Model Feature Set manifest inventory state disagrees with outcome"
+                )
+
     def as_dict(self) -> dict[str, object]:
         return {
             "as_of_time": self.as_of_time.isoformat(),
@@ -178,6 +237,7 @@ class PreModelAttemptManifestV1:
             "outcome": self.outcome,
             "phase_attempt": self.phase_attempt,
             "phase_input_checksum": self.phase_input_checksum,
+            "phase_input_evidence": dict(self.phase_input_evidence),
             "phase_key": self.phase_key,
             "requested_date": self.requested_date,
             "run_id": self.run_id,
@@ -272,7 +332,7 @@ def cleanup_owned_artifact(artifact_root: Path, artifact: PreModelArtifactV1) ->
         try:
             if _safe_file_identity(path).st_nlink == 1:
                 path.unlink(missing_ok=True)
-        except OSError:
+        except (OSError, PreModelEvidenceError):
             return
 
 

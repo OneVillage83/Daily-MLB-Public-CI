@@ -44,11 +44,16 @@ date, as-of time, fixed assessment observation time, and all four upstream
 snapshot IDs/checksums. Secrets, paths, URLs, and runtime identities are
 excluded.
 
-`DataQualityPolicyV1` is the assessment authority, not checksum-only metadata.
-The assessment engine uses its exact supported-market inventory and stores its
-validated policy version in canonical and relational snapshot evidence. Replay
-uses the same immutable policy; changing supported markets changes both the
-input identity and the missing-market assessment behavior.
+`DataQualityPolicyV1` is canonical retained evidence, not checksum-only
+metadata. Its identity is the pair `(policy_version, policy_checksum)`, where
+the checksum covers the canonical sorted, duplicate-free supported-market
+inventory, `network_enabled`, and every behavioral V1 policy field. The full
+policy object is stored in canonical snapshots and in the attempt/snapshot
+`policy_json`, `policy_version`, and `policy_checksum` columns. Replay parses
+and validates that retained policy and never substitutes the repository's
+currently configured policy. Changing supported markets therefore changes the
+policy checksum, phase input checksum, snapshot checksum, assessment behavior,
+artifact, and manifest even when a particular slate would emit the same issues.
 
 Persistence uses phase-specific attempt, snapshot, game, and issue tables.
 Artifacts use
@@ -62,3 +67,9 @@ selected Data Quality row and verifies their checksums and complete lineage. It
 never resolves a historical snapshot through the latest snapshot for the run.
 Writing `assessment_failed` evidence uses only already-resolved upstream and
 context identities; it never invokes the failed assessment again.
+
+After the exact Phase 1–4 chain is safely resolved, deterministic context,
+as-of/date, observation-boundary, policy, or input-contract failures are
+durably recorded as `input_failed` with the exact retained policy and upstream
+identity and no snapshot checksum. Failure before any trustworthy upstream
+identity can be recovered remains fail-closed without a misleading manifest.

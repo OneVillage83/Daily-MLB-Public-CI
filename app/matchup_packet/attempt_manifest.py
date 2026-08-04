@@ -32,6 +32,7 @@ def create_matchup_packet_attempt_manifest(
     warnings: tuple[Mapping[str, object], ...],
     created_at: datetime,
     completed_at: datetime,
+    assembly_policy_version: str,
     secret_values: Iterable[str] = (),
 ) -> MatchupPacketAttemptManifestV1:
     return PreModelAttemptManifestV1(
@@ -49,6 +50,9 @@ def create_matchup_packet_attempt_manifest(
         warnings=warnings,
         created_at=created_at,
         completed_at=completed_at,
+        phase_input_evidence={
+            "assembly_policy_version": assembly_policy_version,
+        },
         secret_values=secret_values,
     )
 

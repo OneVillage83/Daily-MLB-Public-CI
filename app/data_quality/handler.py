@@ -79,13 +79,17 @@ class DataQualityPhaseHandler:
         context: PhaseExecutionContext,
         observed_at: datetime,
         upstream: DataQualityUpstreamV1,
+        context_as_of: datetime,
     ) -> str:
         return canonical_sha256(
             {
                 "as_of_time": upstream.slate.slate.as_of_time.isoformat(),
+                "controller_as_of_time": context_as_of.isoformat(),
+                "controller_requested_date": context.requested_date,
                 "contract_version": DATA_QUALITY_PHASE_INPUT_CONTRACT,
                 "observed_at": observed_at.isoformat(),
                 "policy": self.policy.as_dict(),
+                "policy_checksum": self.policy.checksum,
                 "requested_date": upstream.slate.slate.requested_date,
                 "upstream_baseball_intelligence_checksum": upstream.baseball_intelligence.assembly.checksum,
                 "upstream_baseball_intelligence_snapshot_id": upstream.baseball_intelligence.snapshot_id,
@@ -105,23 +109,47 @@ class DataQualityPhaseHandler:
     def __call__(self, context: PhaseExecutionContext) -> PhaseExecutionResult:
         context_as_of = self._validate_context(context)
         upstream = self.repository.resolve_upstream(context.run_id)
-        if (
-            upstream.slate.slate.requested_date != context.requested_date
-            or upstream.slate.slate.as_of_time != context_as_of
-        ):
-            raise DataQualityPhaseHandlerError("context does not match sealed upstream chain")
         observed_at = self._observed_at()
+        input_checksum = self._input_checksum(
+            context, observed_at, upstream, context_as_of
+        )
         latest = max(
             upstream.slate.slate.observed_at,
             upstream.state.state.observed_at,
             upstream.baseball_intelligence.assembly.observed_at,
             upstream.odds_weather.snapshot.observed_at,
         )
-        if observed_at < latest:
-            raise DataQualityPhaseHandlerError(
-                "assessment boundary cannot precede upstream evidence"
-            )
-        input_checksum = self._input_checksum(context, observed_at, upstream)
+        try:
+            if (
+                upstream.slate.slate.requested_date != context.requested_date
+                or upstream.slate.slate.as_of_time != context_as_of
+            ):
+                raise DataQualityPhaseHandlerError(
+                    "context does not match sealed upstream chain"
+                )
+            if observed_at < latest:
+                raise DataQualityPhaseHandlerError(
+                    "assessment boundary cannot precede upstream evidence"
+                )
+        except Exception as exc:
+            try:
+                self.repository.persist_failed_attempt(
+                    run_id=context.run_id,
+                    phase_attempt=context.attempt_number,
+                    phase_input_checksum=input_checksum,
+                    observed_at=observed_at,
+                    outcome=DataQualityAttemptOutcome.INPUT_FAILED,
+                    warnings=self._failure_warning("data_quality_input_failed", exc),
+                    requested_date=context.requested_date,
+                    as_of_time=context_as_of,
+                    policy=self.policy,
+                    upstream=upstream,
+                )
+            except Exception as retained_exc:
+                exc.add_note(
+                    f"failed-attempt evidence error: {type(retained_exc).__name__}"
+                )
+            raise
         try:
             result, _ = self.repository.assess_for_run(
                 context.run_id, observed_at=observed_at
@@ -136,6 +164,9 @@ class DataQualityPhaseHandler:
                         observed_at=observed_at,
                         outcome=DataQualityAttemptOutcome.ASSESSMENT_FAILED,
                         warnings=self._failure_warning("data_quality_assessment_failed", exc),
+                        requested_date=context.requested_date,
+                        as_of_time=context_as_of,
+                        policy=self.policy,
                         upstream=upstream,
                     )
                 except Exception as retained_exc:
@@ -157,6 +188,9 @@ class DataQualityPhaseHandler:
                     observed_at=observed_at,
                     outcome=DataQualityAttemptOutcome.PERSISTENCE_FAILED,
                     warnings=self._failure_warning("data_quality_persistence_failed", exc),
+                    requested_date=context.requested_date,
+                    as_of_time=context_as_of,
+                    policy=self.policy,
                     upstream=upstream,
                 )
             except Exception as retained_exc:

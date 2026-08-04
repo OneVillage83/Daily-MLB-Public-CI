@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+import app.pre_model_evidence as evidence_module
+from app.daily_slate.contracts import canonical_sha256
+
 from app.pre_model_evidence import (
     PreModelAttemptManifestV1,
     PreModelEvidenceError,
@@ -21,6 +24,15 @@ from app.pre_model_evidence import (
 RUN_ID = "run_20260730_22222222222222222222222222222222"
 NOW = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
 CHECKSUM = "a" * 64
+
+
+def _policy_evidence() -> dict[str, object]:
+    identity: dict[str, object] = {
+        "network_enabled": False,
+        "policy_version": "DSE_DATA_QUALITY_POLICY_V1",
+        "supported_markets": ["h2h", "spreads", "totals"],
+    }
+    return {**identity, "checksum": canonical_sha256(identity)}
 
 
 def _upstream() -> tuple[PreModelUpstreamIdentityV1, ...]:
@@ -51,6 +63,7 @@ def _manifest(**changes: object) -> PreModelAttemptManifestV1:
         "warnings": (),
         "created_at": NOW + timedelta(minutes=2),
         "completed_at": NOW + timedelta(minutes=2),
+        "phase_input_evidence": {"policy": _policy_evidence()},
     }
     values.update(changes)
     return PreModelAttemptManifestV1(**values)  # type: ignore[arg-type]
@@ -179,6 +192,19 @@ def test_each_phase_manifest_profile_requires_exact_contract_outcome_and_order(
         warnings=(),
         created_at=NOW,
         completed_at=NOW,
+        phase_input_evidence=(
+            {"policy": _policy_evidence()}
+            if phase_key == "data_quality"
+            else {
+                "assembly_policy_version": "DSE_MATCHUP_PACKET_ASSEMBLY_POLICY_V1"
+            }
+            if phase_key == "matchup_packet"
+            else {
+                "inventory_validation_state": "validated",
+                "selected_feature_inventory": [],
+                "selected_feature_inventory_checksum": canonical_sha256([]),
+            }
+        ),
     )
     assert manifest.outcome == outcome
     with pytest.raises(PreModelEvidenceError):
@@ -203,3 +229,27 @@ def test_cleanup_never_removes_conflicting_artifact(tmp_path: Path) -> None:
     with pytest.raises(Exception):
         publish_canonical_bytes(tmp_path, "data_quality/conflict.json", b"expected")
     assert target.read_bytes() == b"conflict"
+
+
+def test_cleanup_identity_race_quietly_preserves_original_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b'{"canonical":true}'
+    artifact = publish_canonical_bytes(
+        tmp_path, "data_quality/cleanup-race.json", content
+    )
+    path = tmp_path / artifact.relpath
+    monkeypatch.setattr(evidence_module, "_read_owned_bytes", lambda value: content)
+
+    def changed_identity(value: Path) -> os.stat_result:
+        raise PreModelEvidenceError("ownership changed before unlink")
+
+    monkeypatch.setattr(evidence_module, "_safe_file_identity", changed_identity)
+    original = RuntimeError("primary persistence failure")
+    try:
+        raise original
+    except RuntimeError as caught:
+        cleanup_owned_artifact(tmp_path, artifact)
+        assert caught is original
+    assert path.exists()

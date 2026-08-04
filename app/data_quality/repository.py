@@ -43,6 +43,7 @@ from app.pre_model_evidence import (
     canonical_text,
     cleanup_owned_artifact,
     json_array,
+    json_object,
     row_checksum,
 )
 
@@ -78,6 +79,7 @@ class DataQualityAttemptEvidenceV1:
     as_of_time: datetime
     observed_at: datetime
     phase_input_checksum: str
+    policy: DataQualityPolicyV1
     outcome: DataQualityAttemptOutcome
     snapshot_checksum: str | None
     manifest: DataQualityAttemptManifestArtifactV1
@@ -285,21 +287,47 @@ class DataQualityRepository:
         phase_attempt: int,
         requested_date: str,
         as_of_time: datetime,
+        *,
+        allow_context_mismatch: bool = False,
     ) -> None:
+        predicate = "" if allow_context_mismatch else "AND run.requested_date=? AND run.as_of_time=?"
+        parameters: tuple[object, ...] = (
+            (run_id, phase_attempt)
+            if allow_context_mismatch
+            else (run_id, phase_attempt, requested_date, as_of_time.isoformat())
+        )
         row = connection.execute(
-            """
+            f"""
             SELECT 1 FROM pipeline_runs run
             JOIN pipeline_run_phases phase ON phase.run_id=run.run_id
-            WHERE run.run_id=? AND run.requested_date=? AND run.as_of_time=?
+            WHERE run.run_id=?
               AND phase.phase_key='data_quality' AND phase.status='running'
               AND phase.attempt_count=?
+              {predicate}
             """,
-            (run_id, requested_date, as_of_time.isoformat(), phase_attempt),
+            parameters,
         ).fetchone()
         if row is None:
             raise DataQualityPersistenceConflict(
                 "Data Quality persistence requires the active controller attempt"
             )
+
+    @staticmethod
+    def _policy_from_row(row: sqlite3.Row) -> DataQualityPolicyV1:
+        raw = str(row["policy_json"])
+        payload = json_object(raw, "Data Quality policy")
+        if canonical_text(payload) != raw:
+            raise DataQualityIntegrityError("persisted Data Quality policy is not canonical")
+        try:
+            policy = DataQualityPolicyV1.from_dict(payload)
+        except DataQualityContractError as exc:
+            raise DataQualityIntegrityError("persisted Data Quality policy is invalid") from exc
+        if (
+            str(row["policy_version"]) != policy.policy_version
+            or str(row["policy_checksum"]) != policy.checksum
+        ):
+            raise DataQualityIntegrityError("persisted Data Quality policy identity mismatch")
+        return policy
 
     def _manifest(
         self,
@@ -328,6 +356,7 @@ class DataQualityRepository:
             warnings=warnings,
             created_at=created_at,
             completed_at=completed_at,
+            policy=snapshot.policy,
             secret_values=self.secret_values,
         )
 
@@ -340,6 +369,10 @@ class DataQualityRepository:
         result: DataQualityAssessmentResultV1,
     ) -> PersistedDataQualityV1:
         snapshot = result.snapshot
+        if snapshot.policy != self.policy:
+            raise DataQualityIntegrityError(
+                "new Data Quality snapshot does not use the configured policy"
+            )
         try:
             retained = self.get_for_run_attempt(run_id, phase_attempt)
         except DataQualityNotFoundError:
@@ -411,6 +444,7 @@ class DataQualityRepository:
                     INSERT INTO data_quality_snapshots(
                       snapshot_id,run_id,phase_attempt,requested_date,as_of_time,observed_at,
                       contract_version,policy_version,phase_input_checksum,
+                      policy_json,policy_checksum,
                       upstream_daily_slate_snapshot_id,upstream_daily_slate_checksum,
                       upstream_game_state_snapshot_id,upstream_game_state_checksum,
                       upstream_baseball_intelligence_snapshot_id,upstream_baseball_intelligence_checksum,
@@ -418,7 +452,7 @@ class DataQualityRepository:
                       snapshot_checksum,quality_state,warnings_json,warning_count,canonical_json,
                       game_count,issue_count,artifact_relpath,artifact_checksum,artifact_byte_count,
                       sealed_at,created_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?)
                     """,
                     (
                         snapshot_id,
@@ -430,6 +464,8 @@ class DataQualityRepository:
                         snapshot.contract_version,
                         snapshot.policy_version,
                         phase_input_checksum,
+                        canonical_text(snapshot.policy.as_dict()),
+                        snapshot.policy.checksum,
                         upstream.slate.snapshot_id,
                         upstream.slate.slate.checksum,
                         upstream.state.snapshot_id,
@@ -496,17 +532,21 @@ class DataQualityRepository:
         artifact: DataQualityAttemptManifestArtifactV1,
     ) -> None:
         upstream = {value.phase_key: value for value in manifest.upstream}
+        policy_payload = manifest.phase_input_evidence.get("policy")
+        if not isinstance(policy_payload, Mapping):
+            raise DataQualityIntegrityError("manifest policy evidence is missing")
         connection.execute(
             """
             INSERT INTO data_quality_attempt_evidence(
               run_id,phase_attempt,requested_date,as_of_time,observed_at,phase_input_checksum,
+              policy_version,policy_json,policy_checksum,
               upstream_daily_slate_snapshot_id,upstream_daily_slate_checksum,
               upstream_game_state_snapshot_id,upstream_game_state_checksum,
               upstream_baseball_intelligence_snapshot_id,upstream_baseball_intelligence_checksum,
               upstream_odds_weather_snapshot_id,upstream_odds_weather_checksum,
               outcome,snapshot_checksum,evidence_manifest_relpath,evidence_manifest_checksum,
               evidence_manifest_byte_count,warnings_json,warning_count,created_at,completed_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 manifest.run_id,
@@ -515,6 +555,9 @@ class DataQualityRepository:
                 manifest.as_of_time.isoformat(),
                 manifest.observed_at.isoformat(),
                 manifest.phase_input_checksum,
+                str(policy_payload["policy_version"]),
+                canonical_text(policy_payload),
+                str(policy_payload["checksum"]),
                 upstream["daily_slate"].snapshot_id,
                 upstream["daily_slate"].checksum,
                 upstream["game_state"].snapshot_id,
@@ -648,12 +691,17 @@ class DataQualityRepository:
         observed_at: datetime,
         outcome: DataQualityAttemptOutcome | str,
         warnings: Iterable[Mapping[str, object]],
-        upstream: DataQualityUpstreamV1 | None = None,
+        requested_date: str,
+        as_of_time: datetime,
+        policy: DataQualityPolicyV1,
+        upstream: DataQualityUpstreamV1,
     ) -> DataQualityAttemptEvidenceV1:
         selected_outcome = DataQualityAttemptOutcome(outcome)
         if selected_outcome is DataQualityAttemptOutcome.ASSEMBLED:
             raise ValueError("failed attempt outcome cannot be assembled")
         safe_warnings = tuple(dict(value) for value in warnings)
+        self._validate_upstream(validate_run_id(run_id), upstream)
+        expected_upstream = upstream.identities()
         try:
             existing = self.get_attempt_evidence(run_id, phase_attempt)
         except DataQualityNotFoundError:
@@ -664,26 +712,30 @@ class DataQualityRepository:
                 and existing.outcome is selected_outcome
                 and existing.warnings == safe_warnings
                 and existing.observed_at == aware_utc(observed_at, "observed_at")
+                and existing.requested_date == requested_date
+                and existing.as_of_time == aware_utc(as_of_time, "as_of_time")
+                and existing.policy == policy
+                and self.get_attempt_manifest(run_id, phase_attempt).upstream
+                == expected_upstream
             ):
                 return existing
             raise DataQualityPersistenceConflict("conflicting failed attempt")
-        upstream = self.resolve_upstream(run_id) if upstream is None else upstream
-        self._validate_upstream(validate_run_id(run_id), upstream)
         observed = aware_utc(observed_at, "observed_at")
         now = self._now()
         manifest = create_data_quality_attempt_manifest(
             run_id=run_id,
             phase_attempt=phase_attempt,
-            requested_date=upstream.slate.slate.requested_date,
-            as_of_time=upstream.slate.slate.as_of_time,
+            requested_date=requested_date,
+            as_of_time=as_of_time,
             observed_at=observed,
             phase_input_checksum=phase_input_checksum,
-            upstream=upstream.identities(),
+            upstream=expected_upstream,
             outcome=selected_outcome.value,
             snapshot_checksum=None,
             warnings=safe_warnings,
             created_at=now,
             completed_at=now,
+            policy=policy,
             secret_values=self.secret_values,
         )
         artifact = publish_data_quality_attempt_manifest(
@@ -695,8 +747,9 @@ class DataQualityRepository:
                     connection,
                     run_id,
                     phase_attempt,
-                    upstream.slate.slate.requested_date,
-                    upstream.slate.slate.as_of_time,
+                    requested_date,
+                    as_of_time,
+                    allow_context_mismatch=(selected_outcome is DataQualityAttemptOutcome.INPUT_FAILED),
                 )
                 self._insert_attempt(connection, manifest, artifact)
         except sqlite3.IntegrityError as exc:
@@ -705,6 +758,12 @@ class DataQualityRepository:
                 existing.phase_input_checksum == phase_input_checksum
                 and existing.outcome is selected_outcome
                 and existing.warnings == safe_warnings
+                and existing.observed_at == observed
+                and existing.requested_date == requested_date
+                and existing.as_of_time == aware_utc(as_of_time, "as_of_time")
+                and existing.policy == policy
+                and self.get_attempt_manifest(run_id, phase_attempt).upstream
+                == expected_upstream
             ):
                 return existing
             cleanup_owned_artifact(self.artifact_root, artifact)
@@ -735,6 +794,7 @@ class DataQualityRepository:
             warnings=warnings,
             created_at=_parse_time(row["created_at"], "created_at"),
             completed_at=_parse_time(row["completed_at"], "completed_at"),
+            policy=self._policy_from_row(row),
             secret_values=self.secret_values,
         )
 
@@ -775,6 +835,7 @@ class DataQualityRepository:
             as_of_time=manifest.as_of_time,
             observed_at=manifest.observed_at,
             phase_input_checksum=manifest.phase_input_checksum,
+            policy=self._policy_from_row(row),
             outcome=DataQualityAttemptOutcome(manifest.outcome),
             snapshot_checksum=manifest.snapshot_checksum,
             manifest=PreModelArtifactV1(
@@ -833,15 +894,14 @@ class DataQualityRepository:
         )
         if stored_checksums != expected_checksums:
             raise DataQualityIntegrityError("historical upstream checksum lineage mismatch")
-        if str(row["policy_version"]) != self.policy.policy_version:
-            raise DataQualityIntegrityError("historical Data Quality policy is unavailable")
+        policy = self._policy_from_row(row)
         snapshot = assess_data_quality(
             slate=upstream.slate.slate,
             game_state=upstream.state.state,
             baseball_intelligence=upstream.baseball_intelligence.assembly,
             odds_weather=upstream.odds_weather.snapshot,
             observed_at=_parse_time(row["observed_at"], "observed_at"),
-            policy=self.policy,
+            policy=policy,
         ).snapshot
         if (
             str(row["snapshot_id"]) != f"data-quality:{snapshot.checksum}"
@@ -867,8 +927,16 @@ class DataQualityRepository:
             raise DataQualityIntegrityError(
                 "Data Quality artifact verification failed"
             ) from exc
-        attempt = self.get_attempt_evidence(run_id, int(row["phase_attempt"]))
-        if attempt.snapshot_checksum != snapshot.checksum:
+        try:
+            attempt = self.get_attempt_evidence(run_id, int(row["phase_attempt"]))
+        except (PreModelEvidenceError, DataQualityContractError) as exc:
+            raise DataQualityIntegrityError(
+                "Data Quality attempt evidence verification failed"
+            ) from exc
+        if (
+            attempt.snapshot_checksum != snapshot.checksum
+            or attempt.policy != policy
+        ):
             raise DataQualityIntegrityError("Data Quality attempt/snapshot mismatch")
         return PersistedDataQualityV1(
             snapshot_id=str(row["snapshot_id"]),

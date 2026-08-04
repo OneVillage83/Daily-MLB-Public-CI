@@ -6,6 +6,11 @@ Exact historical upstream resolution, one-pass assembly failure evidence,
 phase-specific manifest validation, configured-secret retained-byte checks,
 and shared hard-link rejection are implemented. Failed packet assembly retains
 an immutable manifest without rerunning the assembly that raised.
+Once exact Data Quality and Phase 1–4 identities are resolved, deterministic
+date/as-of, observation-boundary, upstream-identity, policy, or input-contract
+failures retain `input_failed` evidence without invoking packet assembly.
+Exact replay is idempotent; any changed context, warning, checksum, or upstream
+inventory conflicts.
 
 **Private branch:** `rc/matchup-packet-v1-direct-20260727`  
 **Private draft PR:** #15  

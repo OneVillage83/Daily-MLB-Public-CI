@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from app.data_quality import DataQualityIntegrityError, DataQualityRepository
+from app.data_quality.contracts import DataQualityPolicyV1
 from app.data_quality.engine import DataQualityAssessmentError
+from app.daily_slate.contracts import canonical_json_bytes
 from app.database import Database
 from app.matchup_packet import MatchupPacketIntegrityError, MatchupPacketRepository
 from app.model_feature_set import (
@@ -282,6 +284,399 @@ def test_zero_game_chain_uses_no_provider_and_blocks_predictions(tmp_path: Path)
     assert feature_set is not None and feature_set.feature_set.games == ()
 
 
+def test_nondefault_data_quality_policy_reconstructs_from_retained_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, configured, _, run_id, _ = _phase4_pending_controller(
+        tmp_path, monkeypatch
+    )
+    policy = DataQualityPolicyV1(
+        policy_version="DSE_DATA_QUALITY_POLICY_V1",
+        supported_markets=("h2h",),
+    )
+    handler = controller.handlers[PipelinePhaseKey.DATA_QUALITY]
+    handler.policy = policy
+    handler.repository.policy = policy
+    with pytest.raises(ManualRunExecutionBlocked):
+        controller.resume(run_id)
+
+    default_repository = DataQualityRepository(
+        Database(configured.database_path),
+        artifact_root=configured.artifact_dir,
+        secret_values=configured.credential_values(),
+    )
+    retained = default_repository.get_latest_for_run(run_id)
+    assert retained is not None
+    assert retained.snapshot.policy == policy
+    assert retained.snapshot.policy.checksum == policy.checksum
+    attempt = default_repository.get_attempt_evidence(run_id, 1)
+    assert attempt.policy == policy
+    assert default_repository.policy != policy
+    with default_repository.database.connect() as connection:
+        row = connection.execute(
+            "SELECT policy_version,policy_json,policy_checksum FROM data_quality_snapshots WHERE snapshot_id=?",
+            (retained.snapshot_id,),
+        ).fetchone()
+    assert row[0] == policy.policy_version
+    assert row[2] == policy.checksum
+    assert policy.checksum in str(row[1])
+
+
+def test_data_quality_retained_policy_tampering_and_attempt_disagreement_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller, configured, _, run_id, _ = _phase4_pending_controller(
+        tmp_path, monkeypatch
+    )
+    policy = DataQualityPolicyV1(
+        policy_version="DSE_DATA_QUALITY_POLICY_V1",
+        supported_markets=("h2h",),
+    )
+    handler = controller.handlers[PipelinePhaseKey.DATA_QUALITY]
+    handler.policy = policy
+    handler.repository.policy = policy
+    with pytest.raises(ManualRunExecutionBlocked):
+        controller.resume(run_id)
+
+    repository = DataQualityRepository(
+        Database(configured.database_path),
+        artifact_root=configured.artifact_dir,
+        secret_values=configured.credential_values(),
+    )
+    retained = repository.get_latest_for_run(run_id)
+    assert retained is not None
+    altered = DataQualityPolicyV1(
+        policy_version=policy.policy_version,
+        supported_markets=("h2h", "totals"),
+    )
+    altered_json = canonical_json_bytes(altered.as_dict()).decode("utf-8")
+
+    with sqlite3.connect(configured.database_path) as connection:
+        connection.row_factory = sqlite3.Row
+        snapshot_row = connection.execute(
+            "SELECT policy_version,policy_json,policy_checksum FROM data_quality_snapshots WHERE snapshot_id=?",
+            (retained.snapshot_id,),
+        ).fetchone()
+        attempt_row = connection.execute(
+            "SELECT policy_version,policy_json,policy_checksum FROM data_quality_attempt_evidence WHERE run_id=? AND phase_attempt=1",
+            (run_id,),
+        ).fetchone()
+        assert snapshot_row is not None and attempt_row is not None
+        trigger_names = (
+            "data_quality_snapshots_reject_semantic_update",
+            "data_quality_attempt_evidence_reject_update",
+        )
+        trigger_sql = tuple(
+            str(
+                connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                    (name,),
+                ).fetchone()[0]
+            )
+            for name in trigger_names
+        )
+        for name in trigger_names:
+            connection.execute(f'DROP TRIGGER "{name}"')
+        connection.commit()
+
+    def update_policy(table: str, values: tuple[object, object, object]) -> None:
+        with sqlite3.connect(configured.database_path) as connection:
+            connection.execute("PRAGMA ignore_check_constraints=ON")
+            where = (
+                "snapshot_id=?"
+                if table == "data_quality_snapshots"
+                else "run_id=? AND phase_attempt=1"
+            )
+            keys: tuple[object, ...] = (
+                (retained.snapshot_id,)
+                if table == "data_quality_snapshots"
+                else (run_id,)
+            )
+            connection.execute(
+                f"UPDATE {table} SET policy_version=?,policy_json=?,policy_checksum=? WHERE {where}",
+                (*values, *keys),
+            )
+            connection.commit()
+
+    original_snapshot = tuple(snapshot_row)
+    original_attempt = tuple(attempt_row)
+    try:
+        update_policy(
+            "data_quality_snapshots",
+            (policy.policy_version, altered_json, policy.checksum),
+        )
+        with pytest.raises(DataQualityIntegrityError):
+            repository.get_by_snapshot_id(retained.snapshot_id)
+
+        update_policy("data_quality_snapshots", original_snapshot)
+        update_policy(
+            "data_quality_snapshots",
+            (policy.policy_version, original_snapshot[1], "f" * 64),
+        )
+        with pytest.raises(DataQualityIntegrityError):
+            repository.get_by_snapshot_id(retained.snapshot_id)
+
+        update_policy("data_quality_snapshots", original_snapshot)
+        update_policy(
+            "data_quality_attempt_evidence",
+            (altered.policy_version, altered_json, altered.checksum),
+        )
+        with pytest.raises(DataQualityIntegrityError):
+            repository.get_by_snapshot_id(retained.snapshot_id)
+    finally:
+        update_policy("data_quality_snapshots", original_snapshot)
+        update_policy("data_quality_attempt_evidence", original_attempt)
+        with sqlite3.connect(configured.database_path) as connection:
+            for sql in trigger_sql:
+                connection.execute(sql)
+            connection.commit()
+
+    assert repository.get_by_snapshot_id(retained.snapshot_id) == retained
+
+
+@pytest.mark.parametrize(
+    "phase_key,context_method",
+    (
+        (PipelinePhaseKey.DATA_QUALITY, "_validate_context"),
+        (PipelinePhaseKey.MATCHUP_PACKET, "_context"),
+    ),
+)
+def test_safe_context_input_failure_is_durable_idempotent_and_retryable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase_key: PipelinePhaseKey,
+    context_method: str,
+) -> None:
+    controller, _, _, run_id, _ = _phase4_pending_controller(tmp_path, monkeypatch)
+    handler = controller.handlers[phase_key]
+    repository = handler.repository
+    original = getattr(handler, context_method)
+    wrong_as_of = datetime(2026, 7, 31, 14, tzinfo=timezone.utc)
+    monkeypatch.setattr(handler, context_method, lambda context: wrong_as_of)
+    with pytest.raises(ManualRunExecutionError) as failed:
+        controller.resume(run_id)
+    assert failed.value.phase_key is phase_key
+    first = repository.get_attempt_evidence(run_id, 1)
+    assert first.outcome.value == "input_failed"
+    assert first.snapshot_checksum is None
+    assert first.as_of_time == wrong_as_of
+
+    if phase_key is PipelinePhaseKey.DATA_QUALITY:
+        upstream = repository.resolve_upstream(run_id)
+        replay = repository.persist_failed_attempt(
+            run_id=run_id,
+            phase_attempt=1,
+            phase_input_checksum=first.phase_input_checksum,
+            observed_at=first.observed_at,
+            outcome="input_failed",
+            warnings=first.warnings,
+            requested_date=first.requested_date,
+            as_of_time=first.as_of_time,
+            policy=first.policy,
+            upstream=upstream,
+        )
+        conflict_kwargs = {
+            "policy": first.policy,
+            "upstream": upstream,
+        }
+    else:
+        quality, identities = repository._upstream(run_id)
+        replay = repository.persist_failed_attempt(
+            run_id=run_id,
+            phase_attempt=1,
+            phase_input_checksum=first.phase_input_checksum,
+            observed_at=first.observed_at,
+            outcome="input_failed",
+            warnings=first.warnings,
+            requested_date=first.requested_date,
+            as_of_time=first.as_of_time,
+            quality=quality,
+            upstream_identities=identities,
+        )
+        conflict_kwargs = {
+            "quality": quality,
+            "upstream_identities": identities,
+        }
+    assert replay == first
+    with pytest.raises(Exception, match="conflicting"):
+        repository.persist_failed_attempt(
+            run_id=run_id,
+            phase_attempt=1,
+            phase_input_checksum=first.phase_input_checksum,
+            observed_at=first.observed_at,
+            outcome="input_failed",
+            warnings=({"code": "conflict", "message": "different"},),
+            requested_date=first.requested_date,
+            as_of_time=first.as_of_time,
+            **conflict_kwargs,
+        )
+
+    monkeypatch.setattr(handler, context_method, original)
+    with pytest.raises(ManualRunExecutionBlocked) as blocked:
+        controller.resume(run_id)
+    assert blocked.value.phase_key is PipelinePhaseKey.PREDICTIONS
+    assert repository.get_attempt_evidence(run_id, 1) == first
+    assert repository.get_attempt_evidence(run_id, 2).outcome.value == "assembled"
+
+
+@pytest.mark.parametrize(
+    "mutation,validation_message",
+    (
+        ("missing", "referenced feature snapshot is missing"),
+        ("wrong_player", "referenced feature snapshot violates frozen PIT lineage"),
+    ),
+)
+def test_model_feature_input_failure_retains_packet_inventory_before_transform(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    validation_message: str,
+) -> None:
+    controller, _, _, run_id, _ = _phase4_pending_controller(tmp_path, monkeypatch)
+    handler = controller.handlers[PipelinePhaseKey.MODEL_FEATURE_SET]
+    repository = handler.repository
+    original_validate = repository.validate_selected_inventory
+    original_build = repository.build_from_exact_packet
+    build_calls = 0
+    retained_row: tuple[object, ...] | None = None
+    retained_columns: tuple[str, ...] = ()
+    retained_triggers: tuple[str, ...] = ()
+    resolved_upstream = None
+
+    def mutate_then_validate(inventory, packet):
+        nonlocal retained_row, retained_columns, retained_triggers, resolved_upstream
+        resolved_upstream = repository._upstream(run_id)
+        source = inventory[0]
+        with sqlite3.connect(repository.database.path) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=OFF")
+            retained_columns = tuple(
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(stats_feature_snapshots)"
+                ).fetchall()
+            )
+            row = connection.execute(
+                "SELECT * FROM stats_feature_snapshots WHERE feature_snapshot_id=?",
+                (source.feature_snapshot_id,),
+            ).fetchone()
+            assert row is not None
+            retained_row = tuple(row)
+            trigger_rows = connection.execute(
+                "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='stats_feature_snapshots' AND sql IS NOT NULL"
+            ).fetchall()
+            selected_triggers = tuple(
+                (str(value[0]), str(value[1]))
+                for value in trigger_rows
+                if f"BEFORE {('DELETE' if mutation == 'missing' else 'UPDATE')}" in str(value[1]).upper()
+            )
+            retained_triggers = tuple(sql for _, sql in selected_triggers)
+            for name, _ in selected_triggers:
+                connection.execute(f'DROP TRIGGER "{name}"')
+            if mutation == "missing":
+                connection.execute(
+                    "DELETE FROM stats_feature_snapshots WHERE feature_snapshot_id=?",
+                    (source.feature_snapshot_id,),
+                )
+            else:
+                other = next(
+                    value
+                    for value in inventory[1:]
+                    if value.canonical_player_id != source.canonical_player_id
+                )
+                connection.execute(
+                    "UPDATE stats_feature_snapshots SET canonical_player_id=? WHERE feature_snapshot_id=?",
+                    (other.canonical_player_id, source.feature_snapshot_id),
+                )
+            connection.commit()
+        return original_validate(inventory, packet)
+
+    def count_build(*args, **kwargs):
+        nonlocal build_calls
+        build_calls += 1
+        return original_build(*args, **kwargs)
+
+    monkeypatch.setattr(repository, "validate_selected_inventory", mutate_then_validate)
+    monkeypatch.setattr(repository, "build_from_exact_packet", count_build)
+    with pytest.raises(ManualRunExecutionError) as failed:
+        controller.resume(run_id)
+    assert failed.value.phase_key is PipelinePhaseKey.MODEL_FEATURE_SET
+    causes: list[str] = []
+    cause: BaseException | None = failed.value
+    while cause is not None:
+        causes.append(str(cause))
+        cause = cause.__cause__
+    assert any(validation_message in message for message in causes)
+    assert build_calls == 0
+    first = repository.get_attempt_evidence(run_id, 1)
+    assert first.outcome.value == "input_failed"
+    assert first.snapshot_checksum is None
+    assert first.inventory_validation_state == "unverified"
+    assert first.selected_feature_inventory
+
+    assert resolved_upstream is not None
+    packet, quality, packet_identity = resolved_upstream
+    assert first.selected_feature_inventory == repository.derive_selected_inventory(packet)
+    assert repository.persist_failed_attempt(
+        run_id=run_id,
+        phase_attempt=1,
+        phase_input_checksum=first.phase_input_checksum,
+        observed_at=first.observed_at,
+        outcome="input_failed",
+        warnings=first.warnings,
+        requested_date=first.requested_date,
+        as_of_time=first.as_of_time,
+        packet_snapshot=packet,
+        selected_inventory=first.selected_feature_inventory,
+        inventory_validation_state="unverified",
+        upstream_identities=(quality, packet_identity),
+    ) == first
+    with pytest.raises(Exception, match="conflicting"):
+        repository.persist_failed_attempt(
+            run_id=run_id,
+            phase_attempt=1,
+            phase_input_checksum=first.phase_input_checksum,
+            observed_at=first.observed_at,
+            outcome="input_failed",
+            warnings=({"code": "conflict", "message": "different"},),
+            requested_date=first.requested_date,
+            as_of_time=first.as_of_time,
+            packet_snapshot=packet,
+            selected_inventory=first.selected_feature_inventory,
+            inventory_validation_state="unverified",
+            upstream_identities=(quality, packet_identity),
+        )
+
+    assert retained_row is not None
+    with sqlite3.connect(repository.database.path) as connection:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        if mutation == "missing":
+            placeholders = ",".join("?" for _ in retained_columns)
+            columns = ",".join(f'"{value}"' for value in retained_columns)
+            connection.execute(
+                f"INSERT INTO stats_feature_snapshots({columns}) VALUES ({placeholders})",
+                retained_row,
+            )
+        else:
+            player_index = retained_columns.index("canonical_player_id")
+            snapshot_index = retained_columns.index("feature_snapshot_id")
+            connection.execute(
+                "UPDATE stats_feature_snapshots SET canonical_player_id=? WHERE feature_snapshot_id=?",
+                (retained_row[player_index], retained_row[snapshot_index]),
+            )
+        for trigger_sql in retained_triggers:
+            connection.execute(trigger_sql)
+        connection.commit()
+
+    monkeypatch.setattr(repository, "validate_selected_inventory", original_validate)
+    with pytest.raises(ManualRunExecutionBlocked):
+        controller.resume(run_id)
+    assert repository.get_attempt_evidence(run_id, 1) == first
+    assert repository.get_attempt_evidence(run_id, 2).outcome.value == "assembled"
+
+
 @pytest.mark.parametrize(
     "handler_attribute,phase_key",
     (
@@ -465,6 +860,8 @@ def test_first_seal_rejects_semantic_mutation_and_incomplete_feature_sources(
                 ("issue_count", 999),
                 ("quality_state", "clear"),
                 ("policy_version", "DSE_DATA_QUALITY_POLICY_MUTATED"),
+                ("policy_json", "{}"),
+                ("policy_checksum", "b" * 64),
             ),
         ),
         "matchup_packet_snapshots": (

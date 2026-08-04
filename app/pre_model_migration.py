@@ -30,6 +30,9 @@ PRE_MODEL_SCHEMA_V12_TABLE_STATEMENTS = (
         as_of_time TEXT NOT NULL CHECK ({_aware('as_of_time')}),
         observed_at TEXT NOT NULL CHECK ({_aware('observed_at')}),
         phase_input_checksum TEXT NOT NULL CHECK ({_sha('phase_input_checksum')}),
+        policy_version TEXT NOT NULL CHECK (length(trim(policy_version))>0),
+        policy_json TEXT NOT NULL CHECK (json_valid(policy_json) AND json_type(policy_json)='object'),
+        policy_checksum TEXT NOT NULL CHECK ({_sha('policy_checksum')}),
         upstream_daily_slate_snapshot_id TEXT NOT NULL,
         upstream_daily_slate_checksum TEXT NOT NULL CHECK ({_sha('upstream_daily_slate_checksum')}),
         upstream_game_state_snapshot_id TEXT NOT NULL,
@@ -56,6 +59,8 @@ PRE_MODEL_SCHEMA_V12_TABLE_STATEMENTS = (
         FOREIGN KEY(upstream_game_state_snapshot_id) REFERENCES game_state_snapshots(snapshot_id) ON DELETE RESTRICT,
         FOREIGN KEY(upstream_baseball_intelligence_snapshot_id) REFERENCES baseball_intelligence_snapshots(snapshot_id) ON DELETE RESTRICT,
         FOREIGN KEY(upstream_odds_weather_snapshot_id) REFERENCES odds_weather_snapshots(snapshot_id) ON DELETE RESTRICT,
+        CHECK (policy_version=json_extract(policy_json,'$.policy_version')),
+        CHECK (policy_checksum=json_extract(policy_json,'$.checksum')),
         CHECK ((outcome='assembled' AND snapshot_checksum IS NOT NULL) OR (outcome<>'assembled' AND snapshot_checksum IS NULL))
     )
     """,
@@ -70,6 +75,8 @@ PRE_MODEL_SCHEMA_V12_TABLE_STATEMENTS = (
         observed_at TEXT NOT NULL CHECK ({_aware('observed_at')}),
         contract_version TEXT NOT NULL CHECK (contract_version='DSE_DATA_QUALITY_V1'),
         policy_version TEXT NOT NULL CHECK (length(trim(policy_version))>0),
+        policy_json TEXT NOT NULL CHECK (json_valid(policy_json) AND json_type(policy_json)='object'),
+        policy_checksum TEXT NOT NULL CHECK ({_sha('policy_checksum')}),
         phase_input_checksum TEXT NOT NULL CHECK ({_sha('phase_input_checksum')}),
         upstream_daily_slate_snapshot_id TEXT NOT NULL,
         upstream_daily_slate_checksum TEXT NOT NULL CHECK ({_sha('upstream_daily_slate_checksum')}),
@@ -98,6 +105,9 @@ PRE_MODEL_SCHEMA_V12_TABLE_STATEMENTS = (
         FOREIGN KEY(upstream_game_state_snapshot_id) REFERENCES game_state_snapshots(snapshot_id) ON DELETE RESTRICT,
         FOREIGN KEY(upstream_baseball_intelligence_snapshot_id) REFERENCES baseball_intelligence_snapshots(snapshot_id) ON DELETE RESTRICT,
         FOREIGN KEY(upstream_odds_weather_snapshot_id) REFERENCES odds_weather_snapshots(snapshot_id) ON DELETE RESTRICT
+        ,CHECK (policy_version=json_extract(policy_json,'$.policy_version'))
+        ,CHECK (policy_checksum=json_extract(policy_json,'$.checksum'))
+        ,CHECK (json(json_extract(canonical_json,'$.policy'))=json(policy_json))
     )
     """,
     f"""
@@ -260,6 +270,7 @@ PRE_MODEL_SCHEMA_V12_TABLE_STATEMENTS = (
         upstream_matchup_packet_checksum TEXT NOT NULL CHECK ({_sha('upstream_matchup_packet_checksum')}),
         selected_feature_inventory_json TEXT NOT NULL CHECK (json_valid(selected_feature_inventory_json) AND json_type(selected_feature_inventory_json)='array'),
         selected_feature_inventory_checksum TEXT NOT NULL CHECK ({_sha('selected_feature_inventory_checksum')}),
+        inventory_validation_state TEXT NOT NULL CHECK (inventory_validation_state IN ('unverified','validated')),
         outcome TEXT NOT NULL CHECK (outcome IN ('assembled','input_failed','transformation_failed','persistence_failed')),
         snapshot_checksum TEXT CHECK (snapshot_checksum IS NULL OR ({_sha('snapshot_checksum')})),
         evidence_manifest_relpath TEXT NOT NULL CHECK (evidence_manifest_relpath='model_feature_set/attempts/' || run_id || '/attempt_' || printf('%04d',phase_attempt) || '.json'),
@@ -273,6 +284,7 @@ PRE_MODEL_SCHEMA_V12_TABLE_STATEMENTS = (
         FOREIGN KEY(run_id,phase_key) REFERENCES pipeline_run_phases(run_id,phase_key) ON DELETE RESTRICT,
         FOREIGN KEY(upstream_data_quality_snapshot_id) REFERENCES data_quality_snapshots(snapshot_id) ON DELETE RESTRICT,
         FOREIGN KEY(upstream_matchup_packet_snapshot_id) REFERENCES matchup_packet_snapshots(snapshot_id) ON DELETE RESTRICT,
+        CHECK ((outcome='input_failed' AND inventory_validation_state='unverified') OR (outcome<>'input_failed' AND inventory_validation_state='validated')),
         CHECK ((outcome='assembled' AND snapshot_checksum IS NOT NULL) OR (outcome<>'assembled' AND snapshot_checksum IS NULL))
     )
     """,
@@ -395,7 +407,8 @@ PRE_MODEL_SCHEMA_V12_VALIDATION_TRIGGER_STATEMENTS = (
         JOIN game_state_snapshots state ON state.snapshot_id=NEW.upstream_game_state_snapshot_id
         JOIN baseball_intelligence_snapshots bia ON bia.snapshot_id=NEW.upstream_baseball_intelligence_snapshot_id
         JOIN odds_weather_snapshots ow ON ow.snapshot_id=NEW.upstream_odds_weather_snapshot_id
-        WHERE run.run_id=NEW.run_id AND run.requested_date=NEW.requested_date AND run.as_of_time=NEW.as_of_time
+        WHERE run.run_id=NEW.run_id
+          AND (NEW.outcome='input_failed' OR (run.requested_date=NEW.requested_date AND run.as_of_time=NEW.as_of_time))
           AND phase.status='running' AND phase.attempt_count=NEW.phase_attempt
           AND slate.run_id=NEW.run_id AND slate.sealed_at IS NOT NULL AND slate.snapshot_checksum=NEW.upstream_daily_slate_checksum
           AND state.run_id=NEW.run_id AND state.sealed_at IS NOT NULL AND state.snapshot_checksum=NEW.upstream_game_state_checksum
@@ -416,6 +429,9 @@ PRE_MODEL_SCHEMA_V12_VALIDATION_TRIGGER_STATEMENTS = (
           AND attempt.outcome='assembled' AND attempt.snapshot_checksum=NEW.snapshot_checksum
           AND attempt.phase_input_checksum=NEW.phase_input_checksum
           AND attempt.observed_at=NEW.observed_at
+          AND attempt.policy_version=NEW.policy_version
+          AND attempt.policy_json=NEW.policy_json
+          AND attempt.policy_checksum=NEW.policy_checksum
           AND attempt.upstream_odds_weather_snapshot_id=NEW.upstream_odds_weather_snapshot_id
       ) THEN RAISE(ABORT,'Data Quality snapshot requires matching assembled attempt') END;
     END
@@ -511,7 +527,7 @@ PRE_MODEL_SCHEMA_V12_VALIDATION_TRIGGER_STATEMENTS = (
     """
     CREATE TRIGGER model_feature_set_snapshot_validate_insert BEFORE INSERT ON model_feature_set_snapshots BEGIN
       SELECT CASE WHEN NEW.sealed_at IS NOT NULL THEN RAISE(ABORT,'Model Feature Set snapshot must begin unsealed') END;
-      SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM model_feature_set_attempt_evidence attempt WHERE attempt.run_id=NEW.run_id AND attempt.phase_attempt=NEW.phase_attempt AND attempt.outcome='assembled' AND attempt.snapshot_checksum=NEW.feature_set_checksum AND attempt.phase_input_checksum=NEW.phase_input_checksum AND attempt.selected_feature_inventory_checksum=NEW.selected_feature_inventory_checksum) THEN RAISE(ABORT,'Model Feature Set snapshot requires matching assembled attempt') END;
+      SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM model_feature_set_attempt_evidence attempt WHERE attempt.run_id=NEW.run_id AND attempt.phase_attempt=NEW.phase_attempt AND attempt.outcome='assembled' AND attempt.inventory_validation_state='validated' AND attempt.snapshot_checksum=NEW.feature_set_checksum AND attempt.phase_input_checksum=NEW.phase_input_checksum AND attempt.selected_feature_inventory_checksum=NEW.selected_feature_inventory_checksum) THEN RAISE(ABORT,'Model Feature Set snapshot requires matching assembled attempt') END;
     END
     """,
     """
@@ -616,6 +632,7 @@ PRE_MODEL_SCHEMA_V12_IMMUTABILITY_TRIGGER_STATEMENTS = tuple(
         "data_quality_snapshots": (
             "snapshot_id", "run_id", "phase_key", "phase_attempt", "requested_date",
             "as_of_time", "observed_at", "contract_version", "policy_version",
+            "policy_json", "policy_checksum",
             "phase_input_checksum", "upstream_daily_slate_snapshot_id",
             "upstream_daily_slate_checksum", "upstream_game_state_snapshot_id",
             "upstream_game_state_checksum", "upstream_baseball_intelligence_snapshot_id",

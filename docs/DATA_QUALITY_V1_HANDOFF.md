@@ -12,6 +12,13 @@ is `SUCCEEDED`, info-only issues is `SUCCEEDED_WITH_WARNINGS`, and any degraded
 or insufficient game is `DEGRADED`. The immutable policy actively controls
 supported-market assessment behavior.
 
+The exact canonical policy is retained in both attempt and snapshot rows and
+inside `DataQualityV1`; a fresh default repository reconstructs a nondefault
+historical policy after SQLite reopen. Safely identifiable pre-assessment input
+failures persist immutable `input_failed` evidence and can retry on attempt
+N+1 without changing attempt N. Failures before trustworthy Phase 1–4 identity
+exists intentionally produce no phase-local evidence.
+
 Phase 5 is implemented end to end on the pre-model persistence sprint branch.
 The production handler verifies the complete sealed Phase 1–4 chain, fixes one
 UTC observation time, assesses without acquisition, persists through

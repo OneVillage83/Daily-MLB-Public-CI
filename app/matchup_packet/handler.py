@@ -72,14 +72,17 @@ class MatchupPacketPhaseHandler:
         quality: PersistedDataQualityV1,
         identities: tuple[PreModelUpstreamIdentityV1, ...],
         observed_at: datetime,
+        *,
+        requested_date: str,
+        as_of_time: datetime,
     ) -> str:
         return canonical_sha256(
             {
-                "as_of_time": quality.snapshot.as_of_time.isoformat(),
+                "as_of_time": as_of_time.isoformat(),
                 "assembly_policy_version": MATCHUP_PACKET_ASSEMBLY_POLICY_VERSION,
                 "contract_version": MATCHUP_PACKET_PHASE_INPUT_CONTRACT,
                 "observed_at": observed_at.isoformat(),
-                "requested_date": quality.snapshot.requested_date,
+                "requested_date": requested_date,
                 "upstream": [item.as_dict() for item in identities],
             }
         )
@@ -91,12 +94,45 @@ class MatchupPacketPhaseHandler:
     def __call__(self, context: PhaseExecutionContext) -> PhaseExecutionResult:
         context_as_of = self._context(context)
         quality, identities = self.repository._upstream(context.run_id)
-        if quality.snapshot.requested_date != context.requested_date or quality.snapshot.as_of_time != context_as_of:
-            raise MatchupPacketPhaseHandlerError("context does not match Data Quality")
         observed_at = self._observed()
-        if observed_at < quality.snapshot.observed_at:
-            raise MatchupPacketPhaseHandlerError("packet boundary precedes Data Quality")
-        input_checksum = self._input_checksum(quality, identities, observed_at)
+        input_checksum = self._input_checksum(
+            quality,
+            identities,
+            observed_at,
+            requested_date=context.requested_date,
+            as_of_time=context_as_of,
+        )
+        try:
+            if (
+                quality.snapshot.requested_date != context.requested_date
+                or quality.snapshot.as_of_time != context_as_of
+            ):
+                raise MatchupPacketPhaseHandlerError(
+                    "context does not match Data Quality"
+                )
+            if observed_at < quality.snapshot.observed_at:
+                raise MatchupPacketPhaseHandlerError(
+                    "packet boundary precedes Data Quality"
+                )
+        except Exception as exc:
+            try:
+                self.repository.persist_failed_attempt(
+                    run_id=context.run_id,
+                    phase_attempt=context.attempt_number,
+                    phase_input_checksum=input_checksum,
+                    observed_at=observed_at,
+                    outcome=MatchupPacketAttemptOutcome.INPUT_FAILED,
+                    warnings=self._warning("matchup_packet_input_failed", exc),
+                    requested_date=context.requested_date,
+                    as_of_time=context_as_of,
+                    quality=quality,
+                    upstream_identities=identities,
+                )
+            except Exception as retained_exc:
+                exc.add_note(
+                    f"failed-attempt evidence error: {type(retained_exc).__name__}"
+                )
+            raise
         try:
             packet = self.repository.assemble_for_run(context.run_id, observed_at=observed_at)
         except Exception as exc:
@@ -108,6 +144,8 @@ class MatchupPacketPhaseHandler:
                     observed_at=observed_at,
                     outcome=MatchupPacketAttemptOutcome.ASSEMBLY_FAILED,
                     warnings=self._warning("matchup_packet_assembly_failed", exc),
+                    requested_date=context.requested_date,
+                    as_of_time=context_as_of,
                     quality=quality,
                     upstream_identities=identities,
                 )
@@ -130,6 +168,8 @@ class MatchupPacketPhaseHandler:
                     observed_at=observed_at,
                     outcome=MatchupPacketAttemptOutcome.PERSISTENCE_FAILED,
                     warnings=self._warning("matchup_packet_persistence_failed", exc),
+                    requested_date=context.requested_date,
+                    as_of_time=context_as_of,
                     quality=quality,
                     upstream_identities=identities,
                 )
