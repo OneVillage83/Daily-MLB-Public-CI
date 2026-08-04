@@ -14,6 +14,7 @@ from app.data_quality.contracts import (
     DataQualityContractError,
     DataQualityDisposition,
     DataQualityGameV1,
+    DataQualityPolicyV1,
     DataQualityV1,
     QualityDomain,
     QualityIssueSeverity,
@@ -498,7 +499,9 @@ def _team_intelligence_issues(
     return issues
 
 
-def _odds_issues(game: OddsWeatherGameV1) -> list[QualityIssueV1]:
+def _odds_issues(
+    game: OddsWeatherGameV1, policy: DataQualityPolicyV1 = DataQualityPolicyV1()
+) -> list[QualityIssueV1]:
     issues: list[QualityIssueV1] = []
     odds = game.odds
     if odds.availability is OddsAvailability.UNAVAILABLE:
@@ -532,7 +535,7 @@ def _odds_issues(game: OddsWeatherGameV1) -> list[QualityIssueV1]:
         raw_markets = summary.get("markets")
         if isinstance(raw_markets, Mapping):
             markets = raw_markets
-    for market_key in ("h2h", "spreads", "totals"):
+    for market_key in policy.supported_markets:
         if market_key not in markets:
             issues.append(
                 _issue(
@@ -665,6 +668,7 @@ def _game_issues(
     state_game: GameStateGameV1,
     intelligence_game: BaseballIntelligenceGameV1,
     odds_weather_game: OddsWeatherGameV1,
+    policy: DataQualityPolicyV1 = DataQualityPolicyV1(),
 ) -> list[QualityIssueV1]:
     issues: list[QualityIssueV1] = []
     issues.extend(_schedule_issues(slate_game, state_game))
@@ -678,7 +682,7 @@ def _game_issues(
             )
         issues.extend(_team_state_issues(state_team))
         issues.extend(_team_intelligence_issues(state_team, intelligence_team))
-    issues.extend(_odds_issues(odds_weather_game))
+    issues.extend(_odds_issues(odds_weather_game, policy))
     issues.extend(_weather_issues(odds_weather_game))
     return issues
 
@@ -690,6 +694,7 @@ def assess_data_quality(
     baseball_intelligence: BaseballIntelligenceAssemblyV1,
     odds_weather: OddsWeatherV1,
     observed_at: datetime | None = None,
+    policy: DataQualityPolicyV1 = DataQualityPolicyV1(),
 ) -> DataQualityAssessmentResultV1:
     """Evaluate canonical phases 1-4 without deleting or filtering any game."""
 
@@ -734,6 +739,7 @@ def assess_data_quality(
             state_game=state_game,
             intelligence_game=intelligence_game,
             odds_weather_game=odds_weather_game,
+            policy=policy,
         )
         games.append(
             DataQualityGameV1(
@@ -761,6 +767,7 @@ def assess_data_quality(
             upstream_baseball_intelligence_checksum=baseball_intelligence.checksum,
             upstream_odds_weather_checksum=odds_weather.checksum,
             games=tuple(games),
+            policy=policy,
         )
     except DataQualityContractError as exc:
         raise DataQualityAssessmentError(

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import hashlib
-import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from uuid import uuid4
 
-from app.artifacts import resolve_contained_path, validate_artifact_relpath
 from app.data_quality.contracts import DataQualityContractError, DataQualityV1
+from app.pre_model_evidence import (
+    PreModelArtifactV1,
+    publish_canonical_bytes,
+    verify_canonical_bytes,
+)
 from app.redaction import redact_value
 
 DATA_QUALITY_ARTIFACT_RELPATH = (
@@ -20,6 +21,7 @@ class DataQualityArtifactV1:
     relpath: str
     checksum: str
     byte_count: int
+    created: bool = field(default=False, compare=False, repr=False)
 
 
 def data_quality_artifact_relpath(snapshot: DataQualityV1) -> str:
@@ -36,23 +38,39 @@ def write_data_quality_artifact(
     selected_relpath = (
         data_quality_artifact_relpath(snapshot) if relpath is None else relpath
     )
-    safe_relpath = validate_artifact_relpath(selected_relpath)
     payload = snapshot.as_dict()
     if redact_value(payload, secret_values) != payload:
         raise DataQualityContractError(
             "Data Quality artifact contains credential-bearing material"
         )
-    content = snapshot.canonical_json_bytes()
-    destination = resolve_contained_path(artifact_root, safe_relpath)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
-    try:
-        temporary.write_bytes(content)
-        os.replace(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return DataQualityArtifactV1(
-        relpath=safe_relpath,
-        checksum=hashlib.sha256(content).hexdigest(),
-        byte_count=len(content),
+    artifact = publish_canonical_bytes(
+        artifact_root, selected_relpath, snapshot.canonical_json_bytes()
     )
+    return DataQualityArtifactV1(
+        relpath=artifact.relpath,
+        checksum=artifact.checksum,
+        byte_count=artifact.byte_count,
+        created=artifact.created,
+    )
+
+
+def verify_data_quality_artifact(
+    snapshot: DataQualityV1,
+    artifact: DataQualityArtifactV1,
+    artifact_root: Path,
+    *,
+    secret_values: tuple[str, ...] = (),
+) -> None:
+    if artifact.relpath != data_quality_artifact_relpath(snapshot):
+        raise DataQualityContractError("Data Quality artifact path identity mismatch")
+    verify_canonical_bytes(
+        artifact_root,
+        PreModelArtifactV1(
+            artifact.relpath, artifact.checksum, artifact.byte_count, artifact.created
+        ),
+        snapshot.canonical_json_bytes(),
+    )
+    if redact_value(snapshot.as_dict(), secret_values) != snapshot.as_dict():
+        raise DataQualityContractError(
+            "Data Quality artifact contains credential-bearing material"
+        )

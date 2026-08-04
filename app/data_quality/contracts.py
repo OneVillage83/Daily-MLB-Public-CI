@@ -42,6 +42,66 @@ class QualityDomain(StrEnum):
     WEATHER = "weather"
 
 
+@dataclass(frozen=True, slots=True)
+class DataQualityPolicyV1:
+    policy_version: str = DATA_QUALITY_POLICY_VERSION
+    supported_markets: tuple[str, ...] = ("h2h", "spreads", "totals")
+    network_enabled: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "policy_version", _required_text(self.policy_version, "policy_version")
+        )
+        markets = tuple(
+            sorted(
+                _required_text(value, "supported market")
+                for value in self.supported_markets
+            )
+        )
+        if not markets or len(set(markets)) != len(markets):
+            raise DataQualityContractError("supported markets must be unique and nonempty")
+        if self.network_enabled is not False:
+            raise DataQualityContractError("Data Quality policy must remain zero-network")
+        object.__setattr__(self, "supported_markets", markets)
+
+    def _identity_dict(self) -> dict[str, object]:
+        return {
+            "network_enabled": self.network_enabled,
+            "policy_version": self.policy_version,
+            "supported_markets": list(self.supported_markets),
+        }
+
+    @property
+    def checksum(self) -> str:
+        return canonical_sha256(self._identity_dict())
+
+    def as_dict(self) -> dict[str, object]:
+        return {**self._identity_dict(), "checksum": self.checksum}
+
+    @classmethod
+    def from_dict(cls, value: object) -> "DataQualityPolicyV1":
+        if not isinstance(value, dict) or set(value) != {
+            "checksum",
+            "network_enabled",
+            "policy_version",
+            "supported_markets",
+        }:
+            raise DataQualityContractError("policy must be an exact canonical object")
+        markets = value["supported_markets"]
+        if not isinstance(markets, list) or not all(
+            isinstance(item, str) for item in markets
+        ):
+            raise DataQualityContractError("policy supported_markets must be an array")
+        policy = cls(
+            policy_version=value["policy_version"],
+            supported_markets=tuple(markets),
+            network_enabled=value["network_enabled"],
+        )
+        if value["checksum"] != policy.checksum:
+            raise DataQualityContractError("policy checksum mismatch")
+        return policy
+
+
 def _required_text(value: object, name: str) -> str:
     if not isinstance(value, str) or not value or value != value.strip():
         raise DataQualityContractError(f"{name} must be a non-empty trimmed string")
@@ -245,7 +305,7 @@ class DataQualityV1:
     upstream_odds_weather_checksum: str
     games: tuple[DataQualityGameV1, ...]
     secret_values: InitVar[Iterable[str]] = ()
-    policy_version: str = DATA_QUALITY_POLICY_VERSION
+    policy: DataQualityPolicyV1 = DataQualityPolicyV1()
     contract_version: str = DATA_QUALITY_CONTRACT_VERSION
     sport: str = DATA_QUALITY_SPORT
     league: str = DATA_QUALITY_LEAGUE
@@ -263,8 +323,8 @@ class DataQualityV1:
             "upstream_odds_weather_checksum",
         ):
             object.__setattr__(self, name, _sha256(getattr(self, name), name))
-        if self.policy_version != DATA_QUALITY_POLICY_VERSION:
-            raise DataQualityContractError("unsupported Data Quality policy_version")
+        if not isinstance(self.policy, DataQualityPolicyV1):
+            raise DataQualityContractError("policy must be DataQualityPolicyV1")
         if self.contract_version != DATA_QUALITY_CONTRACT_VERSION:
             raise DataQualityContractError("unsupported Data Quality contract_version")
         if self.sport != "MLB" or self.league != "MLB":
@@ -281,6 +341,10 @@ class DataQualityV1:
             raise DataQualityContractError(
                 "DataQualityV1 contains credential-bearing material"
             )
+
+    @property
+    def policy_version(self) -> str:
+        return self.policy.policy_version
 
     @property
     def ready_game_count(self) -> int:
@@ -307,7 +371,7 @@ class DataQualityV1:
             "insufficient_game_count": self.insufficient_game_count,
             "league": self.league,
             "observed_at": self.observed_at.isoformat(),
-            "policy_version": self.policy_version,
+            "policy": self.policy.as_dict(),
             "ready_game_count": self.ready_game_count,
             "requested_date": self.requested_date,
             "sport": self.sport,

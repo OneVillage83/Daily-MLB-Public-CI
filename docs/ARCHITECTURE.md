@@ -146,12 +146,13 @@ These should not be implemented during Phase 1.
 ## Manual Run Controller Production Boundary
 
 The canonical manual pipeline currently has production handlers for exactly
-`DAILY_SLATE`, `GAME_STATE`, `BASEBALL_INTELLIGENCE_ASSEMBLY`, and
-`ODDS_WEATHER`. Each handler verifies sealed upstream repository evidence and
-returns an immutable phase result; the controller service alone owns phase and
-run status transitions. After a successful Phase 4 commit, execution encounters
-unregistered `DATA_QUALITY` and raises the safe blocked condition while the run
-remains resumable. Repeated resume does not rerun completed upstream phases.
+`DAILY_SLATE`, `GAME_STATE`, `BASEBALL_INTELLIGENCE_ASSEMBLY`, `ODDS_WEATHER`,
+`DATA_QUALITY`, `MATCHUP_PACKET`, and `MODEL_FEATURE_SET`. Each handler verifies
+sealed upstream repository evidence and returns an immutable phase result; the
+controller service alone owns phase and run status transitions. After a
+successful Phase 7 commit, execution encounters unregistered `PREDICTIONS` and
+raises the safe blocked condition while the run remains resumable. Repeated
+resume does not rerun completed upstream phases.
 
 Phase 4 uses retained-evidence acquisition: The Odds API is required for a
 nonempty slate, NWS is primary weather evidence, and optional OpenWeather is a

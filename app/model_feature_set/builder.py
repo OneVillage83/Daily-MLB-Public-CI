@@ -10,7 +10,11 @@ from app.baseball_intelligence.contracts import (
     TeamBaseballIntelligenceV1,
 )
 from app.matchup_packet.contracts import MatchupPacketGameV1, MatchupPacketV1
-from app.model_feature_set.contracts import ModelFeatureGameV1, ModelFeatureSetV1
+from app.model_feature_set.contracts import (
+    ModelFeatureGameV1,
+    ModelFeatureSetV1,
+    ModelFeatureSourceV1,
+)
 from app.model_feature_set.schema import (
     FEATURE_INDEX_V1,
     FEATURE_WINDOWS,
@@ -631,6 +635,30 @@ def build_model_feature_game(game: MatchupPacketGameV1) -> ModelFeatureGameV1:
         _set_lineup_features(builder, side, team)
         _set_bullpen_features(builder, side, team)
     _set_weather_features(builder, game)
+    source_features = tuple(
+        sorted(
+            {
+                ModelFeatureSourceV1(
+                    canonical_player_id=player.canonical_player_id,
+                    feature_snapshot_id=feature_snapshot_id,
+                    feature_checksum=player.feature.feature_checksum,
+                )
+                for team in (
+                    game.baseball_intelligence.away,
+                    game.baseball_intelligence.home,
+                )
+                for player in team.players
+                if player.feature is not None and player.canonical_player_id is not None
+                for feature_snapshot_id in player.equivalent_feature_snapshot_ids
+            },
+            key=lambda value: value.feature_snapshot_id,
+        )
+    )
+    market_context = (
+        None
+        if game.odds_weather.odds.summary is None
+        else dict(game.odds_weather.odds.summary)
+    )
     return ModelFeatureGameV1(
         edge_event_id=game.edge_event_id,
         daily_mlb_game_id=game.daily_mlb_game_id,
@@ -642,6 +670,8 @@ def build_model_feature_game(game: MatchupPacketGameV1) -> ModelFeatureGameV1:
         quality_issue_codes=tuple(issue.code for issue in game.data_quality.issues),
         market_reference_checksum=game.odds_weather.odds.summary_checksum,
         feature_values=tuple(builder.values),
+        market_context=market_context,
+        source_features=source_features,
     )
 
 
@@ -666,5 +696,6 @@ def build_model_feature_set(
         as_of_time=packet.as_of_time,
         observed_at=selected_observed,
         upstream_matchup_packet_checksum=packet.checksum,
+        upstream_data_quality_checksum=packet.upstream_data_quality_checksum,
         games=tuple(build_model_feature_game(game) for game in packet.games),
     )

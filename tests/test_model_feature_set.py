@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -123,6 +124,14 @@ def test_model_feature_set_observed_at_cannot_precede_packet() -> None:
             packet,
             observed_at=packet.observed_at - timedelta(seconds=1),
         )
+
+
+def test_empty_market_context_rejects_unrelated_reference_checksum() -> None:
+    game = build_model_feature_set(_packet_from_chain()).games[0]
+    assert not game.market_context
+    assert game.market_reference_checksum is None
+    with pytest.raises(ModelFeatureSetContractError, match="empty market context"):
+        replace(game, market_reference_checksum="a" * 64)
 
 
 def test_hitting_aggregation_recalculates_rates_from_summed_counts() -> None:

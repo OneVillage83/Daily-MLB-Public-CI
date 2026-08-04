@@ -869,4 +869,4 @@ def test_bia_v10_zero_game_relational_snapshot_seals(tmp_path: Path) -> None:
 
 
 def test_bia_v10_roundtrip_uses_current_schema_only() -> None:
-    assert CURRENT_SCHEMA_VERSION == 11
+    assert CURRENT_SCHEMA_VERSION == 12

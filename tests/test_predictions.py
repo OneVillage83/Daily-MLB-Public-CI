@@ -5,6 +5,7 @@ from datetime import timedelta
 
 import pytest
 
+from app.daily_slate.contracts import canonical_sha256
 from app.data_quality.contracts import DataQualityDisposition
 from app.model_feature_set.builder import build_model_feature_set
 from app.model_feature_set.contracts import ModelFeatureSetV1
@@ -148,14 +149,24 @@ def test_home_offense_feature_changes_home_rate_without_market_input() -> None:
 def test_market_reference_changes_lineage_but_not_model_output() -> None:
     feature_set = _feature_set()
     original_game = feature_set.games[0]
+    changed_market_context = {
+        "markets": [
+            {
+                "bookmaker_count": 2,
+                "market_key": "h2h",
+            }
+        ]
+    }
+    changed_market_checksum = canonical_sha256(changed_market_context)
     changed_game = replace(
         original_game,
-        market_reference_checksum="f" * 64,
+        market_context=changed_market_context,
+        market_reference_checksum=changed_market_checksum,
     )
     changed_set = replace(feature_set, games=(changed_game,))
     original = predict_model_feature_set(feature_set).games[0]
     changed = predict_model_feature_set(changed_set).games[0]
-    assert changed.market_reference_checksum == "f" * 64
+    assert changed.market_reference_checksum == changed_market_checksum
     assert changed.model_input_checksum == original.model_input_checksum
     assert changed.expected_home_runs == original.expected_home_runs
     assert changed.expected_away_runs == original.expected_away_runs

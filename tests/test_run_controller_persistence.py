@@ -22,7 +22,7 @@ from app.migrations import (
     FORMAL_SCHEMA_V6_STATEMENTS,
     FORMAL_SCHEMA_V7_FINGERPRINT,
     FORMAL_SCHEMA_V7_STATEMENTS,
-    FORMAL_SCHEMA_V11_FINGERPRINT,
+    FORMAL_SCHEMA_V12_FINGERPRINT,
     MIGRATION_HISTORY,
     MIGRATION_V6_CHECKSUM,
     MIGRATION_V6_NAME,
@@ -880,12 +880,12 @@ def test_v6_upgrades_through_v9_and_empty_database_installs_current_schema(
     _install_formal_v6(v6_path)
 
     upgraded = ensure_schema(v6_path)
-    assert upgraded.version == 11
-    assert upgraded.schema_fingerprint == FORMAL_SCHEMA_V11_FINGERPRINT
+    assert upgraded.version == 12
+    assert upgraded.schema_fingerprint == FORMAL_SCHEMA_V12_FINGERPRINT
     assert MIGRATION_HISTORY[5] == (6, MIGRATION_V6_NAME, MIGRATION_V6_CHECKSUM)
     verification = sqlite3.connect(v6_path)
     try:
-        assert verification.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert verification.execute("PRAGMA user_version").fetchone()[0] == 12
         assert verification.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert verification.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
@@ -893,7 +893,7 @@ def test_v6_upgrades_through_v9_and_empty_database_installs_current_schema(
 
     empty = Database(tmp_path / "empty.db")
     assert empty.schema_info()["version"] == CURRENT_SCHEMA_VERSION
-    assert empty.schema_info()["fingerprint"] == FORMAL_SCHEMA_V11_FINGERPRINT
+    assert empty.schema_info()["fingerprint"] == FORMAL_SCHEMA_V12_FINGERPRINT
     assert empty.schema_info()["checksum"] == MIGRATION_HISTORY[-1][2]
     assert empty.integrity_check() == {
         "ok": True,
@@ -1117,7 +1117,7 @@ def test_v7_collector_run_rebuild_preserves_structure_data_and_dependencies(
         compact_after = re.sub(r"\s+", "", after_sql)
         assert compact_before.replace(
             "schema_versionIN(1,2,3,4,5,6)",
-                "schema_versionIN(1,2,3,4,5,6,7,8,9,10,11)",
+                "schema_versionIN(1,2,3,4,5,6,7,8,9,10,11,12)",
         ) == compact_after
         assert verification.execute(
             "SELECT run_id,event_id,associated_at FROM run_games"
@@ -1293,8 +1293,8 @@ def test_v7_through_v9_preserves_pipeline_runs_and_widens_schema_version(
         connection.close()
 
     result = ensure_schema(path)
-    assert result.version == 11
-    assert result.schema_fingerprint == FORMAL_SCHEMA_V11_FINGERPRINT
+    assert result.version == 12
+    assert result.schema_fingerprint == FORMAL_SCHEMA_V12_FINGERPRINT
     verification = sqlite3.connect(path)
     try:
         assert verification.execute(
@@ -1314,7 +1314,7 @@ def test_v7_through_v9_preserves_pipeline_runs_and_widens_schema_version(
                 ).fetchone()[0]
             ).split()
         )
-        assert "database_schema_versionIN(7,8,9,10,11)" in pipeline_sql
+        assert "database_schema_versionIN(7,8,9,10,11,12)" in pipeline_sql
         assert {
             str(row[0])
             for row in verification.execute(
@@ -1324,7 +1324,7 @@ def test_v7_through_v9_preserves_pipeline_runs_and_widens_schema_version(
                 """
             )
         } == {"daily_slate_snapshots", "daily_slate_games"}
-        assert verification.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert verification.execute("PRAGMA user_version").fetchone()[0] == 12
         assert verification.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert verification.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:

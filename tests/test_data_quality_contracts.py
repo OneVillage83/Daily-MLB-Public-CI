@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,17 +9,20 @@ import pytest
 
 from app.data_quality.artifact import (
     data_quality_artifact_relpath,
+    verify_data_quality_artifact,
     write_data_quality_artifact,
 )
 from app.data_quality.contracts import (
     DataQualityContractError,
     DataQualityDisposition,
     DataQualityGameV1,
+    DataQualityPolicyV1,
     DataQualityV1,
     QualityDomain,
     QualityIssueSeverity,
     QualityIssueV1,
 )
+from app.pre_model_evidence import PreModelEvidenceError
 
 AS_OF = datetime(2026, 7, 27, 14, 0, tzinfo=timezone.utc)
 OBSERVED = datetime(2026, 7, 27, 14, 15, tzinfo=timezone.utc)
@@ -57,7 +61,11 @@ def _game(
     )
 
 
-def _snapshot(*, games: tuple[DataQualityGameV1, ...] = ()) -> DataQualityV1:
+def _snapshot(
+    *,
+    games: tuple[DataQualityGameV1, ...] = (),
+    policy: DataQualityPolicyV1 = DataQualityPolicyV1(),
+) -> DataQualityV1:
     return DataQualityV1(
         requested_date="2026-07-27",
         as_of_time=AS_OF,
@@ -67,7 +75,26 @@ def _snapshot(*, games: tuple[DataQualityGameV1, ...] = ()) -> DataQualityV1:
         upstream_baseball_intelligence_checksum="c" * 64,
         upstream_odds_weather_checksum="d" * 64,
         games=games,
+        policy=policy,
     )
+
+
+def test_policy_identity_is_complete_canonical_and_snapshot_bound() -> None:
+    default = DataQualityPolicyV1()
+    reordered = DataQualityPolicyV1(
+        supported_markets=("totals", "h2h", "spreads")
+    )
+    h2h_only = DataQualityPolicyV1(
+        policy_version=default.policy_version,
+        supported_markets=("h2h",),
+    )
+    assert default == reordered
+    assert default.checksum == reordered.checksum
+    assert default.as_dict()["checksum"] == default.checksum
+    assert DataQualityPolicyV1.from_dict(default.as_dict()) == default
+    assert h2h_only.policy_version == default.policy_version
+    assert h2h_only.checksum != default.checksum
+    assert _snapshot(policy=h2h_only).checksum != _snapshot(policy=default).checksum
 
 
 def test_disposition_is_derived_from_issue_severity() -> None:
@@ -126,6 +153,35 @@ def test_zero_game_snapshot_is_valid() -> None:
     assert snapshot.ready_game_count == 0
     assert snapshot.degraded_game_count == 0
     assert snapshot.insufficient_game_count == 0
+
+
+def test_standalone_artifact_verifier_rejects_configured_secret_retained_string(
+    tmp_path: Path,
+) -> None:
+    secret = "configured-retained-secret"
+    issue = QualityIssueV1(
+        code="fixture_secret_boundary",
+        domain=QualityDomain.GAME_STATE,
+        severity=QualityIssueSeverity.INFO,
+        message=f"safe prefix {secret} safe suffix",
+    )
+    snapshot = _snapshot(games=(_game(issues=(issue,)),))
+    artifact = write_data_quality_artifact(snapshot, tmp_path)
+    with pytest.raises(DataQualityContractError, match="credential-bearing"):
+        verify_data_quality_artifact(
+            snapshot, artifact, tmp_path, secret_values=(secret,)
+        )
+
+
+def test_phase_snapshot_artifact_verifier_rejects_hard_link(tmp_path: Path) -> None:
+    snapshot = _snapshot()
+    artifact = write_data_quality_artifact(snapshot, tmp_path)
+    try:
+        os.link(tmp_path / artifact.relpath, tmp_path / "snapshot-hard-link.json")
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"hard links unavailable: {exc}")
+    with pytest.raises(PreModelEvidenceError, match="hard link"):
+        verify_data_quality_artifact(snapshot, artifact, tmp_path)
 
 
 def test_duplicate_game_identity_is_rejected() -> None:

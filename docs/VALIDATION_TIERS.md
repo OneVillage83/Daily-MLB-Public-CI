@@ -16,7 +16,7 @@ python scripts/validate_checkpoint.py task `
 # One grouped sprint boundary. Optional evidence root is scanned for configured
 # secret values after the tests have produced sanitized evidence.
 python scripts/validate_checkpoint.py sprint `
-  --generated-evidence-root .validation/phase4-production-sprint
+  --generated-evidence-root .validation/pre-model-persistence-sprint
 
 # Explain without executing anything.
 python scripts/validate_checkpoint.py sprint --explain
@@ -42,21 +42,26 @@ migration matrices, and public workflows. Those omissions are printed.
 
 ## `sprint`
 
-The sprint profile runs once after a grouped sprint:
+The sprint profile runs once after a grouped sprint. For the pre-model sprint it runs:
 
+- Data Quality, Matchup Packet, and Model Feature Set contract, repository,
+  artifact, handler, and controller tests;
+- the focused v12 fresh-install, frozen-v11 upgrade, identity, and rollback
+  regression surface;
 - Phase 4 handler/controller/repository/selector/manifest and credential tests;
-- Phase 1-4 integration, controller resume, and schema-v11 identity tests;
+- Phase 1-7 integration and controller resume tests;
 - one complete development suite;
 - a focused stats contract regression;
 - full Ruff once;
 - full mypy `--no-incremental` once;
-- a fresh SQLite v11 integrity and foreign-key check;
+- a fresh SQLite v12 integrity and foreign-key check;
 - the private repository secret scan;
 - an optional generated-evidence configured-secret scan.
 
-This sprint changes no schema, shared stats contract, dependency, lock, or
-Docker file. Therefore it explicitly skips the complete local stats suite,
-audits, hash-locked install rehearsals, Docker, and migration failure matrices.
+This sprint changes the schema but not shared stats dependencies, lock files, or
+Docker inputs. Therefore it runs focused migration verification and explicitly
+skips the complete local stats suite, audits, hash-locked install rehearsals,
+Docker, and the exhaustive release-only failure-injection matrix.
 The exact-head public workflow supplies final cross-environment and release-image
 evidence.
 

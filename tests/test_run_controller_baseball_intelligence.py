@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -25,6 +26,7 @@ from app.run_controller.service import (
     ManualRunExecutionError,
     PhaseExecutionResult,
 )
+from scripts import run_controller as run_controller_cli
 from scripts.run_controller import (
     EXIT_BLOCKED,
     EXIT_SUCCESS,
@@ -138,10 +140,13 @@ def _persist_phase_two(
         clock=lambda: SELECTION_OBSERVED,
         odds_weather_handler=phase_four_fixture,
     )
+    controller.handlers = MappingProxyType(
+        dict(tuple(controller.handlers.items())[:4])
+    )
     return controller, configured, run_id, slate, state
 
 
-def test_production_controller_registers_exactly_phases_one_through_four(
+def test_production_controller_registers_exactly_phases_one_through_seven(
     tmp_path,
 ) -> None:
     configured = _settings(tmp_path / "handlers.db", tmp_path / "artifacts")
@@ -155,8 +160,11 @@ def test_production_controller_registers_exactly_phases_one_through_four(
         PipelinePhaseKey.GAME_STATE,
         PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY,
         PipelinePhaseKey.ODDS_WEATHER,
+        PipelinePhaseKey.DATA_QUALITY,
+        PipelinePhaseKey.MATCHUP_PACKET,
+        PipelinePhaseKey.MODEL_FEATURE_SET,
     )
-    assert PipelinePhaseKey.DATA_QUALITY not in controller.handlers
+    assert PipelinePhaseKey.PREDICTIONS not in controller.handlers
     metadata = _safe_configuration_metadata(configured)["baseball_intelligence"]
     assert metadata == {
         "attempt_manifest_version": (
@@ -222,6 +230,7 @@ def test_six_category_resume_commits_phase_three_and_four_then_blocks_at_data_qu
     assert controller.show(run_id).phases[2].attempt_count == 1
     assert handler.repository.list_attempt_evidence(run_id) == (first_attempt,)
 
+    monkeypatch.setattr(run_controller_cli, "build_controller", lambda *args, **kwargs: controller)
     exit_code = main(
         [
             "resume",

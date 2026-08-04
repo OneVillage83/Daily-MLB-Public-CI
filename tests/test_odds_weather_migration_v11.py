@@ -36,6 +36,7 @@ from app.migrations import (
     FORMAL_SCHEMA_V10_STATEMENTS,
     FORMAL_SCHEMA_V11_FINGERPRINT,
     FORMAL_SCHEMA_V11_STATEMENTS,
+    FORMAL_SCHEMA_V12_FINGERPRINT,
     MIGRATION_HISTORY,
     MIGRATION_V10_CHECKSUM,
     MIGRATION_V11_CHECKSUM,
@@ -1122,21 +1123,21 @@ def _insert_unavailable_snapshot_children(
 
 
 def test_v11_identity_and_historical_chain_are_pinned() -> None:
-    assert CURRENT_SCHEMA_VERSION == 11
+    assert CURRENT_SCHEMA_VERSION == 12
     assert MIGRATION_V11_NAME == "odds_weather_v1_temporal_persistence"
     assert MIGRATION_V11_CHECKSUM == V11_CHECKSUM
     assert FORMAL_SCHEMA_V11_FINGERPRINT == V11_FINGERPRINT
     assert MIGRATION_V10_CHECKSUM == V10_CHECKSUM
     assert FORMAL_SCHEMA_V10_FINGERPRINT == V10_FINGERPRINT
-    assert MIGRATION_HISTORY[-1] == (11, MIGRATION_V11_NAME, MIGRATION_V11_CHECKSUM)
-    assert tuple(version for version, _, _ in MIGRATION_HISTORY) == tuple(range(1, 12))
+    assert MIGRATION_HISTORY[10] == (11, MIGRATION_V11_NAME, MIGRATION_V11_CHECKSUM)
+    assert tuple(version for version, _, _ in MIGRATION_HISTORY) == tuple(range(1, 13))
 
 
 def test_fresh_v11_has_exact_objects_and_no_pre_v11_backup(tmp_path: Path) -> None:
     path = tmp_path / "fresh-v11.sqlite3"
     result = ensure_schema(path)
-    assert result.version == 11
-    assert result.schema_fingerprint == FORMAL_SCHEMA_V11_FINGERPRINT
+    assert result.version == 12
+    assert result.schema_fingerprint == FORMAL_SCHEMA_V12_FINGERPRINT
     assert not list(path.parent.rglob("*.pre-v11-*.sqlite3"))
     connection = sqlite3.connect(path)
     try:
@@ -1146,7 +1147,7 @@ def test_fresh_v11_has_exact_objects_and_no_pre_v11_backup(tmp_path: Path) -> No
         assert TABLES <= tables
         assert INDEXES <= indexes
         assert len([name for name in triggers if name.startswith("odds_weather_")]) == 38
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
         assert connection.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
@@ -1172,7 +1173,7 @@ def test_exact_v10_upgrade_creates_verified_backup_and_preserves_rows(tmp_path: 
         before.close()
 
     result = ensure_schema(path)
-    assert result.version == 11
+    assert result.version == 12
     assert result.backup_path is not None and ".pre-v11-" in result.backup_path.name
     assert result.diagnostic_path is not None
     assert result.diagnostic_path.name.startswith("migration-v11-")
@@ -1187,7 +1188,7 @@ def test_exact_v10_upgrade_creates_verified_backup_and_preserves_rows(tmp_path: 
     try:
         for table, rows in preserved.items():
             assert verification.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows
-        assert schema_fingerprint(verification) == FORMAL_SCHEMA_V11_FINGERPRINT
+        assert schema_fingerprint(verification) == FORMAL_SCHEMA_V12_FINGERPRINT
         diagnostic = json.loads(result.diagnostic_path.read_text(encoding="utf-8"))
         assert diagnostic["source_version"] == 10
         assert diagnostic["target_version"] == 11
