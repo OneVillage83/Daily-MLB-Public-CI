@@ -14,7 +14,7 @@ from app.migrations import (
     FORMAL_SCHEMA_V4_STATEMENTS,
     FORMAL_SCHEMA_V5_FINGERPRINT,
     FORMAL_SCHEMA_V5_STATEMENTS,
-    FORMAL_SCHEMA_V12_FINGERPRINT,
+    FORMAL_SCHEMA_V13_FINGERPRINT,
     MIGRATION_HISTORY,
     MIGRATION_V1_CHECKSUM,
     MIGRATION_V1_NAME,
@@ -173,8 +173,8 @@ def test_v5_fielding_chains_migrate_to_independent_source_rows(tmp_path: Path) -
 
     result = ensure_schema(path)
 
-    assert result.version == 12
-    assert result.schema_fingerprint == FORMAL_SCHEMA_V12_FINGERPRINT
+    assert result.version == 13
+    assert result.schema_fingerprint == FORMAL_SCHEMA_V13_FINGERPRINT
     connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
     try:
@@ -188,7 +188,7 @@ def test_v5_fielding_chains_migrate_to_independent_source_rows(tmp_path: Path) -
             ("9", "000001", "fielding:9:000001", 1, "initial", HASH_B),
             ("8", "000002", "fielding:8:000002", 1, "initial", HASH_C),
         ]
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert [

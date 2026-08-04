@@ -50,6 +50,31 @@ from app.odds_weather import (  # noqa: E402
     WEATHER_FORECAST_CONTRACT_VERSION,
     OddsWeatherPhaseHandler,
 )
+from app.predictions import (  # noqa: E402
+    PREDICTIONS_CONTRACT_VERSION,
+    PREDICTIONS_PHASE_INPUT_CONTRACT,
+    PREDICTIONS_PROVIDER_POLICY_VERSION,
+    REVIEWED_ANALYST_PROVIDER_CONTRACT,
+    PredictionsPhaseHandler,
+)
+from app.value_engine import (  # noqa: E402
+    VALUE_ENGINE_PHASE_INPUT_CONTRACT,
+    VALUE_ENGINE_POLICY_VERSION,
+    VALUE_ENGINE_PRODUCTION_CONTRACT,
+    ValueEnginePhaseHandler,
+)
+from app.recommendation_gate import (  # noqa: E402
+    RECOMMENDATION_GATE_PHASE_INPUT_CONTRACT,
+    RECOMMENDATION_GATE_POLICY_VERSION,
+    RECOMMENDATION_GATE_PRODUCTION_CONTRACT,
+    RecommendationGatePhaseHandler,
+)
+from app.rankings import (  # noqa: E402
+    RANKINGS_PHASE_INPUT_CONTRACT,
+    RANKINGS_PRODUCTION_CONTRACT,
+    RANKING_POLICY_VERSION,
+    RankingsPhaseHandler,
+)
 from app.database import Database  # noqa: E402
 from app.redaction import redact_text  # noqa: E402
 from app.run_controller.contracts import PipelinePhaseKey  # noqa: E402
@@ -104,9 +129,7 @@ def _safe_configuration_metadata(configured_settings: Settings) -> dict[str, Any
             "source_version": "statsapi-game-feed-v1.1",
         },
         "baseball_intelligence": {
-            "attempt_manifest_version": (
-                BASEBALL_INTELLIGENCE_ATTEMPT_MANIFEST_CONTRACT
-            ),
+            "attempt_manifest_version": (BASEBALL_INTELLIGENCE_ATTEMPT_MANIFEST_CONTRACT),
             "contract_version": BASEBALL_INTELLIGENCE_ASSEMBLY_CONTRACT_VERSION,
             "feature_version": FEATURE_VERSION_V3,
             "network_enabled": False,
@@ -122,8 +145,7 @@ def _safe_configuration_metadata(configured_settings: Settings) -> dict[str, Any
             "openweather_enabled": configured_settings.openweather_enabled,
             "openweather_mode": (
                 "comparison"
-                if configured_settings.openweather_enabled
-                and configured_settings.weather_compare_enabled
+                if configured_settings.openweather_enabled and configured_settings.weather_compare_enabled
                 else "fallback"
                 if configured_settings.openweather_enabled
                 else "disabled"
@@ -158,6 +180,36 @@ def _safe_configuration_metadata(configured_settings: Settings) -> dict[str, Any
             "source_mode": "retained_sqlite",
             "transformation_policy_version": MODEL_FEATURE_TRANSFORMATION_POLICY_VERSION,
         },
+        "predictions": {
+            "contract_version": PREDICTIONS_CONTRACT_VERSION,
+            "input_contract_version": PREDICTIONS_PHASE_INPUT_CONTRACT,
+            "network_enabled": False,
+            "provider_contract": REVIEWED_ANALYST_PROVIDER_CONTRACT,
+            "provider_kind": "reviewed_analyst",
+            "provider_policy_version": PREDICTIONS_PROVIDER_POLICY_VERSION,
+            "source_mode": "sealed_reviewed_input_and_retained_sqlite",
+        },
+        "value_engine": {
+            "contract_version": VALUE_ENGINE_PRODUCTION_CONTRACT,
+            "input_contract_version": VALUE_ENGINE_PHASE_INPUT_CONTRACT,
+            "network_enabled": False,
+            "policy_version": VALUE_ENGINE_POLICY_VERSION,
+            "source_mode": "retained_sqlite",
+        },
+        "recommendation_gate": {
+            "contract_version": RECOMMENDATION_GATE_PRODUCTION_CONTRACT,
+            "input_contract_version": RECOMMENDATION_GATE_PHASE_INPUT_CONTRACT,
+            "network_enabled": False,
+            "policy_version": RECOMMENDATION_GATE_POLICY_VERSION,
+            "source_mode": "retained_sqlite",
+        },
+        "rankings": {
+            "contract_version": RANKINGS_PRODUCTION_CONTRACT,
+            "input_contract_version": RANKINGS_PHASE_INPUT_CONTRACT,
+            "network_enabled": False,
+            "policy_version": RANKING_POLICY_VERSION,
+            "source_mode": "retained_sqlite",
+        },
         "odds": {
             "enabled": bool(configured_settings.odds_api_key),
             "format": configured_settings.odds_format,
@@ -188,6 +240,10 @@ def build_controller(
     data_quality_handler: PhaseHandler | None = None,
     matchup_packet_handler: PhaseHandler | None = None,
     model_feature_set_handler: PhaseHandler | None = None,
+    predictions_handler: PhaseHandler | None = None,
+    value_engine_handler: PhaseHandler | None = None,
+    recommendation_gate_handler: PhaseHandler | None = None,
+    rankings_handler: PhaseHandler | None = None,
 ) -> ManualRunController:
     database = Database(
         database_path,
@@ -261,6 +317,34 @@ def build_controller(
             secret_values=secret_values,
             **retained_phase_options,
         )
+    if predictions_handler is None:
+        predictions_handler = PredictionsPhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        )
+    if value_engine_handler is None:
+        value_engine_handler = ValueEnginePhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        )
+    if recommendation_gate_handler is None:
+        recommendation_gate_handler = RecommendationGatePhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        )
+    if rankings_handler is None:
+        rankings_handler = RankingsPhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        )
     controller_options: dict[str, Any] = {}
     if clock is not None:
         controller_options["clock"] = clock
@@ -271,13 +355,15 @@ def build_controller(
         handlers={
             PipelinePhaseKey.DAILY_SLATE: daily_slate_handler,
             PipelinePhaseKey.GAME_STATE: game_state_handler,
-            PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY: (
-                baseball_intelligence_handler
-            ),
+            PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY: (baseball_intelligence_handler),
             PipelinePhaseKey.ODDS_WEATHER: odds_weather_handler,
             PipelinePhaseKey.DATA_QUALITY: data_quality_handler,
             PipelinePhaseKey.MATCHUP_PACKET: matchup_packet_handler,
             PipelinePhaseKey.MODEL_FEATURE_SET: model_feature_set_handler,
+            PipelinePhaseKey.PREDICTIONS: predictions_handler,
+            PipelinePhaseKey.VALUE_ENGINE: value_engine_handler,
+            PipelinePhaseKey.RECOMMENDATION_GATE: recommendation_gate_handler,
+            PipelinePhaseKey.RANKINGS: rankings_handler,
         },
         **controller_options,
     )
@@ -291,7 +377,7 @@ def _add_common_database_argument(
         "--database",
         type=Path,
         default=configured_settings.database_path,
-        help="schema-v12 SQLite database path",
+        help="schema-v13 SQLite database path",
     )
 
 
@@ -300,7 +386,7 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
         prog="run_controller",
         description=(
             "Initialize, inspect, and manually resume Daily MLB pipeline runs; "
-            "phases 1-7 can execute with immutable retained evidence"
+            "phases 1-11 can execute with immutable retained evidence"
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -321,10 +407,7 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
 
     resume = commands.add_parser(
         "resume",
-        help=(
-            "resume persisted work through MODEL_FEATURE_SET; the controller "
-            "blocks safely at PREDICTIONS"
-        ),
+        help=("resume persisted work through RANKINGS; the controller blocks safely at PDF_REPORT"),
     )
     _add_common_database_argument(resume, configured_settings)
     resume.add_argument("--run-id", required=True)
@@ -368,9 +451,7 @@ def _human_summary(summary: ManualRunSummaryV1) -> str:
 
 def _print_summary(summary: ManualRunSummaryV1, *, json_output: bool) -> None:
     print(
-        _canonical_json(summary.as_dict())
-        if json_output
-        else _human_summary(summary),
+        _canonical_json(summary.as_dict()) if json_output else _human_summary(summary),
         flush=True,
     )
 

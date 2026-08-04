@@ -135,7 +135,7 @@ def test_docker_verifier_covers_release_boundaries_without_collection() -> None:
         "schema-before.json",
         "schema-after.json",
         'schema["version"] == 12',
-        'schema["user_version"] == 12',
+        'schema["user_version"] == 13',
         "integrity_check",
         "foreign_key_violations",
         "docker restart",

@@ -27,6 +27,19 @@ from app.recommendation_gate.policy import (
     RecommendationPolicyError,
     RecommendationPolicyV1,
 )
+from app.recommendation_gate.handler import RecommendationGatePhaseHandler
+from app.recommendation_gate.production import (
+    GATE_CODES,
+    RECOMMENDATION_GATE_PHASE_INPUT_CONTRACT,
+    RECOMMENDATION_GATE_POLICY_VERSION,
+    RECOMMENDATION_GATE_PRODUCTION_CONTRACT,
+    GateGameV1,
+    GateResultV1,
+    GateSideEvaluationV1,
+    ProductionRecommendationGateV1,
+    RecommendationPolicyV1 as ProductionRecommendationPolicyV1,
+)
+from app.recommendation_gate.repository import RecommendationGatePersistenceConflict, RecommendationGateRepository
 
 __all__ = [
     "DEFAULT_RECOMMENDATION_POLICY_V1",
@@ -50,4 +63,16 @@ __all__ = [
     "evidence_confidence_score",
     "recommendation_gate_artifact_relpath",
     "write_recommendation_gate_artifact",
+    "GATE_CODES",
+    "GateGameV1",
+    "GateResultV1",
+    "GateSideEvaluationV1",
+    "ProductionRecommendationGateV1",
+    "ProductionRecommendationPolicyV1",
+    "RECOMMENDATION_GATE_PHASE_INPUT_CONTRACT",
+    "RECOMMENDATION_GATE_POLICY_VERSION",
+    "RECOMMENDATION_GATE_PRODUCTION_CONTRACT",
+    "RecommendationGatePhaseHandler",
+    "RecommendationGatePersistenceConflict",
+    "RecommendationGateRepository",
 ]

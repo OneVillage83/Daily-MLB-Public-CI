@@ -15,6 +15,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 SPRINT_FOCUSED_TESTS: Final = (
+    "tests/test_prediction_decision_migration_v13.py",
+    "tests/test_prediction_decision_contracts.py",
+    "tests/test_prediction_decision_pipeline.py",
     "tests/test_pre_model_migration_v12.py",
     "tests/test_pre_model_pipeline.py",
     "tests/test_data_quality_contracts.py",
@@ -215,7 +218,7 @@ def _skips(profile: str) -> tuple[str, ...]:
             "complete local stats-environment suite (shared stats code and dependencies unchanged)",
             "dependency audits and hash-locked install rehearsals (dependencies unchanged)",
             "local Docker build (Docker/runtime files unchanged; exact-head public CI supplies proof)",
-            "complete release migration failure-injection matrix (focused v12 fresh/upgrade and rollback gates run in sprint)",
+            "complete release migration failure-injection matrix (focused v13 fresh/upgrade and rollback gates run in sprint)",
         )
     return ()
 

@@ -16,7 +16,7 @@ python scripts/validate_checkpoint.py task `
 # One grouped sprint boundary. Optional evidence root is scanned for configured
 # secret values after the tests have produced sanitized evidence.
 python scripts/validate_checkpoint.py sprint `
-  --generated-evidence-root .validation/pre-model-persistence-sprint
+  --generated-evidence-root .validation/prediction-to-ranking-sprint
 
 # Explain without executing anything.
 python scripts/validate_checkpoint.py sprint --explain
@@ -42,19 +42,19 @@ migration matrices, and public workflows. Those omissions are printed.
 
 ## `sprint`
 
-The sprint profile runs once after a grouped sprint. For the pre-model sprint it runs:
+The sprint profile runs once after a grouped sprint. For the prediction-to-ranking sprint it runs:
 
-- Data Quality, Matchup Packet, and Model Feature Set contract, repository,
-  artifact, handler, and controller tests;
-- the focused v12 fresh-install, frozen-v11 upgrade, identity, and rollback
+- Predictions, Value Engine, Recommendation Gate, and Rankings contract,
+  repository, artifact, handler, controller, replay, and integrity tests;
+- the focused v13 fresh-install, frozen-v12 upgrade, identity, and rollback
   regression surface;
 - Phase 4 handler/controller/repository/selector/manifest and credential tests;
-- Phase 1-7 integration and controller resume tests;
+- Phase 1-11 integration and controller resume tests;
 - one complete development suite;
 - a focused stats contract regression;
 - full Ruff once;
 - full mypy `--no-incremental` once;
-- a fresh SQLite v12 integrity and foreign-key check;
+- a fresh SQLite v13 integrity and foreign-key check;
 - the private repository secret scan;
 - an optional generated-evidence configured-secret scan.
 

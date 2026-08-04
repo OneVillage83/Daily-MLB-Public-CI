@@ -22,7 +22,7 @@ from app.run_controller.contracts import (
     PipelineRunStatus,
 )
 from app.run_controller.repository import PipelineRunRepository
-from app.run_controller.service import ManualRunExecutionBlocked, ManualRunExecutionError
+from app.run_controller.service import ManualRunController, ManualRunExecutionBlocked, ManualRunExecutionError
 from scripts import run_controller as run_controller_cli
 from scripts.run_controller import EXIT_BLOCKED, _safe_configuration_metadata, build_controller
 from tests.test_baseball_intelligence_repository import _six_category_repository
@@ -59,7 +59,7 @@ def _capture(provider, endpoint, payload, retrieved_at, event_id=None):
     )
 
 
-def _phase4_pending_controller(tmp_path, monkeypatch, *, fail_first=False):
+def _phase4_pending_controller(tmp_path, monkeypatch, *, fail_first=False, include_decision_phases=False):
     fixture_preview = _six_category_fixture()
     monkeypatch.setattr(
         game_state_repository_tests,
@@ -186,10 +186,18 @@ def _phase4_pending_controller(tmp_path, monkeypatch, *, fail_first=False):
         clock=lambda: observed_at,
         odds_weather_handler=handler,
     )
+    if not include_decision_phases:
+        controller = ManualRunController(
+            controller.repository,
+            timezone_name=configured.report_timezone,
+            configuration_metadata=_safe_configuration_metadata(configured),
+            handlers={key: value for key, value in controller.handlers.items() if key in tuple(PipelinePhaseKey)[:7]},
+            clock=lambda: observed_at,
+        )
     return controller, configured, handler, run_id, calls
 
 
-def test_production_controller_registers_exactly_phases_one_through_seven(tmp_path) -> None:
+def test_production_controller_registers_exactly_phases_one_through_eleven(tmp_path) -> None:
     configured = _settings(tmp_path / "controller.db", tmp_path / "artifacts")
     controller = build_controller(
         configured.database_path,
@@ -197,16 +205,8 @@ def test_production_controller_registers_exactly_phases_one_through_seven(tmp_pa
         clock=lambda: datetime(2026, 8, 1, tzinfo=timezone.utc),
     )
 
-    assert tuple(controller.handlers) == (
-        PipelinePhaseKey.DAILY_SLATE,
-        PipelinePhaseKey.GAME_STATE,
-        PipelinePhaseKey.BASEBALL_INTELLIGENCE_ASSEMBLY,
-        PipelinePhaseKey.ODDS_WEATHER,
-        PipelinePhaseKey.DATA_QUALITY,
-        PipelinePhaseKey.MATCHUP_PACKET,
-        PipelinePhaseKey.MODEL_FEATURE_SET,
-    )
-    assert PipelinePhaseKey.PREDICTIONS not in controller.handlers
+    assert tuple(controller.handlers) == tuple(PipelinePhaseKey)[:11]
+    assert PipelinePhaseKey.PDF_REPORT not in controller.handlers
     metadata = _safe_configuration_metadata(configured)["odds_weather"]
     assert metadata == {
         "attempt_manifest_version": "DSE_ODDS_WEATHER_ATTEMPT_MANIFEST_V1",

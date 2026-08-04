@@ -146,11 +146,17 @@ These should not be implemented during Phase 1.
 ## Manual Run Controller Production Boundary
 
 The canonical manual pipeline currently has production handlers for exactly
-`DAILY_SLATE`, `GAME_STATE`, `BASEBALL_INTELLIGENCE_ASSEMBLY`, `ODDS_WEATHER`,
-`DATA_QUALITY`, `MATCHUP_PACKET`, and `MODEL_FEATURE_SET`. Each handler verifies
+Phases 1-11: `DAILY_SLATE`, `GAME_STATE`, `BASEBALL_INTELLIGENCE_ASSEMBLY`,
+`ODDS_WEATHER`, `DATA_QUALITY`, `MATCHUP_PACKET`, `MODEL_FEATURE_SET`,
+`PREDICTIONS`, `VALUE_ENGINE`, `RECOMMENDATION_GATE`, and `RANKINGS`. Each handler verifies
 sealed upstream repository evidence and returns an immutable phase result; the
 controller service alone owns phase and run status transitions. After a
-successful Phase 7 commit, execution encounters unregistered `PREDICTIONS` and
+successful Phase 7 commit, execution enters the schema-v13 prediction/decision
+chain: market-blind reviewed-analyst `PREDICTIONS`, factual `VALUE_ENGINE`,
+deterministic `RECOMMENDATION_GATE`, then lexicographic `RANKINGS`. Prediction,
+value, decision, and rank remain separate immutable snapshots. PASS and AVOID
+retain all upstream evidence. After a successful Phase 11 commit, execution
+encounters unregistered `PDF_REPORT` and
 raises the safe blocked condition while the run remains resumable. Repeated
 resume does not rerun completed upstream phases.
 

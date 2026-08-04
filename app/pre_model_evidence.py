@@ -37,6 +37,26 @@ _MANIFEST_PROFILES: dict[str, tuple[str, frozenset[str], tuple[str, ...]]] = {
         frozenset({"assembled", "input_failed", "transformation_failed", "persistence_failed"}),
         ("data_quality", "matchup_packet"),
     ),
+    "predictions": (
+        "DSE_PREDICTIONS_ATTEMPT_MANIFEST_V1",
+        frozenset({"assembled", "input_failed", "validation_failed", "persistence_failed"}),
+        ("model_feature_set", "data_quality"),
+    ),
+    "value_engine": (
+        "DSE_VALUE_ENGINE_ATTEMPT_MANIFEST_V1",
+        frozenset({"assembled", "input_failed", "calculation_failed", "persistence_failed"}),
+        ("predictions", "model_feature_set", "data_quality"),
+    ),
+    "recommendation_gate": (
+        "DSE_RECOMMENDATION_GATE_ATTEMPT_MANIFEST_V1",
+        frozenset({"assembled", "input_failed", "evaluation_failed", "persistence_failed"}),
+        ("value_engine", "predictions", "data_quality"),
+    ),
+    "rankings": (
+        "DSE_RANKINGS_ATTEMPT_MANIFEST_V1",
+        frozenset({"assembled", "input_failed", "ranking_failed", "persistence_failed"}),
+        ("recommendation_gate",),
+    ),
 }
 
 
@@ -227,6 +247,45 @@ class PreModelAttemptManifestV1:
                 raise PreModelEvidenceError(
                     "Model Feature Set manifest inventory state disagrees with outcome"
                 )
+        elif self.phase_key == "predictions":
+            if set(value) != {
+                "expected_game_ids",
+                "input_inventory_checksum",
+                "missing_game_ids",
+                "present_input_checksums",
+                "provider_policy",
+            }:
+                raise PreModelEvidenceError("Predictions manifest input evidence is incomplete")
+            self._validate_policy_and_inventory(value, "provider_policy", "input_inventory_checksum")
+        elif self.phase_key == "value_engine":
+            if set(value) != {"market_inventory_checksum", "policy"}:
+                raise PreModelEvidenceError("Value Engine manifest input evidence is incomplete")
+            self._validate_policy_and_inventory(value, "policy", "market_inventory_checksum")
+        elif self.phase_key == "recommendation_gate":
+            if set(value) != {"policy"}:
+                raise PreModelEvidenceError("Recommendation Gate manifest policy is incomplete")
+            self._validate_policy_and_inventory(value, "policy", None)
+        elif self.phase_key == "rankings":
+            if set(value) != {"policy"}:
+                raise PreModelEvidenceError("Rankings manifest policy is incomplete")
+            self._validate_policy_and_inventory(value, "policy", None)
+
+    @staticmethod
+    def _validate_policy_and_inventory(
+        value: dict[str, object],
+        policy_key: str,
+        inventory_key: str | None,
+    ) -> None:
+        policy = value.get(policy_key)
+        if not isinstance(policy, dict) or policy.get("checksum") != canonical_sha256(
+            {key: item for key, item in policy.items() if key != "checksum"}
+        ):
+            raise PreModelEvidenceError("manifest policy checksum mismatch")
+        if inventory_key is not None:
+            inventory = value.get(inventory_key)
+            if not isinstance(inventory, str):
+                raise PreModelEvidenceError(f"{inventory_key} must be text")
+            require_checksum(inventory, inventory_key)
 
     def as_dict(self) -> dict[str, object]:
         return {
