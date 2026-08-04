@@ -4,3 +4,7 @@
 # Optional baseball-statistics ingestion profile. Keep this out of the normal
 # collection-service image until the stats provider is an approved runtime path.
 pybaseball==2.2.7
+
+# Security pin for the PyJWT/PyGithub stats dependency chain.
+# cryptography 49.0.0 is affected by CVE-2026-69247.
+cryptography==50.0.0
