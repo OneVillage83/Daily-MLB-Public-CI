@@ -233,7 +233,7 @@ def test_one_game_pre_model_chain_persists_reconstructs_and_blocks_predictions(
         )
 
 
-def test_zero_game_chain_uses_no_provider_and_blocks_predictions(tmp_path: Path) -> None:
+def test_zero_game_chain_uses_no_provider_and_blocks_pdf_report(tmp_path: Path) -> None:
     odds_repository = _zero_game_odds_weather_repository(tmp_path)
     upstream = odds_repository.baseball_intelligence.get_latest_for_run(RUN_ID)
     assert upstream is not None
@@ -269,7 +269,7 @@ def test_zero_game_chain_uses_no_provider_and_blocks_predictions(tmp_path: Path)
     )
     with pytest.raises(ManualRunExecutionBlocked) as blocked:
         controller.resume(RUN_ID)
-    assert blocked.value.phase_key is PipelinePhaseKey.PREDICTIONS
+    assert blocked.value.phase_key is PipelinePhaseKey.PDF_REPORT
     quality = DataQualityRepository(
         odds_repository.database, artifact_root=odds_repository.artifact_root
     ).get_latest_for_run(RUN_ID)

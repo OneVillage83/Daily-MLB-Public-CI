@@ -866,7 +866,7 @@ def test_code_revision_fallback_current_schema_and_collector_lifecycle_unchanged
     summary = controller.start("2026-07-26")
 
     assert summary.run.code_revision == "unavailable"
-    assert CURRENT_SCHEMA_VERSION == 12
+    assert CURRENT_SCHEMA_VERSION == 13
     assert repository.database.schema_info()["version"] == CURRENT_SCHEMA_VERSION
     assert repository.database.get_run(collector["run_id"]) == collector
 

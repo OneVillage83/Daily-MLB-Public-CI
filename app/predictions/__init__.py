@@ -26,6 +26,24 @@ from app.predictions.runtime import (
     predict_game,
     predict_model_feature_set,
 )
+from app.predictions.handler import PredictionsPhaseHandler
+from app.predictions.production import (
+    PREDICTIONS_CONTRACT_VERSION,
+    PREDICTIONS_PHASE_INPUT_CONTRACT,
+    PREDICTIONS_PROVIDER_POLICY_VERSION,
+    REVIEWED_ANALYST_PROVIDER_CONTRACT,
+    MoneylinePredictionV1,
+    PredictionProviderPolicyV1,
+    PredictionsV1 as ProductionPredictionsV1,
+    ReviewedPredictionInputV1,
+)
+from app.predictions.repository import (
+    InvalidPredictionInputV1,
+    PredictionsInputInventoryError,
+    PredictionsInputInventoryV1,
+    PredictionsPersistenceConflict,
+    PredictionsRepository,
+)
 
 __all__ = [
     "GamePredictionV1",
@@ -48,4 +66,18 @@ __all__ = [
     "predictions_artifact_relpath",
     "total_line_projection",
     "write_predictions_artifact",
+    "MoneylinePredictionV1",
+    "PREDICTIONS_CONTRACT_VERSION",
+    "PREDICTIONS_PHASE_INPUT_CONTRACT",
+    "PREDICTIONS_PROVIDER_POLICY_VERSION",
+    "PredictionProviderPolicyV1",
+    "PredictionsPhaseHandler",
+    "PredictionsInputInventoryError",
+    "PredictionsInputInventoryV1",
+    "PredictionsPersistenceConflict",
+    "PredictionsRepository",
+    "ProductionPredictionsV1",
+    "REVIEWED_ANALYST_PROVIDER_CONTRACT",
+    "ReviewedPredictionInputV1",
+    "InvalidPredictionInputV1",
 ]

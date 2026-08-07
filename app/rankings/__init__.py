@@ -20,6 +20,16 @@ from app.rankings.policy import (
     RankingsPolicyError,
     RankingsPolicyV1,
 )
+from app.rankings.handler import RankingsPhaseHandler
+from app.rankings.production import (
+    RANKINGS_PHASE_INPUT_CONTRACT,
+    RANKINGS_PRODUCTION_CONTRACT,
+    RANKING_POLICY_VERSION,
+    ProductionRankingsV1,
+    RankingEntryV1 as ProductionRankingEntryV1,
+    RankingPolicyV1,
+)
+from app.rankings.repository import RankingsPersistenceConflict, RankingsRepository
 
 __all__ = [
     "DEFAULT_RANKINGS_POLICY_V1",
@@ -38,4 +48,13 @@ __all__ = [
     "rank_recommendations",
     "rankings_artifact_relpath",
     "write_rankings_artifact",
+    "ProductionRankingEntryV1",
+    "ProductionRankingsV1",
+    "RANKINGS_PHASE_INPUT_CONTRACT",
+    "RANKINGS_PRODUCTION_CONTRACT",
+    "RANKING_POLICY_VERSION",
+    "RankingPolicyV1",
+    "RankingsPhaseHandler",
+    "RankingsPersistenceConflict",
+    "RankingsRepository",
 ]
