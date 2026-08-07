@@ -30,6 +30,7 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         home_upper REAL NOT NULL CHECK (home_upper BETWEEN home_probability AND 1.0),
         generated_at TEXT NOT NULL CHECK ({_aware("generated_at")}),
         sealed_at TEXT NOT NULL CHECK ({_aware("sealed_at")}),
+        market_independence_attested INTEGER NOT NULL CHECK (typeof(market_independence_attested)='integer' AND market_independence_attested=1),
         authoring_evidence_json TEXT NOT NULL CHECK (json_valid(authoring_evidence_json) AND json_type(authoring_evidence_json)='object'),
         evidence_checksum TEXT NOT NULL CHECK ({_sha("evidence_checksum")}),
         input_checksum TEXT NOT NULL CHECK ({_sha("input_checksum")}),
@@ -39,6 +40,7 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         FOREIGN KEY(run_id) REFERENCES pipeline_runs(run_id) ON DELETE RESTRICT,
         FOREIGN KEY(upstream_model_feature_set_snapshot_id) REFERENCES model_feature_set_snapshots(snapshot_id) ON DELETE RESTRICT,
         CHECK (provider_policy_checksum=json_extract(provider_policy_json,'$.checksum')),
+        CHECK (json_extract(canonical_json,'$.market_independence_attested')=market_independence_attested),
         CHECK (julianday(sealed_at)>=julianday(generated_at))
     )
     """,
@@ -60,6 +62,8 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         expected_game_ids_json TEXT NOT NULL CHECK (json_valid(expected_game_ids_json) AND json_type(expected_game_ids_json)='array'),
         present_input_checksums_json TEXT NOT NULL CHECK (json_valid(present_input_checksums_json) AND json_type(present_input_checksums_json)='array'),
         missing_game_ids_json TEXT NOT NULL CHECK (json_valid(missing_game_ids_json) AND json_type(missing_game_ids_json)='array'),
+        invalid_inputs_json TEXT NOT NULL CHECK (json_valid(invalid_inputs_json) AND json_type(invalid_inputs_json)='array'),
+        invalid_input_count INTEGER NOT NULL CHECK (invalid_input_count>=0 AND invalid_input_count=json_array_length(invalid_inputs_json)),
         input_inventory_checksum TEXT NOT NULL CHECK ({_sha("input_inventory_checksum")}),
         outcome TEXT NOT NULL CHECK (outcome IN ('assembled','input_failed','validation_failed','persistence_failed')),
         snapshot_checksum TEXT CHECK (snapshot_checksum IS NULL OR ({_sha("snapshot_checksum")})),
@@ -137,6 +141,7 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         generated_at TEXT NOT NULL CHECK ({_aware("generated_at")}),
         prediction_sealed_at TEXT NOT NULL CHECK ({_aware("prediction_sealed_at")}),
         evidence_checksum TEXT NOT NULL CHECK ({_sha("evidence_checksum")}),
+        market_independence_attested INTEGER NOT NULL CHECK (typeof(market_independence_attested)='integer' AND market_independence_attested=1),
         prediction_checksum TEXT NOT NULL CHECK ({_sha("prediction_checksum")}),
         canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json) AND json_extract(canonical_json,'$.checksum')=prediction_checksum),
         PRIMARY KEY(snapshot_id,source_game_id),
@@ -147,6 +152,7 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         CHECK (abs((home_lower+away_upper)-1.0)<=0.000000000001),
         CHECK (abs((home_upper+away_lower)-1.0)<=0.000000000001),
         CHECK ((home_upper-home_lower)>=0.10),
+        CHECK (json_extract(canonical_json,'$.market_independence_attestation')=market_independence_attested),
         CHECK (julianday(prediction_sealed_at)>=julianday(generated_at)),
         CHECK (julianday(prediction_sealed_at)<julianday(scheduled_start_time))
     )
@@ -381,8 +387,7 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         PRIMARY KEY(snapshot_id,source_game_id),
         UNIQUE(snapshot_id,ordinal),
         FOREIGN KEY(snapshot_id,run_id,phase_attempt) REFERENCES recommendation_gate_snapshots(snapshot_id,run_id,phase_attempt) ON DELETE RESTRICT,
-        CHECK ((decision='recommend')=(selected_side IS NOT NULL AND selected_team_id IS NOT NULL)),
-        CHECK (decision='recommend' OR selected_team_id IS NULL)
+        CHECK ((decision='recommend' AND selected_side IS NOT NULL AND selected_team_id IS NOT NULL) OR (decision<>'recommend' AND selected_side IS NULL AND selected_team_id IS NULL))
     )
     """,
     f"""
@@ -410,7 +415,7 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         source_game_id TEXT NOT NULL,
         side TEXT NOT NULL CHECK (side IN ('home','away')),
         ordinal INTEGER NOT NULL CHECK (ordinal>=1),
-        gate_code TEXT NOT NULL CHECK (length(trim(gate_code))>0),
+        gate_code TEXT NOT NULL CHECK (gate_code IN ('prediction_valid','prediction_market_independent','prediction_identity_valid','feature_lineage_valid','market_supported','minimum_bookmaker_count','odds_fresh','best_price_available','data_quality_model_ready','minimum_edge','minimum_ev','lower_bound_clears_market','uncertainty_acceptable','lineup_and_starter_risk','weather_evidence_acceptable','event_pregame','opposing_side_not_selected')),
         passed INTEGER NOT NULL CHECK (passed IN (0,1)),
         threshold_json TEXT NOT NULL CHECK (json_valid(threshold_json)),
         observed_json TEXT NOT NULL CHECK (json_valid(observed_json)),
@@ -422,7 +427,8 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json) AND json_extract(canonical_json,'$.checksum')=result_checksum),
         PRIMARY KEY(snapshot_id,source_game_id,side,ordinal),
         UNIQUE(snapshot_id,source_game_id,side,gate_code),
-        FOREIGN KEY(snapshot_id,source_game_id,side) REFERENCES recommendation_gate_sides(snapshot_id,source_game_id,side) ON DELETE RESTRICT
+        FOREIGN KEY(snapshot_id,source_game_id,side) REFERENCES recommendation_gate_sides(snapshot_id,source_game_id,side) ON DELETE RESTRICT,
+        CHECK (ordinal=CASE gate_code WHEN 'prediction_valid' THEN 1 WHEN 'prediction_market_independent' THEN 2 WHEN 'prediction_identity_valid' THEN 3 WHEN 'feature_lineage_valid' THEN 4 WHEN 'market_supported' THEN 5 WHEN 'minimum_bookmaker_count' THEN 6 WHEN 'odds_fresh' THEN 7 WHEN 'best_price_available' THEN 8 WHEN 'data_quality_model_ready' THEN 9 WHEN 'minimum_edge' THEN 10 WHEN 'minimum_ev' THEN 11 WHEN 'lower_bound_clears_market' THEN 12 WHEN 'uncertainty_acceptable' THEN 13 WHEN 'lineup_and_starter_risk' THEN 14 WHEN 'weather_evidence_acceptable' THEN 15 WHEN 'event_pregame' THEN 16 WHEN 'opposing_side_not_selected' THEN 17 END)
     )
     """,
     f"""
@@ -451,6 +457,7 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         FOREIGN KEY(run_id,phase_key) REFERENCES pipeline_run_phases(run_id,phase_key) ON DELETE RESTRICT,
         FOREIGN KEY(upstream_recommendation_gate_snapshot_id) REFERENCES recommendation_gate_snapshots(snapshot_id) ON DELETE RESTRICT,
         CHECK (policy_checksum=json_extract(policy_json,'$.checksum')),
+        CHECK (json_extract(policy_json,'$.comparator')='["decision_eligibility","ev_desc","edge_desc","lower_bound_clearance_desc","interval_width_asc","data_quality_disposition","bookmaker_count_desc","scheduled_start_time","source_game_id","selected_team_id"]'),
         CHECK ((outcome='assembled' AND snapshot_checksum IS NOT NULL) OR (outcome<>'assembled' AND snapshot_checksum IS NULL)),
         CHECK (julianday(completed_at)>=julianday(created_at))
     )
@@ -483,7 +490,8 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         UNIQUE(run_id,phase_attempt),
         UNIQUE(snapshot_id,run_id,phase_attempt),
         FOREIGN KEY(run_id,phase_attempt) REFERENCES rankings_attempt_evidence(run_id,phase_attempt) ON DELETE RESTRICT,
-        CHECK (policy_checksum=json_extract(policy_json,'$.checksum'))
+        CHECK (policy_checksum=json_extract(policy_json,'$.checksum')),
+        CHECK (json_extract(policy_json,'$.comparator')='["decision_eligibility","ev_desc","edge_desc","lower_bound_clearance_desc","interval_width_asc","data_quality_disposition","bookmaker_count_desc","scheduled_start_time","source_game_id","selected_team_id"]')
     )
     """,
     f"""
@@ -497,7 +505,7 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
         selected_side TEXT CHECK (selected_side IS NULL OR selected_side IN ('home','away')),
         selected_team_id TEXT,
         rank_eligible INTEGER NOT NULL CHECK (rank_eligible IN (0,1)),
-        recommendation_rank INTEGER CHECK (recommendation_rank IS NULL OR recommendation_rank>=1),
+        recommendation_rank INTEGER CHECK (recommendation_rank IS NULL OR (typeof(recommendation_rank)='integer' AND recommendation_rank>=1)),
         upstream_gate_game_checksum TEXT NOT NULL CHECK ({_sha("upstream_gate_game_checksum")}),
         entry_checksum TEXT NOT NULL CHECK ({_sha("entry_checksum")}),
         canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json) AND json_extract(canonical_json,'$.checksum')=entry_checksum),
@@ -511,7 +519,7 @@ PREDICTION_DECISION_SCHEMA_V13_TABLE_STATEMENTS = (
 
 
 PREDICTION_DECISION_SCHEMA_V13_INDEX_STATEMENTS = (
-    "CREATE INDEX idx_prediction_inputs_run_game ON prediction_authoring_inputs(run_id,source_game_id,sealed_at)",
+    "CREATE INDEX idx_prediction_inputs_run_game ON prediction_authoring_inputs(run_id,source_game_id,upstream_model_feature_set_snapshot_id,sealed_at)",
     "CREATE INDEX idx_predictions_attempt_run_outcome ON predictions_attempt_evidence(run_id,outcome,phase_attempt)",
     "CREATE INDEX idx_prediction_snapshot_upstream ON prediction_snapshots(upstream_model_feature_set_snapshot_id,upstream_data_quality_snapshot_id)",
     "CREATE INDEX idx_prediction_game_source ON prediction_games(source_game_id,snapshot_id)",
@@ -608,8 +616,10 @@ PREDICTION_DECISION_SCHEMA_V13_VALIDATION_TRIGGER_STATEMENTS = (
     WHEN OLD.sealed_at IS NULL AND NEW.sealed_at IS NOT NULL BEGIN
       SELECT CASE WHEN (SELECT count(*) FROM prediction_games WHERE snapshot_id=NEW.snapshot_id)<>NEW.game_count
         THEN RAISE(ABORT,'Prediction game count mismatch') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM predictions_attempt_evidence a WHERE a.run_id=NEW.run_id AND a.phase_attempt=NEW.phase_attempt AND (a.invalid_input_count<>0 OR json_array_length(a.missing_game_ids_json)<>0)) THEN RAISE(ABORT,'Assembled Predictions attempt contains missing or invalid input') END;
       SELECT CASE WHEN NEW.game_count>0 AND ((SELECT min(ordinal) FROM prediction_games WHERE snapshot_id=NEW.snapshot_id)<>1 OR (SELECT max(ordinal) FROM prediction_games WHERE snapshot_id=NEW.snapshot_id)<>NEW.game_count)
         THEN RAISE(ABORT,'Prediction ordinals are not contiguous') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM prediction_games WHERE snapshot_id=NEW.snapshot_id AND (market_independence_attested<>1 OR json_extract(canonical_json,'$.market_independence_attestation')<>1)) THEN RAISE(ABORT,'Prediction market-independence attestation mismatch') END;
     END
     """,
     """
@@ -631,6 +641,15 @@ PREDICTION_DECISION_SCHEMA_V13_VALIDATION_TRIGGER_STATEMENTS = (
       SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_games g WHERE g.snapshot_id=NEW.snapshot_id AND (SELECT count(*) FROM recommendation_gate_sides s WHERE s.snapshot_id=g.snapshot_id AND s.source_game_id=g.source_game_id)<>2) THEN RAISE(ABORT,'Gate game requires both side evaluations') END;
       SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_sides s WHERE s.snapshot_id=NEW.snapshot_id AND (SELECT count(*) FROM recommendation_gate_results r WHERE r.snapshot_id=s.snapshot_id AND r.source_game_id=s.source_game_id AND r.side=s.side)<>s.gate_count) THEN RAISE(ABORT,'Gate result count mismatch') END;
       SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_sides s WHERE s.snapshot_id=NEW.snapshot_id AND ((SELECT min(ordinal) FROM recommendation_gate_results r WHERE r.snapshot_id=s.snapshot_id AND r.source_game_id=s.source_game_id AND r.side=s.side)<>1 OR (SELECT max(ordinal) FROM recommendation_gate_results r WHERE r.snapshot_id=s.snapshot_id AND r.source_game_id=s.source_game_id AND r.side=s.side)<>s.gate_count)) THEN RAISE(ABORT,'Gate result ordinals are not contiguous') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_sides s WHERE s.snapshot_id=NEW.snapshot_id AND json(s.reason_codes_json)<>json((SELECT json_group_array(gate_code) FROM (SELECT gate_code FROM recommendation_gate_results r WHERE r.snapshot_id=s.snapshot_id AND r.source_game_id=s.source_game_id AND r.side=s.side AND r.passed=0 ORDER BY r.ordinal)))) THEN RAISE(ABORT,'Gate reason codes do not equal failed results') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_sides s WHERE s.snapshot_id=NEW.snapshot_id AND (SELECT count(*) FROM recommendation_gate_results r WHERE r.snapshot_id=s.snapshot_id AND r.source_game_id=s.source_game_id AND r.side=s.side AND r.gate_code='opposing_side_not_selected')<>1) THEN RAISE(ABORT,'Gate selection result inventory mismatch') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_sides s WHERE s.snapshot_id=NEW.snapshot_id AND ((s.decision='recommend' AND EXISTS (SELECT 1 FROM recommendation_gate_results r WHERE r.snapshot_id=s.snapshot_id AND r.source_game_id=s.source_game_id AND r.side=s.side AND r.passed=0)) OR (s.decision='pass' AND ((SELECT count(*) FROM recommendation_gate_results r WHERE r.snapshot_id=s.snapshot_id AND r.source_game_id=s.source_game_id AND r.side=s.side AND r.passed=0)=0 OR EXISTS (SELECT 1 FROM recommendation_gate_results r WHERE r.snapshot_id=s.snapshot_id AND r.source_game_id=s.source_game_id AND r.side=s.side AND r.passed=0 AND r.gate_code IN ('data_quality_model_ready','uncertainty_acceptable','lineup_and_starter_risk','weather_evidence_acceptable','event_pregame')))) OR (s.decision='avoid' AND NOT EXISTS (SELECT 1 FROM recommendation_gate_results r WHERE r.snapshot_id=s.snapshot_id AND r.source_game_id=s.source_game_id AND r.side=s.side AND r.passed=0 AND r.gate_code IN ('data_quality_model_ready','uncertainty_acceptable','lineup_and_starter_risk','weather_evidence_acceptable','event_pregame'))))) THEN RAISE(ABORT,'Gate side decision disagrees with failed-result taxonomy') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_games g WHERE g.snapshot_id=NEW.snapshot_id AND ((g.decision='recommend' AND ((SELECT count(*) FROM recommendation_gate_sides s WHERE s.snapshot_id=g.snapshot_id AND s.source_game_id=g.source_game_id AND s.decision='recommend')<>1 OR NOT EXISTS (SELECT 1 FROM recommendation_gate_sides s WHERE s.snapshot_id=g.snapshot_id AND s.source_game_id=g.source_game_id AND s.decision='recommend' AND s.side=g.selected_side AND s.outcome_team_id=g.selected_team_id))) OR (g.decision='pass' AND EXISTS (SELECT 1 FROM recommendation_gate_sides s WHERE s.snapshot_id=g.snapshot_id AND s.source_game_id=g.source_game_id AND s.decision<>'pass')) OR (g.decision='avoid' AND NOT EXISTS (SELECT 1 FROM recommendation_gate_sides s WHERE s.snapshot_id=g.snapshot_id AND s.source_game_id=g.source_game_id AND s.decision='avoid')))) THEN RAISE(ABORT,'Gate game decision disagrees with side decisions') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_games g JOIN recommendation_gate_sides s ON s.snapshot_id=g.snapshot_id AND s.source_game_id=g.source_game_id JOIN recommendation_gate_results r ON r.snapshot_id=s.snapshot_id AND r.source_game_id=s.source_game_id AND r.side=s.side WHERE g.snapshot_id=NEW.snapshot_id AND g.decision='recommend' AND r.gate_code='opposing_side_not_selected' AND ((s.decision='recommend' AND r.passed<>1) OR (s.decision<>'recommend' AND r.passed<>0))) THEN RAISE(ABORT,'Gate selected-side results are inconsistent') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_games g JOIN recommendation_gate_results r ON r.snapshot_id=g.snapshot_id AND r.source_game_id=g.source_game_id WHERE g.snapshot_id=NEW.snapshot_id AND g.decision<>'recommend' AND r.gate_code='opposing_side_not_selected' AND r.passed<>0) THEN RAISE(ABORT,'Unrecommended game cannot claim a selected side') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_games g WHERE g.snapshot_id=NEW.snapshot_id AND (json_extract(g.canonical_json,'$.decision')<>g.decision OR json_extract(g.canonical_json,'$.selected_side') IS NOT g.selected_side OR json_extract(g.canonical_json,'$.selected_team_id') IS NOT g.selected_team_id)) THEN RAISE(ABORT,'Gate game canonical identity mismatch') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_sides s WHERE s.snapshot_id=NEW.snapshot_id AND (json_extract(s.canonical_json,'$.decision')<>s.decision OR json(json_extract(s.canonical_json,'$.reason_codes'))<>json(s.reason_codes_json))) THEN RAISE(ABORT,'Gate side canonical evidence mismatch') END;
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM recommendation_gate_results r WHERE r.snapshot_id=NEW.snapshot_id AND (json_extract(r.canonical_json,'$.code')<>r.gate_code OR json_extract(r.canonical_json,'$.passed')<>r.passed)) THEN RAISE(ABORT,'Gate result canonical evidence mismatch') END;
       SELECT CASE WHEN (SELECT count(*) FROM recommendation_gate_games WHERE snapshot_id=NEW.snapshot_id AND decision='recommend')<>NEW.recommended_game_count THEN RAISE(ABORT,'Recommended game count mismatch') END;
     END
     """,
@@ -639,6 +658,7 @@ PREDICTION_DECISION_SCHEMA_V13_VALIDATION_TRIGGER_STATEMENTS = (
     WHEN OLD.sealed_at IS NULL AND NEW.sealed_at IS NOT NULL BEGIN
       SELECT CASE WHEN (SELECT count(*) FROM ranking_entries WHERE snapshot_id=NEW.snapshot_id)<>NEW.entry_count THEN RAISE(ABORT,'Ranking entry count mismatch') END;
       SELECT CASE WHEN (SELECT count(*) FROM ranking_entries WHERE snapshot_id=NEW.snapshot_id AND rank_eligible=1)<>NEW.eligible_count THEN RAISE(ABORT,'Ranking eligible count mismatch') END;
+      SELECT CASE WHEN (SELECT count(recommendation_rank) FROM ranking_entries WHERE snapshot_id=NEW.snapshot_id)<>NEW.eligible_count THEN RAISE(ABORT,'Ranking recommendation rank count mismatch') END;
       SELECT CASE WHEN NEW.entry_count>0 AND ((SELECT min(ordinal) FROM ranking_entries WHERE snapshot_id=NEW.snapshot_id)<>1 OR (SELECT max(ordinal) FROM ranking_entries WHERE snapshot_id=NEW.snapshot_id)<>NEW.entry_count) THEN RAISE(ABORT,'Ranking ordinals are not contiguous') END;
       SELECT CASE WHEN NEW.eligible_count>0 AND ((SELECT min(recommendation_rank) FROM ranking_entries WHERE snapshot_id=NEW.snapshot_id AND rank_eligible=1)<>1 OR (SELECT max(recommendation_rank) FROM ranking_entries WHERE snapshot_id=NEW.snapshot_id AND rank_eligible=1)<>NEW.eligible_count) THEN RAISE(ABORT,'Recommendation ranks are not contiguous') END;
     END

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -59,6 +59,12 @@ class PredictionsIntegrityError(PredictionsRepositoryError):
     pass
 
 
+class PredictionsInputInventoryError(PredictionsIntegrityError):
+    def __init__(self, message: str, inventory: "PredictionsInputInventoryV1") -> None:
+        super().__init__(message)
+        self.inventory = inventory
+
+
 @dataclass(frozen=True, slots=True)
 class PredictionsUpstreamV1:
     model_feature_set: PersistedModelFeatureSetV1
@@ -77,6 +83,44 @@ class PredictionsUpstreamV1:
                 self.data_quality.snapshot_id,
                 self.data_quality.snapshot.checksum,
             ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class InvalidPredictionInputV1:
+    source_game_id: str
+    reason_code: str
+    retained_input_checksum: str | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "reason_code": self.reason_code,
+            "retained_input_checksum": self.retained_input_checksum,
+            "source_game_id": self.source_game_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PredictionsInputInventoryV1:
+    expected_game_ids: tuple[str, ...]
+    values: tuple[ReviewedPredictionInputV1, ...]
+    missing_game_ids: tuple[str, ...]
+    invalid_inputs: tuple[InvalidPredictionInputV1, ...]
+    validation_error: Exception | None = field(default=None, compare=False, repr=False)
+
+    @property
+    def checksum(self) -> str:
+        values = {value.source_game_id: value.checksum for value in self.values}
+        invalid = {value.source_game_id: value.as_dict() for value in self.invalid_inputs}
+        return canonical_sha256(
+            [
+                {"input_checksum": values[source_game_id], "source_game_id": source_game_id}
+                if source_game_id in values
+                else {"invalid_input": invalid[source_game_id], "source_game_id": source_game_id}
+                if source_game_id in invalid
+                else {"input_checksum": None, "source_game_id": source_game_id}
+                for source_game_id in self.expected_game_ids
+            ]
         )
 
 
@@ -204,8 +248,12 @@ class PredictionsRepository:
         return PredictionsUpstreamV1(model, quality, packet)
 
     def seal_authoring_input(self, value: ReviewedPredictionInputV1) -> ReviewedPredictionInputV1:
-        upstream = self.resolve_upstream(value.run_id)
+        upstream = self.resolve_upstream_by_snapshot_ids(
+            model_feature_set_snapshot_id=value.upstream_model_feature_set_snapshot_id
+        )
         if (
+            value.run_id != upstream.model_feature_set.run_id
+            or
             value.upstream_model_feature_set_snapshot_id != upstream.model_feature_set.snapshot_id
             or value.upstream_model_feature_set_checksum != upstream.model_feature_set.feature_set.checksum
         ):
@@ -228,9 +276,9 @@ class PredictionsRepository:
                       input_id,run_id,source_game_id,upstream_model_feature_set_snapshot_id,
                       upstream_model_feature_set_checksum,upstream_model_feature_game_checksum,
                       predictive_feature_checksum,provider_policy_json,provider_policy_checksum,
-                      home_probability,home_lower,home_upper,generated_at,sealed_at,
+                      home_probability,home_lower,home_upper,generated_at,sealed_at,market_independence_attested,
                       authoring_evidence_json,evidence_checksum,input_checksum,canonical_json,created_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         f"reviewed-analyst:{value.checksum}",
@@ -247,6 +295,7 @@ class PredictionsRepository:
                         value.home_upper,
                         value.generated_at.isoformat(),
                         value.sealed_at.isoformat(),
+                        int(value.market_independence_attested),
                         canonical_text(dict(value.authoring_evidence)),
                         value.evidence_checksum,
                         value.checksum,
@@ -256,22 +305,38 @@ class PredictionsRepository:
                 )
         except sqlite3.IntegrityError as exc:
             try:
-                existing = self.get_authoring_input(value.run_id, value.source_game_id)
+                existing = self.get_authoring_input(
+                    value.run_id,
+                    value.source_game_id,
+                    value.upstream_model_feature_set_snapshot_id,
+                )
             except PredictionsNotFoundError:
                 raise PredictionsPersistenceConflict("conflicting reviewed prediction input") from exc
             if existing.canonical_json_bytes() == value.canonical_json_bytes():
                 return existing
             raise PredictionsPersistenceConflict("conflicting reviewed prediction input") from exc
-        return self.get_authoring_input(value.run_id, value.source_game_id)
+        return self.get_authoring_input(
+            value.run_id,
+            value.source_game_id,
+            value.upstream_model_feature_set_snapshot_id,
+        )
 
-    def get_authoring_input(self, run_id: str, source_game_id: str) -> ReviewedPredictionInputV1:
+    def get_authoring_input(
+        self,
+        run_id: str,
+        source_game_id: str,
+        model_feature_set_snapshot_id: str,
+    ) -> ReviewedPredictionInputV1:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM prediction_authoring_inputs WHERE run_id=? AND source_game_id=?",
-                (validate_run_id(run_id), source_game_id),
+                "SELECT * FROM prediction_authoring_inputs WHERE run_id=? AND source_game_id=? AND upstream_model_feature_set_snapshot_id=?",
+                (validate_run_id(run_id), source_game_id, model_feature_set_snapshot_id),
             ).fetchone()
         if row is None:
             raise PredictionsNotFoundError("reviewed prediction input not found")
+        return self._authoring_from_row(row)
+
+    def _authoring_from_row(self, row: sqlite3.Row) -> ReviewedPredictionInputV1:
         value = ReviewedPredictionInputV1(
             run_id=str(row["run_id"]),
             source_game_id=str(row["source_game_id"]),
@@ -286,6 +351,10 @@ class PredictionsRepository:
             generated_at=_time(row["generated_at"], "generated_at"),
             sealed_at=_time(row["sealed_at"], "sealed_at"),
             authoring_evidence=json.loads(str(row["authoring_evidence_json"])),
+            market_independence_attested=bool(row["market_independence_attested"])
+            if isinstance(row["market_independence_attested"], int)
+            and row["market_independence_attested"] in {0, 1}
+            else row["market_independence_attested"],
             secret_values=self.secret_values,
         )
         if value.checksum != str(row["input_checksum"]) or value.canonical_json_bytes().decode("utf-8") != str(
@@ -294,18 +363,72 @@ class PredictionsRepository:
             raise PredictionsIntegrityError("reviewed prediction input evidence mismatch")
         return value
 
-    def load_input_inventory(
-        self, upstream: PredictionsUpstreamV1
-    ) -> tuple[tuple[ReviewedPredictionInputV1, ...], tuple[str, ...]]:
+    def discover_input_inventory(self, upstream: PredictionsUpstreamV1) -> PredictionsInputInventoryV1:
         expected = tuple(game.source_game_id for game in upstream.model_feature_set.feature_set.games)
         values: list[ReviewedPredictionInputV1] = []
         missing: list[str] = []
-        for source_game_id in expected:
-            try:
-                values.append(self.get_authoring_input(upstream.model_feature_set.run_id, source_game_id))
-            except PredictionsNotFoundError:
-                missing.append(source_game_id)
-        return tuple(values), tuple(missing)
+        invalid: list[InvalidPredictionInputV1] = []
+        validation_error: Exception | None = None
+        with self.database.connect() as connection:
+            for source_game_id in expected:
+                rows = connection.execute(
+                    "SELECT * FROM prediction_authoring_inputs WHERE run_id=? AND source_game_id=? AND upstream_model_feature_set_snapshot_id=? ORDER BY input_id",
+                    (upstream.model_feature_set.run_id, source_game_id, upstream.model_feature_set.snapshot_id),
+                ).fetchall()
+                if not rows:
+                    missing.append(source_game_id)
+                    continue
+                if len(rows) != 1:
+                    invalid.append(InvalidPredictionInputV1(source_game_id, "ambiguous_authoring_identity"))
+                    continue
+                row = rows[0]
+                retained = str(row["input_checksum"])
+                retained_checksum = (
+                    retained
+                    if len(retained) == 64 and all(character in "0123456789abcdef" for character in retained)
+                    else None
+                )
+                try:
+                    value = self._authoring_from_row(row)
+                    if (
+                        value.upstream_model_feature_set_snapshot_id != upstream.model_feature_set.snapshot_id
+                        or value.upstream_model_feature_set_checksum != upstream.model_feature_set.feature_set.checksum
+                    ):
+                        raise PredictionsIntegrityError("authoring input Model Feature Set identity mismatch")
+                    game = next(
+                        game
+                        for game in upstream.model_feature_set.feature_set.games
+                        if game.source_game_id == source_game_id
+                    )
+                    if (
+                        value.upstream_model_feature_game_checksum != game.checksum
+                        or value.predictive_feature_checksum != game.predictive_feature_checksum
+                        or value.provider_policy != self.provider_policy
+                    ):
+                        raise PredictionsIntegrityError("authoring input retained lineage mismatch")
+                except Exception as exc:
+                    if validation_error is None:
+                        validation_error = exc
+                    invalid.append(
+                        InvalidPredictionInputV1(source_game_id, "invalid_authoring_evidence", retained_checksum)
+                    )
+                else:
+                    values.append(value)
+        return PredictionsInputInventoryV1(
+            expected,
+            tuple(values),
+            tuple(missing),
+            tuple(invalid),
+            validation_error,
+        )
+
+    def load_input_inventory(
+        self, upstream: PredictionsUpstreamV1
+    ) -> tuple[tuple[ReviewedPredictionInputV1, ...], tuple[str, ...]]:
+        inventory = self.discover_input_inventory(upstream)
+        if inventory.invalid_inputs:
+            raise PredictionsInputInventoryError("retained reviewed prediction input is invalid", inventory)
+        return inventory.values, inventory.missing_game_ids
 
     @staticmethod
     def input_inventory_checksum(values: tuple[ReviewedPredictionInputV1, ...], expected: tuple[str, ...]) -> str:
@@ -363,6 +486,7 @@ class PredictionsRepository:
                     generated_at=authored.generated_at,
                     sealed_at=authored.sealed_at,
                     evidence_checksum=authored.evidence_checksum,
+                    market_independence_attested=authored.market_independence_attested,
                     completeness_state="degraded"
                     if feature_game.quality_disposition.value in {"degraded", "insufficient"}
                     else "complete",
@@ -404,12 +528,10 @@ class PredictionsRepository:
         upstream: PredictionsUpstreamV1,
         outcome: PredictionsAttemptOutcome,
         snapshot_checksum: str | None,
-        values: tuple[ReviewedPredictionInputV1, ...],
-        missing: tuple[str, ...],
+        inventory: PredictionsInputInventoryV1,
         warnings: tuple[Mapping[str, object], ...],
         created_at: datetime,
     ) -> PreModelAttemptManifestV1:
-        expected = tuple(game.source_game_id for game in upstream.model_feature_set.feature_set.games)
         return create_predictions_attempt_manifest(
             run_id=run_id,
             phase_attempt=attempt,
@@ -424,10 +546,11 @@ class PredictionsRepository:
             created_at=created_at,
             completed_at=created_at,
             provider_policy=self.provider_policy,
-            expected_game_ids=expected,
-            present_input_checksums=tuple(value.checksum for value in values),
-            missing_game_ids=missing,
-            input_inventory_checksum=self.input_inventory_checksum(values, expected),
+            expected_game_ids=inventory.expected_game_ids,
+            present_input_checksums=tuple(value.checksum for value in inventory.values),
+            missing_game_ids=inventory.missing_game_ids,
+            invalid_inputs=tuple(value.as_dict() for value in inventory.invalid_inputs),
+            input_inventory_checksum=inventory.checksum,
             secret_values=self.secret_values,
         )
 
@@ -440,6 +563,9 @@ class PredictionsRepository:
         policy = evidence["provider_policy"]
         if not isinstance(policy, Mapping):
             raise PredictionsIntegrityError("manifest provider policy is missing")
+        invalid_inputs = evidence["invalid_inputs"]
+        if not isinstance(invalid_inputs, list):
+            raise PredictionsIntegrityError("manifest invalid input inventory is missing")
         connection.execute(
             """
             INSERT INTO predictions_attempt_evidence(
@@ -447,10 +573,10 @@ class PredictionsRepository:
               provider_policy_json,provider_policy_checksum,
               upstream_model_feature_set_snapshot_id,upstream_model_feature_set_checksum,
               upstream_data_quality_snapshot_id,upstream_data_quality_checksum,
-              expected_game_ids_json,present_input_checksums_json,missing_game_ids_json,input_inventory_checksum,
+              expected_game_ids_json,present_input_checksums_json,missing_game_ids_json,invalid_inputs_json,invalid_input_count,input_inventory_checksum,
               outcome,snapshot_checksum,evidence_manifest_relpath,evidence_manifest_checksum,evidence_manifest_byte_count,
               warnings_json,warning_count,created_at,completed_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 manifest.run_id,
@@ -468,6 +594,8 @@ class PredictionsRepository:
                 canonical_text(evidence["expected_game_ids"]),
                 canonical_text(evidence["present_input_checksums"]),
                 canonical_text(evidence["missing_game_ids"]),
+                canonical_text(evidence["invalid_inputs"]),
+                len(invalid_inputs),
                 evidence["input_inventory_checksum"],
                 manifest.outcome,
                 manifest.snapshot_checksum,
@@ -501,11 +629,18 @@ class PredictionsRepository:
             ):
                 return existing
             raise PredictionsPersistenceConflict("conflicting immutable Predictions attempt")
-        upstream = self.resolve_upstream(run_id)
+        upstream = self.resolve_upstream_by_snapshot_ids(
+            model_feature_set_snapshot_id=predictions.upstream_model_feature_set_snapshot_id,
+            data_quality_snapshot_id=predictions.upstream_data_quality_snapshot_id,
+        )
+        if upstream.model_feature_set.run_id != validate_run_id(run_id):
+            raise PredictionsIntegrityError("Predictions replay run identity mismatch")
         replay = self.assemble(upstream, values, observed_at=predictions.observed_at)
         if replay.canonical_json_bytes() != predictions.canonical_json_bytes():
             raise PredictionsIntegrityError("Predictions snapshot is not deterministically reproducible")
         now = self._now()
+        expected = tuple(game.source_game_id for game in upstream.model_feature_set.feature_set.games)
+        inventory = PredictionsInputInventoryV1(expected, values, (), ())
         manifest = self._manifest(
             run_id=run_id,
             attempt=phase_attempt,
@@ -516,8 +651,7 @@ class PredictionsRepository:
             upstream=upstream,
             outcome=PredictionsAttemptOutcome.ASSEMBLED,
             snapshot_checksum=predictions.checksum,
-            values=values,
-            missing=(),
+            inventory=inventory,
             warnings=predictions.warnings,
             created_at=now,
         )
@@ -582,8 +716,8 @@ class PredictionsRepository:
                           scheduled_start_time,predictive_feature_checksum,upstream_model_feature_game_checksum,
                           provider_identity_json,provider_identity_checksum,home_probability,away_probability,
                           home_lower,home_upper,away_lower,away_upper,generated_at,prediction_sealed_at,
-                          evidence_checksum,prediction_checksum,canonical_json
-                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                          evidence_checksum,market_independence_attested,prediction_checksum,canonical_json
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """,
                         (
                             snapshot_id,
@@ -607,6 +741,7 @@ class PredictionsRepository:
                             game.generated_at.isoformat(),
                             game.sealed_at.isoformat(),
                             game.evidence_checksum,
+                            int(game.market_independence_attested),
                             game.checksum,
                             canonical_text(game.as_dict()),
                         ),
@@ -653,8 +788,7 @@ class PredictionsRepository:
         observed_at: datetime,
         outcome: PredictionsAttemptOutcome,
         upstream: PredictionsUpstreamV1,
-        values: tuple[ReviewedPredictionInputV1, ...],
-        missing: tuple[str, ...],
+        inventory: PredictionsInputInventoryV1,
         warnings: tuple[Mapping[str, object], ...],
     ) -> PredictionsAttemptEvidenceV1:
         if outcome is PredictionsAttemptOutcome.ASSEMBLED:
@@ -663,8 +797,7 @@ class PredictionsRepository:
             existing = self.get_attempt_evidence(run_id, phase_attempt)
         except PredictionsNotFoundError:
             existing = None
-        expected = tuple(game.source_game_id for game in upstream.model_feature_set.feature_set.games)
-        inventory_checksum = self.input_inventory_checksum(values, expected)
+        inventory_checksum = inventory.checksum
         if existing is not None:
             if (
                 existing.outcome is outcome
@@ -685,8 +818,7 @@ class PredictionsRepository:
             upstream=upstream,
             outcome=outcome,
             snapshot_checksum=None,
-            values=values,
-            missing=missing,
+            inventory=inventory,
             warnings=warnings,
             created_at=now,
         )
@@ -717,6 +849,7 @@ class PredictionsRepository:
         expected = tuple(json.loads(str(row["expected_game_ids_json"])))
         present = tuple(json.loads(str(row["present_input_checksums_json"])))
         missing = tuple(json.loads(str(row["missing_game_ids_json"])))
+        invalid = tuple(dict(value) for value in json.loads(str(row["invalid_inputs_json"])))
         warnings = tuple(dict(value) for value in json.loads(str(row["warnings_json"])))
         return create_predictions_attempt_manifest(
             run_id=str(row["run_id"]),
@@ -746,6 +879,7 @@ class PredictionsRepository:
             expected_game_ids=expected,
             present_input_checksums=present,
             missing_game_ids=missing,
+            invalid_inputs=invalid,
             input_inventory_checksum=str(row["input_inventory_checksum"]),
             secret_values=self.secret_values,
         )
@@ -835,6 +969,10 @@ class PredictionsRepository:
                 generated_at=_time(game["generated_at"], "generated_at"),
                 sealed_at=_time(game["prediction_sealed_at"], "prediction_sealed_at"),
                 evidence_checksum=str(game["evidence_checksum"]),
+                market_independence_attested=bool(game["market_independence_attested"])
+                if isinstance(game["market_independence_attested"], int)
+                and game["market_independence_attested"] in {0, 1}
+                else game["market_independence_attested"],
                 completeness_state=str(json.loads(str(game["canonical_json"])).get("completeness_state", "complete")),
             )
             for game in game_rows

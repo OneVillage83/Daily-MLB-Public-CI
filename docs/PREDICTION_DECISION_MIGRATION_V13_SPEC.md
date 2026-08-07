@@ -3,9 +3,9 @@
 Migration `prediction_decision_v1_temporal_persistence` is the single additive
 schema v13 migration for Phases 8-11. It leaves every v1-v12 statement tuple and
 identity unchanged. The final migration checksum is
-`1c17d467535a6531b920378611881634e5ef5349ac7fa3152d51597ae37f8b84`;
+`43f07d5c477d13badc533f300a9c635017d7f8b130b118166aa49e79c7a9ea9e`;
 the formal schema fingerprint is
-`9813312fe416dc0aa69c155a3da36e0d98d8ef6cb8caac46ba2bb752eab8b856`.
+`deb71b8fcdfbc22dd55c92210a2a80f7521e370ce9fb474909e11f23954937f1`.
 The formal chain contains 155 statements.
 
 ## Object inventory
@@ -34,6 +34,14 @@ child ordinals, exactly two moneyline outcomes/sides, pair counts, gate result
 counts, and contiguous recommendation ranks. Sealed snapshots and children are
 immutable and undeletable.
 
+The corrected seal validators also prove reviewed market-independence
+attestation, exact authoring-to-Model-Feature-Set identity, Gate reason/result
+equality and side/game decision consistency, and ranking completeness without
+requiring ranks to ascend in slate order. Gate rows require the exact ordered
+17-code inventory and sole-selection evidence. Ranking policies require the
+frozen V1 comparator JSON. First seal still permits only `sealed_at: NULL` to a
+non-null value; semantic mutation during that update remains prohibited.
+
 ## Evidence identity
 
 Attempts bind the exact controller attempt, upstream IDs/checksums, full policy
@@ -42,10 +50,12 @@ attempt manifest. Successful attempts alone have a snapshot checksum. Snapshot
 paths are constrained to each phase's exact content-addressed semantic path.
 Canonical child JSON checksums must agree with relational checksum columns.
 
-Prediction authoring is anchored to one Model Feature Set game. Value outcomes
+Prediction authoring is anchored to one exact Model Feature Set snapshot and
+game, and retains explicit market-independence attestation. Invalid retained
+authoring inventory is stored as durable failed-attempt evidence. Value outcomes
 retain home and away rows plus same-book pair children. Gate retains two sides
-and ordered gate results. Rankings retains every Gate game while only
-recommendations receive a rank. All histories are append-only; no mutable
+and ordered gate results whose failures exactly match reason codes. Rankings
+retains every Gate game while only recommendations receive a rank. All histories are append-only; no mutable
 latest-state row is introduced.
 
 Fresh installation and exact v12-to-v13 upgrade produce the same fingerprint.

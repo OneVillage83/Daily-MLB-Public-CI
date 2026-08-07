@@ -251,12 +251,16 @@ class PreModelAttemptManifestV1:
             if set(value) != {
                 "expected_game_ids",
                 "input_inventory_checksum",
+                "invalid_inputs",
                 "missing_game_ids",
                 "present_input_checksums",
                 "provider_policy",
             }:
                 raise PreModelEvidenceError("Predictions manifest input evidence is incomplete")
             self._validate_policy_and_inventory(value, "provider_policy", "input_inventory_checksum")
+            invalid_inputs = value["invalid_inputs"]
+            if not isinstance(invalid_inputs, list) or not all(isinstance(item, dict) for item in invalid_inputs):
+                raise PreModelEvidenceError("Predictions invalid input inventory must be an array of objects")
         elif self.phase_key == "value_engine":
             if set(value) != {"market_inventory_checksum", "policy"}:
                 raise PreModelEvidenceError("Value Engine manifest input evidence is incomplete")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import InitVar, dataclass
 from datetime import datetime, timezone
@@ -62,6 +63,17 @@ def _canonical_mapping(value: Mapping[str, object], name: str) -> Mapping[str, o
 
 def _contains_forbidden_market_key(value: object) -> bool:
     forbidden = {
+        "odds",
+        "sportsbook",
+        "sportsbook_price",
+        "market_price",
+        "implied_prob",
+        "no_vig",
+        "consensus",
+        "line",
+        "market_context",
+        "selected_offer",
+        "bookmaker_offer",
         "bookmaker",
         "bookmaker_key",
         "price",
@@ -83,7 +95,9 @@ def _contains_forbidden_market_key(value: object) -> bool:
     }
     if isinstance(value, Mapping):
         return any(
-            str(key).casefold() in forbidden or _contains_forbidden_market_key(item) for key, item in value.items()
+            re.sub(r"[^a-z0-9]+", "_", str(key).casefold()).strip("_") in forbidden
+            or _contains_forbidden_market_key(item)
+            for key, item in value.items()
         )
     if isinstance(value, list | tuple):
         return any(_contains_forbidden_market_key(item) for item in value)
@@ -157,6 +171,7 @@ class ReviewedPredictionInputV1:
     generated_at: datetime
     sealed_at: datetime
     authoring_evidence: Mapping[str, object]
+    market_independence_attested: bool
     secret_values: InitVar[Iterable[str]] = ()
 
     def __post_init__(self, secret_values: Iterable[str]) -> None:
@@ -189,6 +204,8 @@ class ReviewedPredictionInputV1:
             raise PredictionsContractError("generated_at cannot follow sealed_at")
         object.__setattr__(self, "generated_at", generated)
         object.__setattr__(self, "sealed_at", sealed)
+        if not isinstance(self.market_independence_attested, bool) or self.market_independence_attested is not True:
+            raise PredictionsContractError("reviewer must explicitly attest market independence")
         evidence = _canonical_mapping(self.authoring_evidence, "authoring_evidence")
         if _contains_forbidden_market_key(evidence):
             raise PredictionsContractError("authoring evidence contains market-derived input")
@@ -210,7 +227,7 @@ class ReviewedPredictionInputV1:
             "home_lower": self.home_lower,
             "home_probability": self.home_probability,
             "home_upper": self.home_upper,
-            "market_independent": True,
+            "market_independence_attested": self.market_independence_attested,
             "predictive_feature_checksum": self.predictive_feature_checksum,
             "provider_policy": self.provider_policy.as_dict(),
             "run_id": self.run_id,
@@ -248,6 +265,7 @@ class MoneylinePredictionV1:
     generated_at: datetime
     sealed_at: datetime
     evidence_checksum: str
+    market_independence_attested: bool
     completeness_state: str = "complete"
 
     def __post_init__(self) -> None:
@@ -270,6 +288,8 @@ class MoneylinePredictionV1:
         object.__setattr__(self, "sealed_at", sealed)
         for name in ("predictive_feature_checksum", "upstream_model_feature_game_checksum", "evidence_checksum"):
             object.__setattr__(self, name, _checksum(getattr(self, name), name))
+        if not isinstance(self.market_independence_attested, bool) or self.market_independence_attested is not True:
+            raise PredictionsContractError("prediction requires explicit market-independence attestation")
         home = _probability(self.home_probability, "home_probability")
         lower = _probability(self.home_lower, "home_lower")
         upper = _probability(self.home_upper, "home_upper")
@@ -307,7 +327,7 @@ class MoneylinePredictionV1:
             "home_probability": self.home_probability,
             "home_team_id": self.home_team_id,
             "home_upper": self.home_upper,
-            "market_independence_attestation": True,
+            "market_independence_attestation": self.market_independence_attested,
             "ordinal": self.ordinal,
             "predictive_feature_checksum": self.predictive_feature_checksum,
             "provider_identity": self.provider_policy.as_dict(),

@@ -357,10 +357,10 @@ def _numeric(value: object) -> float:
     return float(value)
 
 
-def _offers(outcome: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
+def _offers(outcome: Mapping[str, object]) -> dict[str, tuple[Mapping[str, object], ...]]:
     raw = outcome.get("selected_offers_by_book")
     if isinstance(raw, Mapping):
-        return {str(key): value for key, value in raw.items() if isinstance(value, Mapping)}
+        return {str(key): (value,) for key, value in raw.items() if isinstance(value, Mapping)}
     retained = outcome.get("offers")
     if not isinstance(retained, (list, tuple)):
         return {}
@@ -373,15 +373,92 @@ def _offers(outcome: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
             continue
         grouped.setdefault(bookmaker, []).append(value)
 
-    def selection_key(value: Mapping[str, object]) -> tuple[datetime, datetime, int]:
-        minimum = datetime.min.replace(tzinfo=timezone.utc)
-        effective = _timestamp(value.get("effective_provider_timestamp")) or minimum
-        retrieved = _timestamp(value.get("provider_retrieved_at")) or minimum
-        provider_order = value.get("provider_order")
-        ordinal = provider_order if isinstance(provider_order, int) and not isinstance(provider_order, bool) else 0
-        return effective, retrieved, ordinal
+    return {
+        bookmaker: tuple(
+            sorted(values, key=lambda value: canonical_sha256(dict(value)))
+        )
+        for bookmaker, values in grouped.items()
+    }
 
-    return {bookmaker: max(values, key=selection_key) for bookmaker, values in grouped.items()}
+
+def _provider_order(value: Mapping[str, object]) -> int:
+    raw = value.get("provider_order")
+    return raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
+
+
+def _compatible_pair(
+    bookmaker_key: str,
+    home_offer: Mapping[str, object],
+    away_offer: Mapping[str, object],
+    *,
+    evaluated_at: datetime,
+    policy: ValuePolicyV1,
+) -> tuple[EligibleBookPairV1 | None, str, tuple[object, ...] | None]:
+    if home_offer.get("calculation_eligible") not in {None, True} or away_offer.get(
+        "calculation_eligible"
+    ) not in {None, True}:
+        return None, "malformed", None
+    try:
+        home_price = _numeric(home_offer["price"])
+        away_price = _numeric(away_offer["price"])
+        home_implied = american_to_implied_probability(home_price)
+        away_implied = american_to_implied_probability(away_price)
+    except (KeyError, TypeError, ValueError):
+        return None, "malformed", None
+    home_effective = _timestamp(home_offer.get("effective_provider_timestamp"))
+    away_effective = _timestamp(away_offer.get("effective_provider_timestamp"))
+    home_retrieved = _timestamp(home_offer.get("provider_retrieved_at")) or _timestamp(
+        home_offer.get("retrieved_at")
+    )
+    away_retrieved = _timestamp(away_offer.get("provider_retrieved_at")) or _timestamp(
+        away_offer.get("retrieved_at")
+    )
+    if None in {home_effective, away_effective, home_retrieved, away_retrieved}:
+        return None, "malformed", None
+    assert home_effective is not None and away_effective is not None
+    assert home_retrieved is not None and away_retrieved is not None
+    if (
+        abs((home_effective - away_effective).total_seconds())
+        > policy.maximum_pair_timestamp_skew_seconds
+        or abs((home_retrieved - away_retrieved).total_seconds())
+        > policy.maximum_pair_timestamp_skew_seconds
+    ):
+        return None, "timestamp_skew", None
+    effective = max(home_effective, away_effective)
+    retrieval = max(home_retrieved, away_retrieved)
+    age = (evaluated_at - effective).total_seconds()
+    if age < -policy.maximum_future_skew_seconds:
+        return None, "future", None
+    if age > policy.maximum_odds_age_seconds:
+        return None, "stale", None
+    overround = home_implied + away_implied
+    home_checksum = canonical_sha256(dict(home_offer))
+    away_checksum = canonical_sha256(dict(away_offer))
+    evidence = canonical_sha256(
+        {"away": dict(away_offer), "bookmaker_key": bookmaker_key, "home": dict(home_offer)}
+    )
+    pair = EligibleBookPairV1(
+        bookmaker_key,
+        home_price,
+        away_price,
+        home_implied,
+        away_implied,
+        home_implied / overround,
+        away_implied / overround,
+        effective,
+        retrieval,
+        evidence,
+    )
+    selection_key: tuple[object, ...] = (
+        min(home_effective, away_effective),
+        min(home_retrieved, away_retrieved),
+        max(home_effective, away_effective),
+        max(home_retrieved, away_retrieved),
+        min(_provider_order(home_offer), _provider_order(away_offer)),
+        home_checksum,
+        away_checksum,
+    )
+    return pair, "", selection_key
 
 
 def calculate_game_value(
@@ -408,66 +485,28 @@ def calculate_game_value(
             if book not in home_offers or book not in away_offers:
                 excluded["incomplete_pair"] += 1
                 continue
-            first, second = home_offers[book], away_offers[book]
-            first_eligible = first.get("calculation_eligible")
-            second_eligible = second.get("calculation_eligible")
-            if (first_eligible is not None and first_eligible is not True) or (
-                second_eligible is not None and second_eligible is not True
-            ):
-                excluded["malformed"] += 1
+            compatible: list[tuple[tuple[object, ...], EligibleBookPairV1]] = []
+            rejected_reasons: set[str] = set()
+            for home_offer in home_offers[book]:
+                for away_offer in away_offers[book]:
+                    pair, reason, selection_key = _compatible_pair(
+                        book,
+                        home_offer,
+                        away_offer,
+                        evaluated_at=evaluated,
+                        policy=policy,
+                    )
+                    if pair is None or selection_key is None:
+                        rejected_reasons.add(reason)
+                    else:
+                        compatible.append((selection_key, pair))
+            if compatible:
+                pairs.append(max(compatible, key=lambda item: item[0])[1])
                 continue
-            try:
-                home_price, away_price = _numeric(first["price"]), _numeric(second["price"])
-                home_implied = american_to_implied_probability(home_price)
-                away_implied = american_to_implied_probability(away_price)
-            except (KeyError, TypeError, ValueError):
-                excluded["malformed"] += 1
-                continue
-            first_time = _timestamp(first.get("effective_provider_timestamp"))
-            second_time = _timestamp(second.get("effective_provider_timestamp"))
-            first_retrieval = _timestamp(first.get("provider_retrieved_at")) or _timestamp(first.get("retrieved_at"))
-            second_retrieval = _timestamp(second.get("provider_retrieved_at")) or _timestamp(second.get("retrieved_at"))
-            retrieval = (
-                max(value for value in (first_retrieval, second_retrieval) if value is not None)
-                if first_retrieval is not None and second_retrieval is not None
-                else first_retrieval or second_retrieval or evaluated
-            )
-            if first_time is None or second_time is None:
-                excluded["malformed"] += 1
-                continue
-            if (
-                abs((first_time - second_time).total_seconds()) > policy.maximum_pair_timestamp_skew_seconds
-                or first_retrieval is None
-                or second_retrieval is None
-                or abs((first_retrieval - second_retrieval).total_seconds())
-                > policy.maximum_pair_timestamp_skew_seconds
-            ):
-                excluded["timestamp_skew"] += 1
-                continue
-            effective = max(first_time, second_time)
-            age = (evaluated - effective).total_seconds()
-            if age < -policy.maximum_future_skew_seconds:
-                excluded["future"] += 1
-                continue
-            if age > policy.maximum_odds_age_seconds:
-                excluded["stale"] += 1
-                continue
-            overround = home_implied + away_implied
-            evidence = canonical_sha256({"away": dict(second), "bookmaker_key": book, "home": dict(first)})
-            pairs.append(
-                EligibleBookPairV1(
-                    book,
-                    home_price,
-                    away_price,
-                    home_implied,
-                    away_implied,
-                    home_implied / overround,
-                    away_implied / overround,
-                    effective,
-                    retrieval,
-                    evidence,
-                )
-            )
+            for reason in ("malformed", "future", "stale", "timestamp_skew"):
+                if reason in rejected_reasons:
+                    excluded[reason] += 1
+                    break
     pairs_tuple = tuple(pairs)
 
     def outcome_value(side: str) -> MoneylineOutcomeValueV1:

@@ -154,16 +154,17 @@ class RankingsRepository:
         metrics = {}
         for value_game in value.value_engine.games:
             gate_game = next(x for x in g.gate.games if x.source_game_id == value_game.source_game_id)
-            outcome = next(
-                (x for x in value_game.outcomes if x.side == gate_game.selected_side), value_game.outcomes[0]
-            )
+            outcome = next((x for x in value_game.outcomes if x.side == gate_game.selected_side), None)
+            if gate_game.decision == "recommend" and outcome is None:
+                raise RankingsIntegrityError("recommended game is missing its selected Value outcome")
+            audit_outcome = value_game.outcomes[0] if outcome is None else outcome
             metrics[value_game.source_game_id] = {
-                "bookmaker_count": len(outcome.eligible_pairs),
-                "edge": outcome.edge or 0.0,
-                "ev": outcome.expected_value_per_unit or 0.0,
+                "bookmaker_count": len(audit_outcome.eligible_pairs),
+                "edge": audit_outcome.edge,
+                "ev": audit_outcome.expected_value_per_unit,
                 "interval_width": pred_by[value_game.source_game_id].home_upper
                 - pred_by[value_game.source_game_id].home_lower,
-                "lower_bound_clearance": outcome.lower_bound_clearance or 0.0,
+                "lower_bound_clearance": audit_outcome.lower_bound_clearance,
             }
         return build_rankings(
             g.gate,
@@ -544,17 +545,17 @@ class RankingsRepository:
         metrics: dict[str, Mapping[str, object]] = {}
         for value_game in value.value_engine.games:
             gate_game = next(game for game in gate.gate.games if game.source_game_id == value_game.source_game_id)
-            outcome = next(
-                (item for item in value_game.outcomes if item.side == gate_game.selected_side),
-                value_game.outcomes[0],
-            )
+            outcome = next((item for item in value_game.outcomes if item.side == gate_game.selected_side), None)
+            if gate_game.decision == "recommend" and outcome is None:
+                raise RankingsIntegrityError("historical recommended game lacks selected Value outcome")
+            audit_outcome = value_game.outcomes[0] if outcome is None else outcome
             prediction = predictions_by_game[value_game.source_game_id]
             metrics[value_game.source_game_id] = {
-                "bookmaker_count": len(outcome.eligible_pairs),
-                "edge": outcome.edge or 0.0,
-                "ev": outcome.expected_value_per_unit or 0.0,
+                "bookmaker_count": len(audit_outcome.eligible_pairs),
+                "edge": audit_outcome.edge,
+                "ev": audit_outcome.expected_value_per_unit,
                 "interval_width": prediction.home_upper - prediction.home_lower,
-                "lower_bound_clearance": outcome.lower_bound_clearance or 0.0,
+                "lower_bound_clearance": audit_outcome.lower_bound_clearance,
             }
         replay = build_rankings(
             gate.gate,

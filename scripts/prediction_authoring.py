@@ -5,6 +5,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -53,6 +54,7 @@ def _templates(repository: PredictionsRepository, run_id: str) -> list[dict[str,
             "home_team_id": game.home_team_id,
             "home_upper": None,
             "market_context_exposed": False,
+            "market_independence_attested": False,
             "predictive_feature_checksum": game.predictive_feature_checksum,
             "predictive_features": game.feature_map(),
             "provider_policy": repository.provider_policy.as_dict(),
@@ -94,6 +96,7 @@ def _value(payload: dict[str, object], repository: PredictionsRepository) -> Rev
         generated_at=datetime.fromisoformat(str(payload["generated_at"]).replace("Z", "+00:00")),
         sealed_at=datetime.fromisoformat(str(payload["sealed_at"]).replace("Z", "+00:00")),
         authoring_evidence=evidence,
+        market_independence_attested=cast(bool, payload.get("market_independence_attested")),
         secret_values=repository.secret_values,
     )
 

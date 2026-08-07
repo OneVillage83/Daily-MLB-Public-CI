@@ -10,6 +10,7 @@ from app.identifiers import parse_requested_date, validate_run_id
 from app.predictions.production import PREDICTIONS_PHASE_INPUT_CONTRACT, PredictionProviderPolicyV1
 from app.predictions.repository import (
     PredictionsAttemptOutcome,
+    PredictionsInputInventoryV1,
     PredictionsRepository,
     PredictionsUpstreamV1,
 )
@@ -105,11 +106,11 @@ class PredictionsPhaseHandler:
         as_of = self._context(context)
         upstream = self.repository.resolve_upstream(context.run_id)
         observed_at = self._observed()
-        values, missing = self.repository.load_input_inventory(upstream)
-        expected = tuple(game.source_game_id for game in upstream.model_feature_set.feature_set.games)
-        inventory_checksum = self.repository.input_inventory_checksum(values, expected)
-        input_checksum = self._input_checksum(context, as_of, observed_at, upstream, inventory_checksum)
+        inventory: PredictionsInputInventoryV1 | None = None
+        input_checksum: str | None = None
         try:
+            inventory = self.repository.discover_input_inventory(upstream)
+            input_checksum = self._input_checksum(context, as_of, observed_at, upstream, inventory.checksum)
             if (
                 upstream.model_feature_set.feature_set.requested_date != context.requested_date
                 or upstream.model_feature_set.feature_set.as_of_time != as_of
@@ -117,24 +118,30 @@ class PredictionsPhaseHandler:
                 raise PredictionsPhaseHandlerError("context does not match sealed Model Feature Set")
             if observed_at < upstream.model_feature_set.feature_set.observed_at:
                 raise PredictionsPhaseHandlerError("prediction boundary precedes Model Feature Set")
-            if missing:
+            if inventory.invalid_inputs:
+                if inventory.validation_error is not None:
+                    raise inventory.validation_error
+                raise PredictionsPhaseHandlerError("retained reviewed prediction input is invalid")
+            if inventory.missing_game_ids:
                 raise PredictionsPhaseHandlerError("reviewed prediction input is missing for one or more games")
         except Exception as exc:
-            try:
-                self.repository.persist_failed_attempt(
-                    run_id=context.run_id,
-                    phase_attempt=context.attempt_number,
-                    phase_input_checksum=input_checksum,
-                    observed_at=observed_at,
-                    outcome=PredictionsAttemptOutcome.INPUT_FAILED,
-                    upstream=upstream,
-                    values=values,
-                    missing=missing,
-                    warnings=self._warning("predictions_input_failed", exc),
-                )
-            except Exception as retained_exc:
-                exc.add_note(f"failed-attempt evidence error: {type(retained_exc).__name__}")
+            if inventory is not None and input_checksum is not None:
+                try:
+                    self.repository.persist_failed_attempt(
+                        run_id=context.run_id,
+                        phase_attempt=context.attempt_number,
+                        phase_input_checksum=input_checksum,
+                        observed_at=observed_at,
+                        outcome=PredictionsAttemptOutcome.INPUT_FAILED,
+                        upstream=upstream,
+                        inventory=inventory,
+                        warnings=self._warning("predictions_input_failed", exc),
+                    )
+                except Exception as retained_exc:
+                    exc.add_note(f"failed-attempt evidence error: {type(retained_exc).__name__}")
             raise
+        assert inventory is not None and input_checksum is not None
+        values = inventory.values
         try:
             snapshot = self.repository.assemble(upstream, values, observed_at=observed_at)
         except Exception as exc:
@@ -146,8 +153,7 @@ class PredictionsPhaseHandler:
                     observed_at=observed_at,
                     outcome=PredictionsAttemptOutcome.VALIDATION_FAILED,
                     upstream=upstream,
-                    values=values,
-                    missing=(),
+                    inventory=inventory,
                     warnings=self._warning("predictions_validation_failed", exc),
                 )
             except Exception as retained_exc:
@@ -170,8 +176,7 @@ class PredictionsPhaseHandler:
                     observed_at=observed_at,
                     outcome=PredictionsAttemptOutcome.PERSISTENCE_FAILED,
                     upstream=upstream,
-                    values=values,
-                    missing=(),
+                    inventory=inventory,
                     warnings=self._warning("predictions_persistence_failed", exc),
                 )
             except Exception as retained_exc:

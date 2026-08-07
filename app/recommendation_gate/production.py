@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import InitVar, dataclass
+from dataclasses import InitVar, dataclass, replace
 from datetime import datetime, timezone
 
+from app.data_quality.contracts import DataQualityGameV1, QualityDomain, QualityIssueSeverity
 from app.daily_slate.contracts import canonical_json_bytes, canonical_sha256
 from app.identifiers import parse_requested_date, validate_run_id
+from app.predictions.production import MoneylinePredictionV1
 from app.redaction import redact_value
 from app.value_engine.production import MoneylineOutcomeValueV1, ProductionValueEngineV1
 
@@ -31,6 +33,21 @@ GATE_CODES = (
     "event_pregame",
     "opposing_side_not_selected",
 )
+RISK_GATE_CODES = frozenset(
+    {
+        "data_quality_model_ready",
+        "uncertainty_acceptable",
+        "lineup_and_starter_risk",
+        "weather_evidence_acceptable",
+        "event_pregame",
+    }
+)
+OPPORTUNITY_GATE_CODES = frozenset(GATE_CODES) - RISK_GATE_CODES - {
+    "prediction_valid",
+    "prediction_market_independent",
+    "prediction_identity_valid",
+    "feature_lineage_valid",
+}
 
 
 class RecommendationGateProductionError(ValueError):
@@ -98,6 +115,10 @@ class GateResultV1:
     def __post_init__(self) -> None:
         if self.code not in GATE_CODES or self.ordinal != GATE_CODES.index(self.code) + 1:
             raise RecommendationGateProductionError("gate code/ordinal is invalid")
+        if not isinstance(self.passed, bool):
+            raise RecommendationGateProductionError("gate passed state must be Boolean")
+        if not self.reason or self.reason != self.reason.strip():
+            raise RecommendationGateProductionError("gate reason must be nonblank")
         object.__setattr__(self, "evaluated_at", _utc(self.evaluated_at, "evaluated_at"))
 
     def identity_dict(self) -> dict[str, object]:
@@ -135,6 +156,16 @@ class GateSideEvaluationV1:
             raise RecommendationGateProductionError("gate side or decision is invalid")
         if tuple(result.code for result in self.results) != GATE_CODES:
             raise RecommendationGateProductionError("gate result inventory is incomplete")
+        failed_codes = tuple(result.code for result in self.results if not result.passed)
+        if self.reason_codes != failed_codes:
+            raise RecommendationGateProductionError("reason codes must exactly equal failed gate codes")
+        risk_failures = RISK_GATE_CODES.intersection(failed_codes)
+        if self.decision == "recommend" and failed_codes:
+            raise RecommendationGateProductionError("recommended side cannot contain a failed gate")
+        if self.decision == "pass" and (not failed_codes or risk_failures):
+            raise RecommendationGateProductionError("pass requires only opportunity or selection failures")
+        if self.decision == "avoid" and not risk_failures:
+            raise RecommendationGateProductionError("avoid requires at least one risk gate failure")
 
     def identity_dict(self) -> dict[str, object]:
         return {
@@ -173,8 +204,28 @@ class GateGameV1:
             raise RecommendationGateProductionError("gate game must retain both sides")
         if (self.decision == "recommend") != (self.selected_side is not None and self.selected_team_id is not None):
             raise RecommendationGateProductionError("selected recommendation identity mismatch")
-        if sum(side.decision == "recommend" for side in self.sides) > 1:
-            raise RecommendationGateProductionError("at most one side may be recommended")
+        recommended = tuple(side for side in self.sides if side.decision == "recommend")
+        if len(recommended) != (1 if self.decision == "recommend" else 0):
+            raise RecommendationGateProductionError("game decision must agree with its side decisions")
+        if recommended and (
+            self.selected_side != recommended[0].side or self.selected_team_id != recommended[0].outcome_team_id
+        ):
+            raise RecommendationGateProductionError("selected recommendation does not match the recommended side")
+        if self.decision == "avoid" and not any(side.decision == "avoid" for side in self.sides):
+            raise RecommendationGateProductionError("avoid game requires an avoided side")
+        if self.decision == "pass" and any(side.decision != "pass" for side in self.sides):
+            raise RecommendationGateProductionError("pass game requires both sides to pass")
+        selection = {
+            side.side: next(result for result in side.results if result.code == "opposing_side_not_selected")
+            for side in self.sides
+        }
+        if recommended:
+            if not selection[recommended[0].side].passed or any(
+                result.passed for side, result in selection.items() if side != recommended[0].side
+            ):
+                raise RecommendationGateProductionError("selection gates disagree with the sole recommendation")
+        elif any(result.passed for result in selection.values()):
+            raise RecommendationGateProductionError("unrecommended game cannot claim a selected side")
 
     def identity_dict(self) -> dict[str, object]:
         return {
@@ -258,17 +309,41 @@ class ProductionRecommendationGateV1:
 def _gate_results(
     value: MoneylineOutcomeValueV1,
     *,
+    prediction: MoneylinePredictionV1,
+    quality_game: DataQualityGameV1,
     policy: RecommendationPolicyV1,
     evaluated_at: datetime,
-    model_ready: bool,
     pregame: bool,
 ) -> tuple[GateResultV1, ...]:
     interval_width = value.probability_upper - value.probability_lower
+    prediction_valid = prediction.checksum == value.prediction_checksum
+    prediction_identity_valid = value.outcome_team_id == (
+        prediction.home_team_id if value.side == "home" else prediction.away_team_id
+    )
+    feature_lineage_valid = bool(
+        prediction.predictive_feature_checksum and prediction.upstream_model_feature_game_checksum
+    )
+    relevant_severities = {QualityIssueSeverity.WARNING, QualityIssueSeverity.CRITICAL}
+    lineup_issues = tuple(
+        issue.code
+        for issue in quality_game.issues
+        if issue.domain in {QualityDomain.STARTER, QualityDomain.LINEUP} and issue.severity in relevant_severities
+    )
+    weather_issues = tuple(
+        issue.code
+        for issue in quality_game.issues
+        if issue.domain is QualityDomain.WEATHER and issue.severity in relevant_severities
+    )
+    model_ready = quality_game.disposition.value not in {"degraded", "insufficient"}
     observed: dict[str, tuple[object, object, bool]] = {
-        "prediction_valid": (True, True, True),
-        "prediction_market_independent": (True, True, True),
-        "prediction_identity_valid": (True, True, True),
-        "feature_lineage_valid": (True, True, True),
+        "prediction_valid": (value.prediction_checksum, prediction.checksum, prediction_valid),
+        "prediction_market_independent": (True, prediction.market_independence_attested, prediction.market_independence_attested),
+        "prediction_identity_valid": (value.outcome_team_id, value.outcome_team_id if prediction_identity_valid else None, prediction_identity_valid),
+        "feature_lineage_valid": (
+            prediction.upstream_model_feature_game_checksum,
+            prediction.predictive_feature_checksum,
+            feature_lineage_valid,
+        ),
         "market_supported": ("available", value.availability, value.availability == "available"),
         "minimum_bookmaker_count": (
             policy.minimum_fresh_bookmakers,
@@ -295,10 +370,10 @@ def _gate_results(
             interval_width,
             interval_width <= policy.maximum_interval_width,
         ),
-        "lineup_and_starter_risk": (True, model_ready, model_ready),
-        "weather_evidence_acceptable": (True, model_ready, model_ready),
+        "lineup_and_starter_risk": ([], list(lineup_issues), not lineup_issues),
+        "weather_evidence_acceptable": ([], list(weather_issues), not weather_issues),
         "event_pregame": (True, pregame, pregame),
-        "opposing_side_not_selected": (True, True, True),
+        "opposing_side_not_selected": ("sole_recommendation", None, False),
     }
     return tuple(
         GateResultV1(
@@ -307,7 +382,16 @@ def _gate_results(
             seen,
             passed,
             "passed" if passed else f"{code} failed",
-            value.checksum,
+            prediction.checksum
+            if code in {
+                "prediction_valid",
+                "prediction_market_independent",
+                "prediction_identity_valid",
+                "feature_lineage_valid",
+            }
+            else quality_game.checksum
+            if code in {"data_quality_model_ready", "lineup_and_starter_risk", "weather_evidence_acceptable"}
+            else value.checksum,
             evaluated_at,
             policy.checksum,
             ordinal,
@@ -320,7 +404,8 @@ def _gate_results(
 def evaluate_recommendation_gate(
     value: ProductionValueEngineV1,
     *,
-    quality_by_game: Mapping[str, str],
+    predictions_by_game: Mapping[str, MoneylinePredictionV1],
+    quality_games_by_id: Mapping[str, DataQualityGameV1],
     scheduled_start_by_game: Mapping[str, datetime],
     policy: RecommendationPolicyV1,
     evaluated_at: datetime,
@@ -329,46 +414,74 @@ def evaluate_recommendation_gate(
     evaluated = _utc(evaluated_at, "evaluated_at")
     games: list[GateGameV1] = []
     for game in value.games:
-        quality = quality_by_game[game.source_game_id]
-        model_ready = quality not in {"degraded", "insufficient"}
+        prediction = predictions_by_game[game.source_game_id]
+        quality_game = quality_games_by_id[game.source_game_id]
+        quality = quality_game.disposition.value
         pregame = evaluated < _utc(scheduled_start_by_game[game.source_game_id], "scheduled_start")
-        side_rows: list[GateSideEvaluationV1] = []
-        candidates: list[tuple[float, float, str]] = []
+        result_rows: list[tuple[MoneylineOutcomeValueV1, tuple[GateResultV1, ...]]] = []
+        candidates: list[tuple[float, float, float, str, str]] = []
         for outcome in game.outcomes:
             results = _gate_results(
-                outcome, policy=policy, evaluated_at=evaluated, model_ready=model_ready, pregame=pregame
+                outcome,
+                prediction=prediction,
+                quality_game=quality_game,
+                policy=policy,
+                evaluated_at=evaluated,
+                pregame=pregame,
             )
-            failures = tuple(result.code for result in results if not result.passed)
-            avoid_codes = {
-                "data_quality_model_ready",
-                "uncertainty_acceptable",
-                "lineup_and_starter_risk",
-                "weather_evidence_acceptable",
-                "event_pregame",
-            }
-            decision = "avoid" if avoid_codes.intersection(failures) else "recommend" if not failures else "pass"
-            if decision == "recommend":
-                candidates.append((outcome.expected_value_per_unit or -999.0, outcome.edge or -999.0, outcome.side))
+            independent_failures = tuple(
+                result.code
+                for result in results
+                if not result.passed and result.code != "opposing_side_not_selected"
+            )
+            if not independent_failures:
+                if (
+                    outcome.expected_value_per_unit is None
+                    or outcome.edge is None
+                    or outcome.lower_bound_clearance is None
+                ):
+                    raise RecommendationGateProductionError("qualified side is missing value metrics")
+                candidates.append(
+                    (
+                        outcome.expected_value_per_unit,
+                        outcome.edge,
+                        outcome.lower_bound_clearance,
+                        outcome.outcome_team_id,
+                        outcome.side,
+                    )
+                )
+            result_rows.append((outcome, results))
+        winner = max(candidates)[-1] if candidates else None
+        side_rows: list[GateSideEvaluationV1] = []
+        selected_team = next(
+            (outcome.outcome_team_id for outcome, _ in result_rows if outcome.side == winner), None
+        )
+        for outcome, results in result_rows:
+            selected = outcome.side == winner
+            finalized = tuple(
+                replace(
+                    result,
+                    passed=selected,
+                    threshold="sole_recommendation",
+                    observed_value=selected_team,
+                    reason="passed" if selected else "opposing side selected" if winner else "no side selected",
+                )
+                if result.code == "opposing_side_not_selected"
+                else result
+                for result in results
+            )
+            failures = tuple(result.code for result in finalized if not result.passed)
+            decision = "avoid" if RISK_GATE_CODES.intersection(failures) else "recommend" if not failures else "pass"
             side_rows.append(
                 GateSideEvaluationV1(
-                    outcome.side, outcome.outcome_team_id, decision, outcome.checksum, results, failures
+                    outcome.side,
+                    outcome.outcome_team_id,
+                    decision,
+                    outcome.checksum,
+                    finalized,
+                    failures,
                 )
             )
-        if len(candidates) > 1:
-            winner = max(candidates)[2]
-            side_rows = [
-                side
-                if side.side == winner
-                else GateSideEvaluationV1(
-                    side.side,
-                    side.outcome_team_id,
-                    "pass",
-                    side.value_checksum,
-                    side.results,
-                    tuple(sorted((*side.reason_codes, "opposing_side_not_selected"))),
-                )
-                for side in side_rows
-            ]
         recommended = next((side for side in side_rows if side.decision == "recommend"), None)
         decision = (
             "recommend" if recommended else "avoid" if any(side.decision == "avoid" for side in side_rows) else "pass"

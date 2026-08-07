@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import InitVar, dataclass
 from datetime import datetime, timezone
+import math
 
 from app.daily_slate.contracts import canonical_json_bytes, canonical_sha256
 from app.identifiers import parse_requested_date, validate_run_id
@@ -12,6 +13,19 @@ from app.redaction import redact_value
 RANKINGS_PRODUCTION_CONTRACT = "DSE_MLB_ML_RANKINGS_V1"
 RANKINGS_PHASE_INPUT_CONTRACT = "DSE_MLB_ML_RANKINGS_PHASE_INPUT_V1"
 RANKING_POLICY_VERSION = "DSE_MLB_ML_LEXICOGRAPHIC_RANKING_V1"
+RANKING_V1_COMPARATOR = (
+    "decision_eligibility",
+    "ev_desc",
+    "edge_desc",
+    "lower_bound_clearance_desc",
+    "interval_width_asc",
+    "data_quality_disposition",
+    "bookmaker_count_desc",
+    "scheduled_start_time",
+    "source_game_id",
+    "selected_team_id",
+)
+DATA_QUALITY_RANK = {"ready": 0, "degraded": 2, "insufficient": 3}
 
 
 class RankingsProductionError(ValueError):
@@ -26,23 +40,12 @@ def _utc(value: datetime, name: str) -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class RankingPolicyV1:
-    comparator: tuple[str, ...] = (
-        "decision_eligibility",
-        "ev_desc",
-        "edge_desc",
-        "lower_bound_clearance_desc",
-        "interval_width_asc",
-        "data_quality_disposition",
-        "bookmaker_count_desc",
-        "scheduled_start_time",
-        "source_game_id",
-        "selected_team_id",
-    )
+    comparator: tuple[str, ...] = RANKING_V1_COMPARATOR
     policy_version: str = RANKING_POLICY_VERSION
 
     def __post_init__(self) -> None:
-        if len(self.comparator) != len(set(self.comparator)) or not self.comparator:
-            raise RankingsProductionError("ranking comparator must be nonempty and unique")
+        if self.comparator != RANKING_V1_COMPARATOR:
+            raise RankingsProductionError("V1 ranking comparator must match the frozen policy")
 
     def identity_dict(self) -> dict[str, object]:
         return {"comparator": list(self.comparator), "policy_version": self.policy_version}
@@ -74,6 +77,12 @@ class RankingEntryV1:
             raise RankingsProductionError("rank eligibility must equal recommendation decision")
         if self.rank_eligible != (self.recommendation_rank is not None):
             raise RankingsProductionError("recommendation rank identity mismatch")
+        if self.recommendation_rank is not None and (
+            isinstance(self.recommendation_rank, bool)
+            or not isinstance(self.recommendation_rank, int)
+            or self.recommendation_rank < 1
+        ):
+            raise RankingsProductionError("recommendation rank must be a positive integer")
 
     def identity_dict(self) -> dict[str, object]:
         return {
@@ -117,8 +126,16 @@ class ProductionRankingsV1:
         object.__setattr__(self, "ranked_at", _utc(self.ranked_at, "ranked_at"))
         if [entry.ordinal for entry in self.entries] != list(range(1, len(self.entries) + 1)):
             raise RankingsProductionError("ranking ordinals must retain slate order")
-        ranks = [entry.recommendation_rank for entry in self.entries if entry.rank_eligible]
-        if ranks != list(range(1, len(ranks) + 1)):
+        ranks = [
+            entry.recommendation_rank
+            for entry in self.entries
+            if entry.rank_eligible and entry.recommendation_rank is not None
+        ]
+        if len(ranks) != sum(entry.rank_eligible for entry in self.entries) or any(
+            isinstance(rank, bool) or rank < 1 for rank in ranks
+        ):
+            raise RankingsProductionError("recommendation ranks must be positive integers")
+        if len(set(ranks)) != len(ranks) or sorted(ranks) != list(range(1, len(ranks) + 1)):
             raise RankingsProductionError("recommendation ranks must be contiguous")
         configured = tuple(str(value) for value in secret_values if str(value))
         if redact_value(self.identity_dict(), configured) != self.identity_dict():
@@ -164,29 +181,38 @@ def build_rankings(
             continue
         metrics = value_metrics_by_game[game.source_game_id]
 
-        def metric_float(name: str, default: float) -> float:
-            value = metrics.get(name, default)
+        def metric_float(name: str) -> float:
+            value = metrics.get(name)
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise RankingsProductionError(f"ranking metric {name} must be numeric")
-            return float(value)
+            result = float(value)
+            if not math.isfinite(result):
+                raise RankingsProductionError(f"ranking metric {name} must be finite")
+            return result
 
-        def metric_int(name: str, default: int) -> int:
-            value = metrics.get(name, default)
+        def metric_int(name: str) -> int:
+            value = metrics.get(name)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise RankingsProductionError(f"ranking metric {name} must be an integer")
             return value
 
+        quality = str(game.quality_disposition)
+        if quality not in DATA_QUALITY_RANK:
+            raise RankingsProductionError("ranking Data Quality disposition is invalid")
+        if game.selected_team_id is None:
+            raise RankingsProductionError("recommended game requires selected team identity")
+
         recommendations.append(
             (
-                -metric_float("ev", 0.0),
-                -metric_float("edge", 0.0),
-                -metric_float("lower_bound_clearance", 0.0),
-                metric_float("interval_width", 1.0),
-                str(game.quality_disposition),
-                -metric_int("bookmaker_count", 0),
+                -metric_float("ev"),
+                -metric_float("edge"),
+                -metric_float("lower_bound_clearance"),
+                metric_float("interval_width"),
+                DATA_QUALITY_RANK[quality],
+                -metric_int("bookmaker_count"),
                 _utc(scheduled_start_by_game[game.source_game_id], "scheduled_start"),
                 game.source_game_id,
-                game.selected_team_id or "",
+                game.selected_team_id,
                 game.source_game_id,
             )
         )

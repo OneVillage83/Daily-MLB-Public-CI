@@ -172,7 +172,8 @@ class RecommendationGateRepository:
         return RecommendationGateUpstreamV1(value, predictions, quality)
 
     def evaluate(self, u: RecommendationGateUpstreamV1, *, evaluated_at: datetime) -> ProductionRecommendationGateV1:
-        byq = {g.source_game_id: g.disposition.value for g in u.quality.snapshot.games}
+        byq = {g.source_game_id: g for g in u.quality.snapshot.games}
+        predictions_by_game = {g.source_game_id: g for g in u.predictions.predictions.games}
         pred_up = self.predictions.resolve_upstream_by_snapshot_ids(
             model_feature_set_snapshot_id=u.predictions.predictions.upstream_model_feature_set_snapshot_id,
             data_quality_snapshot_id=u.predictions.predictions.upstream_data_quality_snapshot_id,
@@ -185,7 +186,8 @@ class RecommendationGateRepository:
             starts[game.source_game_id] = scheduled_start
         return evaluate_recommendation_gate(
             u.value.value_engine,
-            quality_by_game=byq,
+            predictions_by_game=predictions_by_game,
+            quality_games_by_id=byq,
             scheduled_start_by_game=starts,
             policy=self.policy,
             evaluated_at=evaluated_at,
@@ -680,7 +682,8 @@ class RecommendationGateRepository:
             scheduled[game.source_game_id] = game.schedule.scheduled_start_time
         replay = evaluate_recommendation_gate(
             replay_repository.value.value_engine,
-            quality_by_game={game.source_game_id: game.disposition.value for game in quality.snapshot.games},
+            predictions_by_game={game.source_game_id: game for game in pred.predictions.games},
+            quality_games_by_id={game.source_game_id: game for game in quality.snapshot.games},
             scheduled_start_by_game=scheduled,
             policy=s.policy,
             evaluated_at=s.evaluated_at,

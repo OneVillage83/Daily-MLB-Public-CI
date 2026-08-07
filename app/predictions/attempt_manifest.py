@@ -34,6 +34,7 @@ def create_predictions_attempt_manifest(
     expected_game_ids: tuple[str, ...],
     present_input_checksums: tuple[str, ...],
     missing_game_ids: tuple[str, ...],
+    invalid_inputs: tuple[Mapping[str, object], ...],
     input_inventory_checksum: str,
     secret_values: Iterable[str] = (),
 ) -> PreModelAttemptManifestV1:
@@ -55,6 +56,7 @@ def create_predictions_attempt_manifest(
         phase_input_evidence={
             "expected_game_ids": list(expected_game_ids),
             "input_inventory_checksum": input_inventory_checksum,
+            "invalid_inputs": [dict(value) for value in invalid_inputs],
             "missing_game_ids": list(missing_game_ids),
             "present_input_checksums": list(present_input_checksums),
             "provider_policy": provider_policy.as_dict(),

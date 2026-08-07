@@ -41,6 +41,8 @@ from app.prediction_decision_migration import (
 
 V12_CHECKSUM = "9409445202fc362377f112dc546bacf087820b0f1fb608b08b1a542afa4950d0"
 V12_FINGERPRINT = "f597210e59f941e3e0bcdd5583dea597ee9cbbcb598a45fc23abe18144f52a22"
+V13_CHECKSUM = "43f07d5c477d13badc533f300a9c635017d7f8b130b118166aa49e79c7a9ea9e"
+V13_FINGERPRINT = "deb71b8fcdfbc22dd55c92210a2a80f7521e370ce9fb474909e11f23954937f1"
 
 
 def _install_v12(path: Path) -> None:
@@ -82,6 +84,8 @@ def test_v13_identity_and_frozen_v12_identity() -> None:
     assert FORMAL_SCHEMA_V12_FINGERPRINT == V12_FINGERPRINT
     assert MIGRATION_HISTORY[11][2] == V12_CHECKSUM
     assert MIGRATION_HISTORY[12] == (13, MIGRATION_V13_NAME, MIGRATION_V13_CHECKSUM)
+    assert MIGRATION_V13_CHECKSUM == V13_CHECKSUM
+    assert FORMAL_SCHEMA_V13_FINGERPRINT == V13_FINGERPRINT
     assert len(FORMAL_SCHEMA_V13_STATEMENTS) == 155
 
 
@@ -124,6 +128,43 @@ def test_v13_object_inventory_and_semantic_artifact_paths(tmp_path: Path) -> Non
         "rankings/snapshots/",
     ):
         assert relpath in sql
+
+
+def test_v13_correction_columns_and_seal_proofs_are_schema_owned(tmp_path: Path) -> None:
+    with Database(tmp_path / "correction-objects.db").connect() as connection:
+        authoring_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(prediction_authoring_inputs)")}
+        attempt_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(predictions_attempt_evidence)")}
+        prediction_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(prediction_games)")}
+        gate_seal = str(
+            connection.execute(
+                "SELECT sql FROM sqlite_master WHERE name='recommendation_gate_snapshots_validate_seal'"
+            ).fetchone()[0]
+        )
+        ranking_seal = str(
+            connection.execute(
+                "SELECT sql FROM sqlite_master WHERE name='ranking_snapshots_validate_seal'"
+            ).fetchone()[0]
+        )
+        rankings_attempt_sql = str(
+            connection.execute(
+                "SELECT sql FROM sqlite_master WHERE name='rankings_attempt_evidence'"
+            ).fetchone()[0]
+        )
+    assert "market_independence_attested" in authoring_columns
+    assert {"invalid_inputs_json", "invalid_input_count"} <= attempt_columns
+    assert "market_independence_attested" in prediction_columns
+    for evidence in (
+        "Gate reason codes do not equal failed results",
+        "Gate side decision disagrees with failed-result taxonomy",
+        "Gate game decision disagrees with side decisions",
+        "Gate selected-side results are inconsistent",
+        "Gate side canonical evidence mismatch",
+    ):
+        assert evidence in gate_seal
+    assert "count(recommendation_rank)" in ranking_seal
+    assert "min(recommendation_rank)" in ranking_seal
+    assert "max(recommendation_rank)" in ranking_seal
+    assert "decision_eligibility" in rankings_attempt_sql
 
 
 def test_first_seal_triggers_bind_every_snapshot_semantic_column(tmp_path: Path) -> None:

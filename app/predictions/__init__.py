@@ -37,7 +37,13 @@ from app.predictions.production import (
     PredictionsV1 as ProductionPredictionsV1,
     ReviewedPredictionInputV1,
 )
-from app.predictions.repository import PredictionsPersistenceConflict, PredictionsRepository
+from app.predictions.repository import (
+    InvalidPredictionInputV1,
+    PredictionsInputInventoryError,
+    PredictionsInputInventoryV1,
+    PredictionsPersistenceConflict,
+    PredictionsRepository,
+)
 
 __all__ = [
     "GamePredictionV1",
@@ -66,9 +72,12 @@ __all__ = [
     "PREDICTIONS_PROVIDER_POLICY_VERSION",
     "PredictionProviderPolicyV1",
     "PredictionsPhaseHandler",
+    "PredictionsInputInventoryError",
+    "PredictionsInputInventoryV1",
     "PredictionsPersistenceConflict",
     "PredictionsRepository",
     "ProductionPredictionsV1",
     "REVIEWED_ANALYST_PROVIDER_CONTRACT",
     "ReviewedPredictionInputV1",
+    "InvalidPredictionInputV1",
 ]
