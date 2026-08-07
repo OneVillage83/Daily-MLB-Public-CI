@@ -44,8 +44,8 @@ class RankingPolicyV1:
     policy_version: str = RANKING_POLICY_VERSION
 
     def __post_init__(self) -> None:
-        if self.comparator != RANKING_V1_COMPARATOR:
-            raise RankingsProductionError("V1 ranking comparator must match the frozen policy")
+        if self.comparator != RANKING_V1_COMPARATOR or self.policy_version != RANKING_POLICY_VERSION:
+            raise RankingsProductionError("V1 ranking comparator and version must match the frozen policy")
 
     def identity_dict(self) -> dict[str, object]:
         return {"comparator": list(self.comparator), "policy_version": self.policy_version}

@@ -3,9 +3,9 @@
 Migration `prediction_decision_v1_temporal_persistence` is the single additive
 schema v13 migration for Phases 8-11. It leaves every v1-v12 statement tuple and
 identity unchanged. The final migration checksum is
-`43f07d5c477d13badc533f300a9c635017d7f8b130b118166aa49e79c7a9ea9e`;
+`9606657f9497cd54444ecb35680f05d7003a0db535d2e9a1fcc594c9bbf63089`;
 the formal schema fingerprint is
-`deb71b8fcdfbc22dd55c92210a2a80f7521e370ce9fb474909e11f23954937f1`.
+`d33d27ba07d21aa35584e0afe3c39334deba30170d761897acb13e9e04a65fee`.
 The formal chain contains 155 statements.
 
 ## Object inventory
@@ -39,7 +39,9 @@ attestation, exact authoring-to-Model-Feature-Set identity, Gate reason/result
 equality and side/game decision consistency, and ranking completeness without
 requiring ranks to ascend in slate order. Gate rows require the exact ordered
 17-code inventory and sole-selection evidence. Ranking policies require the
-frozen V1 comparator JSON. First seal still permits only `sealed_at: NULL` to a
+frozen V1 comparator JSON, exact policy version, and canonical policy checksum.
+Gate sealing rejects every failed structural code, so structural corruption
+cannot be persisted as PASS or AVOID. First seal still permits only `sealed_at: NULL` to a
 non-null value; semantic mutation during that update remains prohibited.
 
 ## Evidence identity

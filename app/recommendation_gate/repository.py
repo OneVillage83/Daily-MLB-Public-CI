@@ -27,11 +27,16 @@ from app.pre_model_evidence import (
     canonical_text,
     cleanup_owned_artifact,
 )
-from app.predictions.repository import PersistedPredictionsV1, PredictionsRepository
+from app.predictions.repository import (
+    PersistedPredictionsV1,
+    PredictionsRepository,
+    PredictionsUpstreamV1,
+)
 from app.recommendation_gate.production import (
     GateGameV1,
     GateResultV1,
     GateSideEvaluationV1,
+    GateStructuralProofV1,
     ProductionRecommendationGateV1,
     RecommendationPolicyV1,
     evaluate_recommendation_gate,
@@ -171,6 +176,44 @@ class RecommendationGateRepository:
             raise RecommendationGateIntegrityError("Gate upstream lineage mismatch")
         return RecommendationGateUpstreamV1(value, predictions, quality)
 
+    @staticmethod
+    def _structural_proofs(
+        upstream: RecommendationGateUpstreamV1,
+        exact_prediction_upstream: PredictionsUpstreamV1,
+    ) -> dict[str, GateStructuralProofV1]:
+        model_feature_set = exact_prediction_upstream.model_feature_set.feature_set
+        feature_games = {game.source_game_id: game for game in model_feature_set.games}
+        prediction_games = {
+            game.source_game_id: game for game in upstream.predictions.predictions.games
+        }
+        if set(feature_games) != set(prediction_games):
+            raise RecommendationGateIntegrityError(
+                "Gate Prediction and Model Feature Set game inventories differ"
+            )
+        return {
+            source_game_id: GateStructuralProofV1(
+                source_game_id=source_game_id,
+                prediction_contract_version=upstream.predictions.predictions.contract_version,
+                prediction_source_game_id=prediction.source_game_id,
+                prediction_home_team_id=prediction.home_team_id,
+                prediction_away_team_id=prediction.away_team_id,
+                prediction_checksum=prediction.checksum,
+                prediction_upstream_model_feature_game_checksum=(
+                    prediction.upstream_model_feature_game_checksum
+                ),
+                prediction_predictive_feature_checksum=prediction.predictive_feature_checksum,
+                market_independence_attested=prediction.market_independence_attested,
+                model_feature_source_game_id=feature_games[source_game_id].source_game_id,
+                model_feature_home_team_id=feature_games[source_game_id].home_team_id,
+                model_feature_away_team_id=feature_games[source_game_id].away_team_id,
+                model_feature_game_checksum=feature_games[source_game_id].checksum,
+                model_feature_predictive_feature_checksum=(
+                    feature_games[source_game_id].predictive_feature_checksum
+                ),
+            )
+            for source_game_id, prediction in prediction_games.items()
+        }
+
     def evaluate(self, u: RecommendationGateUpstreamV1, *, evaluated_at: datetime) -> ProductionRecommendationGateV1:
         byq = {g.source_game_id: g for g in u.quality.snapshot.games}
         predictions_by_game = {g.source_game_id: g for g in u.predictions.predictions.games}
@@ -187,6 +230,7 @@ class RecommendationGateRepository:
         return evaluate_recommendation_gate(
             u.value.value_engine,
             predictions_by_game=predictions_by_game,
+            structural_proofs_by_game=self._structural_proofs(u, pred_up),
             quality_games_by_id=byq,
             scheduled_start_by_game=starts,
             policy=self.policy,
@@ -683,6 +727,7 @@ class RecommendationGateRepository:
         replay = evaluate_recommendation_gate(
             replay_repository.value.value_engine,
             predictions_by_game={game.source_game_id: game for game in pred.predictions.games},
+            structural_proofs_by_game=self._structural_proofs(replay_repository, exact_pred_up),
             quality_games_by_id={game.source_game_id: game for game in quality.snapshot.games},
             scheduled_start_by_game=scheduled,
             policy=s.policy,

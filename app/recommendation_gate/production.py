@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from app.data_quality.contracts import DataQualityGameV1, QualityDomain, QualityIssueSeverity
 from app.daily_slate.contracts import canonical_json_bytes, canonical_sha256
 from app.identifiers import parse_requested_date, validate_run_id
-from app.predictions.production import MoneylinePredictionV1
+from app.predictions.production import (
+    PREDICTIONS_CONTRACT_VERSION,
+    MoneylinePredictionV1,
+)
 from app.redaction import redact_value
 from app.value_engine.production import MoneylineOutcomeValueV1, ProductionValueEngineV1
 
@@ -42,12 +45,15 @@ RISK_GATE_CODES = frozenset(
         "event_pregame",
     }
 )
-OPPORTUNITY_GATE_CODES = frozenset(GATE_CODES) - RISK_GATE_CODES - {
-    "prediction_valid",
-    "prediction_market_independent",
-    "prediction_identity_valid",
-    "feature_lineage_valid",
-}
+STRUCTURAL_GATE_CODES = frozenset(
+    {
+        "prediction_valid",
+        "prediction_market_independent",
+        "prediction_identity_valid",
+        "feature_lineage_valid",
+    }
+)
+OPPORTUNITY_GATE_CODES = frozenset(GATE_CODES) - RISK_GATE_CODES - STRUCTURAL_GATE_CODES
 
 
 class RecommendationGateProductionError(ValueError):
@@ -98,6 +104,57 @@ class RecommendationPolicyV1:
 
     def as_dict(self) -> dict[str, object]:
         return {**self.identity_dict(), "checksum": self.checksum}
+
+
+@dataclass(frozen=True, slots=True)
+class GateStructuralProofV1:
+    """Exact reconstructed Prediction -> Model Feature Set proof for one game."""
+
+    source_game_id: str
+    prediction_contract_version: str
+    prediction_source_game_id: str
+    prediction_home_team_id: str
+    prediction_away_team_id: str
+    prediction_checksum: str
+    prediction_upstream_model_feature_game_checksum: str
+    prediction_predictive_feature_checksum: str
+    market_independence_attested: bool
+    model_feature_source_game_id: str
+    model_feature_home_team_id: str
+    model_feature_away_team_id: str
+    model_feature_game_checksum: str
+    model_feature_predictive_feature_checksum: str
+
+    def __post_init__(self) -> None:
+        values = self.identity_dict()
+        if any(not isinstance(value, str) or not value for value in values.values() if not isinstance(value, bool)):
+            raise RecommendationGateProductionError("structural proof contains an invalid identity")
+        if not isinstance(self.market_independence_attested, bool):
+            raise RecommendationGateProductionError("market independence proof must be Boolean")
+
+    def identity_dict(self) -> dict[str, object]:
+        return {
+            "market_independence_attested": self.market_independence_attested,
+            "model_feature_away_team_id": self.model_feature_away_team_id,
+            "model_feature_game_checksum": self.model_feature_game_checksum,
+            "model_feature_home_team_id": self.model_feature_home_team_id,
+            "model_feature_predictive_feature_checksum": self.model_feature_predictive_feature_checksum,
+            "model_feature_source_game_id": self.model_feature_source_game_id,
+            "prediction_away_team_id": self.prediction_away_team_id,
+            "prediction_checksum": self.prediction_checksum,
+            "prediction_contract_version": self.prediction_contract_version,
+            "prediction_home_team_id": self.prediction_home_team_id,
+            "prediction_predictive_feature_checksum": self.prediction_predictive_feature_checksum,
+            "prediction_source_game_id": self.prediction_source_game_id,
+            "prediction_upstream_model_feature_game_checksum": (
+                self.prediction_upstream_model_feature_game_checksum
+            ),
+            "source_game_id": self.source_game_id,
+        }
+
+    @property
+    def checksum(self) -> str:
+        return canonical_sha256(self.identity_dict())
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,10 +216,19 @@ class GateSideEvaluationV1:
         failed_codes = tuple(result.code for result in self.results if not result.passed)
         if self.reason_codes != failed_codes:
             raise RecommendationGateProductionError("reason codes must exactly equal failed gate codes")
+        structural_failures = STRUCTURAL_GATE_CODES.intersection(failed_codes)
+        if structural_failures:
+            raise RecommendationGateProductionError(
+                "structural gate failure cannot produce a betting decision: "
+                + ",".join(sorted(structural_failures))
+            )
         risk_failures = RISK_GATE_CODES.intersection(failed_codes)
+        opportunity_failures = OPPORTUNITY_GATE_CODES.intersection(failed_codes)
         if self.decision == "recommend" and failed_codes:
             raise RecommendationGateProductionError("recommended side cannot contain a failed gate")
-        if self.decision == "pass" and (not failed_codes or risk_failures):
+        if self.decision == "pass" and (
+            not failed_codes or risk_failures or set(failed_codes) != opportunity_failures
+        ):
             raise RecommendationGateProductionError("pass requires only opportunity or selection failures")
         if self.decision == "avoid" and not risk_failures:
             raise RecommendationGateProductionError("avoid requires at least one risk gate failure")
@@ -310,18 +376,44 @@ def _gate_results(
     value: MoneylineOutcomeValueV1,
     *,
     prediction: MoneylinePredictionV1,
+    structural_proof: GateStructuralProofV1,
+    source_game_id: str,
     quality_game: DataQualityGameV1,
     policy: RecommendationPolicyV1,
     evaluated_at: datetime,
     pregame: bool,
 ) -> tuple[GateResultV1, ...]:
     interval_width = value.probability_upper - value.probability_lower
-    prediction_valid = prediction.checksum == value.prediction_checksum
-    prediction_identity_valid = value.outcome_team_id == (
-        prediction.home_team_id if value.side == "home" else prediction.away_team_id
+    prediction_valid = (
+        structural_proof.prediction_contract_version == PREDICTIONS_CONTRACT_VERSION
+        and structural_proof.prediction_checksum == prediction.checksum
+        and prediction.checksum == value.prediction_checksum
     )
-    feature_lineage_valid = bool(
-        prediction.predictive_feature_checksum and prediction.upstream_model_feature_game_checksum
+    expected_team_id = prediction.home_team_id if value.side == "home" else prediction.away_team_id
+    prediction_identity_valid = (
+        source_game_id
+        == prediction.source_game_id
+        == structural_proof.source_game_id
+        == structural_proof.prediction_source_game_id
+        == structural_proof.model_feature_source_game_id
+        == quality_game.source_game_id
+        and prediction.home_team_id
+        == structural_proof.prediction_home_team_id
+        == structural_proof.model_feature_home_team_id
+        == quality_game.home_team_id
+        and prediction.away_team_id
+        == structural_proof.prediction_away_team_id
+        == structural_proof.model_feature_away_team_id
+        == quality_game.away_team_id
+        and value.outcome_team_id == expected_team_id
+    )
+    feature_lineage_valid = (
+        prediction.upstream_model_feature_game_checksum
+        == structural_proof.prediction_upstream_model_feature_game_checksum
+        == structural_proof.model_feature_game_checksum
+        and prediction.predictive_feature_checksum
+        == structural_proof.prediction_predictive_feature_checksum
+        == structural_proof.model_feature_predictive_feature_checksum
     )
     relevant_severities = {QualityIssueSeverity.WARNING, QualityIssueSeverity.CRITICAL}
     lineup_issues = tuple(
@@ -337,11 +429,29 @@ def _gate_results(
     model_ready = quality_game.disposition.value not in {"degraded", "insufficient"}
     observed: dict[str, tuple[object, object, bool]] = {
         "prediction_valid": (value.prediction_checksum, prediction.checksum, prediction_valid),
-        "prediction_market_independent": (True, prediction.market_independence_attested, prediction.market_independence_attested),
-        "prediction_identity_valid": (value.outcome_team_id, value.outcome_team_id if prediction_identity_valid else None, prediction_identity_valid),
+        "prediction_market_independent": (
+            True,
+            structural_proof.market_independence_attested,
+            prediction.market_independence_attested is True
+            and structural_proof.market_independence_attested is True,
+        ),
+        "prediction_identity_valid": (
+            value.outcome_team_id,
+            expected_team_id if prediction_identity_valid else None,
+            prediction_identity_valid,
+        ),
         "feature_lineage_valid": (
-            prediction.upstream_model_feature_game_checksum,
-            prediction.predictive_feature_checksum,
+            structural_proof.model_feature_game_checksum,
+            {
+                "model_feature_game_checksum": structural_proof.model_feature_game_checksum,
+                "model_feature_predictive_feature_checksum": (
+                    structural_proof.model_feature_predictive_feature_checksum
+                ),
+                "prediction_model_feature_game_checksum": (
+                    prediction.upstream_model_feature_game_checksum
+                ),
+                "prediction_predictive_feature_checksum": prediction.predictive_feature_checksum,
+            },
             feature_lineage_valid,
         ),
         "market_supported": ("available", value.availability, value.availability == "available"),
@@ -382,13 +492,8 @@ def _gate_results(
             seen,
             passed,
             "passed" if passed else f"{code} failed",
-            prediction.checksum
-            if code in {
-                "prediction_valid",
-                "prediction_market_independent",
-                "prediction_identity_valid",
-                "feature_lineage_valid",
-            }
+            structural_proof.checksum
+            if code in STRUCTURAL_GATE_CODES
             else quality_game.checksum
             if code in {"data_quality_model_ready", "lineup_and_starter_risk", "weather_evidence_acceptable"}
             else value.checksum,
@@ -405,6 +510,7 @@ def evaluate_recommendation_gate(
     value: ProductionValueEngineV1,
     *,
     predictions_by_game: Mapping[str, MoneylinePredictionV1],
+    structural_proofs_by_game: Mapping[str, GateStructuralProofV1],
     quality_games_by_id: Mapping[str, DataQualityGameV1],
     scheduled_start_by_game: Mapping[str, datetime],
     policy: RecommendationPolicyV1,
@@ -412,9 +518,23 @@ def evaluate_recommendation_gate(
     secret_values: Iterable[str] = (),
 ) -> ProductionRecommendationGateV1:
     evaluated = _utc(evaluated_at, "evaluated_at")
+    value_game_ids = tuple(game.source_game_id for game in value.games)
+    expected_game_ids = set(value_game_ids)
+    inventories = {
+        "Prediction": set(predictions_by_game),
+        "Data Quality": set(quality_games_by_id),
+        "schedule": set(scheduled_start_by_game),
+        "structural proof": set(structural_proofs_by_game),
+    }
+    mismatched = tuple(name for name, game_ids in inventories.items() if game_ids != expected_game_ids)
+    if mismatched:
+        raise RecommendationGateProductionError(
+            "Gate input inventories do not exactly match Value games: " + ",".join(mismatched)
+        )
     games: list[GateGameV1] = []
     for game in value.games:
         prediction = predictions_by_game[game.source_game_id]
+        structural_proof = structural_proofs_by_game[game.source_game_id]
         quality_game = quality_games_by_id[game.source_game_id]
         quality = quality_game.disposition.value
         pregame = evaluated < _utc(scheduled_start_by_game[game.source_game_id], "scheduled_start")
@@ -424,6 +544,8 @@ def evaluate_recommendation_gate(
             results = _gate_results(
                 outcome,
                 prediction=prediction,
+                structural_proof=structural_proof,
+                source_game_id=game.source_game_id,
                 quality_game=quality_game,
                 policy=policy,
                 evaluated_at=evaluated,
@@ -434,6 +556,12 @@ def evaluate_recommendation_gate(
                 for result in results
                 if not result.passed and result.code != "opposing_side_not_selected"
             )
+            structural_failures = STRUCTURAL_GATE_CODES.intersection(independent_failures)
+            if structural_failures:
+                raise RecommendationGateProductionError(
+                    f"structural Gate validation failed for {game.source_game_id}: "
+                    + ",".join(sorted(structural_failures))
+                )
             if not independent_failures:
                 if (
                     outcome.expected_value_per_unit is None

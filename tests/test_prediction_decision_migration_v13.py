@@ -41,8 +41,8 @@ from app.prediction_decision_migration import (
 
 V12_CHECKSUM = "9409445202fc362377f112dc546bacf087820b0f1fb608b08b1a542afa4950d0"
 V12_FINGERPRINT = "f597210e59f941e3e0bcdd5583dea597ee9cbbcb598a45fc23abe18144f52a22"
-V13_CHECKSUM = "43f07d5c477d13badc533f300a9c635017d7f8b130b118166aa49e79c7a9ea9e"
-V13_FINGERPRINT = "deb71b8fcdfbc22dd55c92210a2a80f7521e370ce9fb474909e11f23954937f1"
+V13_CHECKSUM = "9606657f9497cd54444ecb35680f05d7003a0db535d2e9a1fcc594c9bbf63089"
+V13_FINGERPRINT = "d33d27ba07d21aa35584e0afe3c39334deba30170d761897acb13e9e04a65fee"
 
 
 def _install_v12(path: Path) -> None:
@@ -150,6 +150,11 @@ def test_v13_correction_columns_and_seal_proofs_are_schema_owned(tmp_path: Path)
                 "SELECT sql FROM sqlite_master WHERE name='rankings_attempt_evidence'"
             ).fetchone()[0]
         )
+        ranking_snapshot_sql = str(
+            connection.execute(
+                "SELECT sql FROM sqlite_master WHERE name='ranking_snapshots'"
+            ).fetchone()[0]
+        )
     assert "market_independence_attested" in authoring_columns
     assert {"invalid_inputs_json", "invalid_input_count"} <= attempt_columns
     assert "market_independence_attested" in prediction_columns
@@ -159,12 +164,16 @@ def test_v13_correction_columns_and_seal_proofs_are_schema_owned(tmp_path: Path)
         "Gate game decision disagrees with side decisions",
         "Gate selected-side results are inconsistent",
         "Gate side canonical evidence mismatch",
+        "Gate structural failure cannot be sealed",
     ):
         assert evidence in gate_seal
     assert "count(recommendation_rank)" in ranking_seal
     assert "min(recommendation_rank)" in ranking_seal
     assert "max(recommendation_rank)" in ranking_seal
     assert "decision_eligibility" in rankings_attempt_sql
+    for sql in (rankings_attempt_sql, ranking_snapshot_sql):
+        assert "DSE_MLB_ML_LEXICOGRAPHIC_RANKING_V1" in sql
+        assert "536edd25604cdc0340e6c74bd3ff6bc67f24c75a6298cee63465a47da07ce0eb" in sql
 
 
 def test_first_seal_triggers_bind_every_snapshot_semantic_column(tmp_path: Path) -> None:

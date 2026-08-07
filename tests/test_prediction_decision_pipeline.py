@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 import json
 from pathlib import Path
@@ -91,7 +92,7 @@ def test_prediction_to_ranking_chain_retries_missing_input_and_blocks_pdf(
     assert templates and templates[0]["market_independence_attested"] is False
 
     value_calculate = value_handler.repository.calculate
-    gate_evaluate = gate_handler.repository.evaluate
+    gate_structural_proofs = gate_handler.repository._structural_proofs
     rankings_rank = rankings_handler.repository.rank
     failures = {"value": 0, "gate": 0, "rankings": 0}
 
@@ -101,11 +102,16 @@ def test_prediction_to_ranking_chain_retries_missing_input_and_blocks_pdf(
             raise RuntimeError("deterministic value calculation failure")
         return value_calculate(*args, **kwargs)
 
-    def fail_gate_once(*args, **kwargs):
+    def fail_gate_once(upstream, exact_prediction_upstream):
         failures["gate"] += 1
+        proofs = gate_structural_proofs(upstream, exact_prediction_upstream)
         if failures["gate"] == 1:
-            raise RuntimeError("deterministic gate evaluation failure")
-        return gate_evaluate(*args, **kwargs)
+            source_game_id = next(iter(proofs))
+            proofs[source_game_id] = replace(
+                proofs[source_game_id],
+                prediction_checksum="f" * 64,
+            )
+        return proofs
 
     def fail_rankings_once(*args, **kwargs):
         failures["rankings"] += 1
@@ -114,7 +120,7 @@ def test_prediction_to_ranking_chain_retries_missing_input_and_blocks_pdf(
         return rankings_rank(*args, **kwargs)
 
     monkeypatch.setattr(value_handler.repository, "calculate", fail_value_once)
-    monkeypatch.setattr(gate_handler.repository, "evaluate", fail_gate_once)
+    monkeypatch.setattr(gate_handler.repository, "_structural_proofs", fail_gate_once)
     monkeypatch.setattr(rankings_handler.repository, "rank", fail_rankings_once)
 
     _seal_reviewed_inputs(prediction_handler.repository, run_id)

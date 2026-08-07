@@ -22,12 +22,15 @@ from app.predictions.production import (
     ReviewedPredictionInputV1,
 )
 from app.rankings.production import (
+    RANKING_POLICY_VERSION,
     RANKING_V1_COMPARATOR,
     RankingPolicyV1,
     RankingsProductionError,
     build_rankings,
 )
+from app.rankings.repository import _policy as reconstruct_ranking_policy
 from app.recommendation_gate.production import (
+    GateStructuralProofV1,
     RecommendationGateProductionError,
     RecommendationPolicyV1,
     evaluate_recommendation_gate,
@@ -157,11 +160,34 @@ def _quality_game(*, degraded: bool = False) -> DataQualityGameV1:
     )
 
 
+def _structural_proof(predictions: PredictionsV1) -> GateStructuralProofV1:
+    prediction = predictions.games[0]
+    return GateStructuralProofV1(
+        source_game_id=prediction.source_game_id,
+        prediction_contract_version=predictions.contract_version,
+        prediction_source_game_id=prediction.source_game_id,
+        prediction_home_team_id=prediction.home_team_id,
+        prediction_away_team_id=prediction.away_team_id,
+        prediction_checksum=prediction.checksum,
+        prediction_upstream_model_feature_game_checksum=(
+            prediction.upstream_model_feature_game_checksum
+        ),
+        prediction_predictive_feature_checksum=prediction.predictive_feature_checksum,
+        market_independence_attested=prediction.market_independence_attested,
+        model_feature_source_game_id=prediction.source_game_id,
+        model_feature_home_team_id=prediction.home_team_id,
+        model_feature_away_team_id=prediction.away_team_id,
+        model_feature_game_checksum=prediction.upstream_model_feature_game_checksum,
+        model_feature_predictive_feature_checksum=prediction.predictive_feature_checksum,
+    )
+
+
 def _gate(value, *, predictions: PredictionsV1 | None = None, degraded: bool = False, policy=None):
     prediction_snapshot = _prediction() if predictions is None else predictions
     return evaluate_recommendation_gate(
         value,
         predictions_by_game={"777001": prediction_snapshot.games[0]},
+        structural_proofs_by_game={"777001": _structural_proof(prediction_snapshot)},
         quality_games_by_id={"777001": _quality_game(degraded=degraded)},
         scheduled_start_by_game={"777001": START},
         policy=RecommendationPolicyV1() if policy is None else policy,
@@ -439,6 +465,18 @@ def test_gate_distinguishes_recommend_pass_and_avoid_without_changing_value() ->
     value = _value(_prediction())
     recommend = _gate(value)
     assert recommend.games[0].decision == "recommend"
+    structural = recommend.games[0].sides[0].results[:4]
+    assert all(result.passed for result in structural)
+    assert {result.source_checksum for result in structural} == {
+        _structural_proof(_prediction()).checksum
+    }
+    lineage = next(result for result in structural if result.code == "feature_lineage_valid")
+    assert lineage.observed_value == {
+        "model_feature_game_checksum": "b" * 64,
+        "model_feature_predictive_feature_checksum": "c" * 64,
+        "prediction_model_feature_game_checksum": "b" * 64,
+        "prediction_predictive_feature_checksum": "c" * 64,
+    }
     passed = _gate(value, policy=RecommendationPolicyV1(minimum_edge=0.5))
     assert passed.games[0].decision == "pass"
     avoided = _gate(value, degraded=True)
@@ -477,6 +515,88 @@ def test_two_sided_gate_selection_rebuilds_losing_side_evidence() -> None:
         replace(selected, results=tuple(replace(result, passed=False) if result.code == "minimum_ev" else result for result in selected.results), reason_codes=("minimum_ev",))
     with pytest.raises(RecommendationGateProductionError, match="avoid requires"):
         replace(losing, decision="avoid")
+
+
+def test_gate_structural_failures_cannot_be_classified_as_pass_or_avoid() -> None:
+    predictions = _prediction()
+    value = _value(predictions)
+    corrupted = replace(
+        predictions.games[0],
+        evidence_checksum="e" * 64,
+    )
+    with pytest.raises(RecommendationGateProductionError, match="structural"):
+        evaluate_recommendation_gate(
+            value,
+            predictions_by_game={"777001": corrupted},
+            structural_proofs_by_game={"777001": _structural_proof(predictions)},
+            quality_games_by_id={"777001": _quality_game()},
+            scheduled_start_by_game={"777001": START},
+            policy=RecommendationPolicyV1(minimum_edge=0.5),
+            evaluated_at=NOW,
+        )
+
+    selected = _gate(value).games[0].sides[0]
+    structurally_failed = tuple(
+        replace(result, passed=False, reason="prediction_valid failed")
+        if result.code == "prediction_valid"
+        else result
+        for result in selected.results
+    )
+    with pytest.raises(RecommendationGateProductionError, match="structural"):
+        replace(
+            selected,
+            decision="pass",
+            results=structurally_failed,
+            reason_codes=("prediction_valid",),
+        )
+
+    avoided = _gate(value, degraded=True).games[0].sides[0]
+    structurally_failed_avoid = tuple(
+        replace(result, passed=False, reason="prediction_valid failed")
+        if result.code == "prediction_valid"
+        else result
+        for result in avoided.results
+    )
+    failed_codes = tuple(result.code for result in structurally_failed_avoid if not result.passed)
+    with pytest.raises(RecommendationGateProductionError, match="structural"):
+        replace(
+            avoided,
+            results=structurally_failed_avoid,
+            reason_codes=failed_codes,
+        )
+
+    proof = _structural_proof(predictions)
+    for corrupted_proof in (
+        replace(proof, market_independence_attested=False),
+        replace(proof, prediction_home_team_id="BAL"),
+        replace(proof, model_feature_game_checksum="f" * 64),
+        replace(proof, model_feature_predictive_feature_checksum="f" * 64),
+    ):
+        with pytest.raises(RecommendationGateProductionError, match="structural"):
+            evaluate_recommendation_gate(
+                value,
+                predictions_by_game={"777001": predictions.games[0]},
+                structural_proofs_by_game={"777001": corrupted_proof},
+                quality_games_by_id={"777001": _quality_game()},
+                scheduled_start_by_game={"777001": START},
+                policy=RecommendationPolicyV1(),
+                evaluated_at=NOW,
+            )
+
+    for degraded, policy in (
+        (False, RecommendationPolicyV1(minimum_edge=0.5)),
+        (True, RecommendationPolicyV1()),
+    ):
+        with pytest.raises(RecommendationGateProductionError, match="structural"):
+            evaluate_recommendation_gate(
+                value,
+                predictions_by_game={"777001": corrupted},
+                structural_proofs_by_game={"777001": proof},
+                quality_games_by_id={"777001": _quality_game(degraded=degraded)},
+                scheduled_start_by_game={"777001": START},
+                policy=policy,
+                evaluated_at=NOW,
+            )
 
 
 def test_ranking_tie_breakers_are_deterministic_and_pass_rows_remain_unranked() -> None:
@@ -563,6 +683,24 @@ def test_rankings_retain_slate_order_while_allowing_rank_inversion() -> None:
 
 def test_ranking_policy_is_exactly_frozen_and_metrics_are_required() -> None:
     assert RankingPolicyV1().comparator == RANKING_V1_COMPARATOR
+    assert RankingPolicyV1(
+        comparator=RANKING_V1_COMPARATOR,
+        policy_version=RANKING_POLICY_VERSION,
+    ) == RankingPolicyV1()
+    with pytest.raises(RankingsProductionError, match="frozen"):
+        RankingPolicyV1(policy_version="DSE_MLB_ML_LEXICOGRAPHIC_RANKING_V1_CHANGED")
+    with pytest.raises(RankingsProductionError, match="frozen"):
+        RankingPolicyV1(policy_version="")
+    with pytest.raises(RankingsProductionError, match="frozen"):
+        RankingPolicyV1(policy_version=" DSE_MLB_ML_LEXICOGRAPHIC_RANKING_V1")
+    altered_identity = {
+        "comparator": list(RANKING_V1_COMPARATOR),
+        "policy_version": f"{RANKING_POLICY_VERSION}_ALTERED",
+    }
+    with pytest.raises(RankingsProductionError, match="frozen"):
+        reconstruct_ranking_policy(
+            {**altered_identity, "checksum": canonical_sha256(altered_identity)}
+        )
     with pytest.raises(RankingsProductionError, match="frozen"):
         RankingPolicyV1(comparator=tuple(reversed(RANKING_V1_COMPARATOR)))
     with pytest.raises(RankingsProductionError, match="frozen"):
@@ -676,6 +814,7 @@ def test_zero_game_prediction_value_gate_and_ranking_chain_is_valid() -> None:
     gate = evaluate_recommendation_gate(
         value,
         predictions_by_game={},
+        structural_proofs_by_game={},
         quality_games_by_id={},
         scheduled_start_by_game={},
         policy=RecommendationPolicyV1(),
