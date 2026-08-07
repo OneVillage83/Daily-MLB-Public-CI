@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -642,7 +642,7 @@ def test_explicit_market_independence_attestation_and_alias_boundary() -> None:
     assert authored.as_dict()["market_independence_attested"] is True
     for invalid in (False, 0, 1):
         with pytest.raises(PredictionsContractError, match="explicitly attest"):
-            replace(authored, market_independence_attested=invalid)
+            replace(authored, market_independence_attested=cast(bool, invalid))
     for alias in ("odds", "sportsbook_price", "implied_prob", "no_vig", "market_context", "bookmaker_offer"):
         with pytest.raises(PredictionsContractError, match="market-derived"):
             replace(authored, authoring_evidence={alias: "forbidden"})
