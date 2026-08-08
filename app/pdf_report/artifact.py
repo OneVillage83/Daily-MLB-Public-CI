@@ -11,6 +11,14 @@ from app.artifacts import resolve_contained_path, validate_artifact_relpath
 from app.daily_slate.contracts import canonical_json_bytes
 from app.pdf_report.contracts import PdfReportContractError, PdfReportDocumentV1
 from app.pdf_report.renderer import render_pdf_report
+from app.pdf_report.production import ProductionPdfReportV1
+from app.pdf_report.renderer import render_production_pdf_report
+from app.pre_model_evidence import (
+    PreModelArtifactV1,
+    cleanup_owned_artifact,
+    publish_canonical_bytes,
+    verify_canonical_bytes,
+)
 
 PDF_REPORT_BASE_RELPATH = "pdf_report/snapshots/{report_checksum}"
 PDF_REPORT_DOCUMENT_FILENAME = "pdf_report_document_v1.json"
@@ -48,6 +56,83 @@ class PdfReportArtifactsV1:
     page_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class ProductionPdfReportArtifactsV1:
+    document: PreModelArtifactV1
+    pdf: PreModelArtifactV1
+    manifest: PreModelArtifactV1
+    page_count: int
+
+
+def production_pdf_artifact_bytes(
+    document: ProductionPdfReportV1,
+) -> tuple[bytes, bytes, bytes, PdfPreflightV1]:
+    document_bytes = document.canonical_json_bytes()
+    pdf_bytes = render_production_pdf_report(document)
+    preflight = pdf_preflight(pdf_bytes)
+    base = PDF_REPORT_BASE_RELPATH.format(report_checksum=document.checksum)
+    manifest = {
+        "contract_version": "DSE_PDF_REPORT_RENDER_MANIFEST_V1",
+        "document_checksum": document.checksum,
+        "document_relpath": f"{base}/{PDF_REPORT_DOCUMENT_FILENAME}",
+        "document_sha256": hashlib.sha256(document_bytes).hexdigest(),
+        "pdf_relpath": f"{base}/{PDF_REPORT_PDF_FILENAME}",
+        "pdf_preflight": preflight.as_dict(),
+        "policy_checksum": document.policy.checksum,
+        "render_version": document.render_version,
+        "report_status": document.report_status,
+        "upstream_checksums": dict(document.upstream_checksums),
+        "upstream_snapshot_ids": dict(document.upstream_snapshot_ids),
+    }
+    return document_bytes, pdf_bytes, canonical_json_bytes(manifest), preflight
+
+
+def publish_production_pdf_report_artifacts(
+    document: ProductionPdfReportV1,
+    artifact_root: Path,
+) -> ProductionPdfReportArtifactsV1:
+    document_bytes, pdf_bytes, manifest_bytes, preflight = production_pdf_artifact_bytes(document)
+    base = PDF_REPORT_BASE_RELPATH.format(report_checksum=document.checksum)
+    published: list[PreModelArtifactV1] = []
+    try:
+        for relpath, content in (
+            (f"{base}/{PDF_REPORT_DOCUMENT_FILENAME}", document_bytes),
+            (f"{base}/{PDF_REPORT_PDF_FILENAME}", pdf_bytes),
+            (f"{base}/{PDF_REPORT_MANIFEST_FILENAME}", manifest_bytes),
+        ):
+            published.append(publish_canonical_bytes(artifact_root, relpath, content))
+    except Exception:
+        for artifact in reversed(published):
+            cleanup_owned_artifact(artifact_root, artifact)
+        raise
+    return ProductionPdfReportArtifactsV1(
+        document=published[0],
+        pdf=published[1],
+        manifest=published[2],
+        page_count=preflight.page_count,
+    )
+
+
+def verify_production_pdf_report_artifacts(
+    document: ProductionPdfReportV1,
+    artifacts: ProductionPdfReportArtifactsV1,
+    artifact_root: Path,
+) -> None:
+    document_bytes, pdf_bytes, manifest_bytes, preflight = production_pdf_artifact_bytes(document)
+    base = PDF_REPORT_BASE_RELPATH.format(report_checksum=document.checksum)
+    expected = (
+        (artifacts.document, f"{base}/{PDF_REPORT_DOCUMENT_FILENAME}", document_bytes),
+        (artifacts.pdf, f"{base}/{PDF_REPORT_PDF_FILENAME}", pdf_bytes),
+        (artifacts.manifest, f"{base}/{PDF_REPORT_MANIFEST_FILENAME}", manifest_bytes),
+    )
+    for artifact, relpath, content in expected:
+        if artifact.relpath != relpath:
+            raise PdfReportContractError("PDF Report artifact path identity mismatch")
+        verify_canonical_bytes(artifact_root, artifact, content)
+    if artifacts.page_count != preflight.page_count:
+        raise PdfReportContractError("PDF Report page-count evidence mismatch")
+
+
 def pdf_preflight(content: bytes) -> PdfPreflightV1:
     header_valid = content.startswith(b"%PDF-")
     eof_valid = content.rstrip().endswith(b"%%EOF")
@@ -79,13 +164,9 @@ def write_pdf_report_artifacts(
     artifact_root: Path,
 ) -> PdfReportArtifactsV1:
     base = PDF_REPORT_BASE_RELPATH.format(report_checksum=document.checksum)
-    document_relpath = validate_artifact_relpath(
-        f"{base}/{PDF_REPORT_DOCUMENT_FILENAME}"
-    )
+    document_relpath = validate_artifact_relpath(f"{base}/{PDF_REPORT_DOCUMENT_FILENAME}")
     pdf_relpath = validate_artifact_relpath(f"{base}/{PDF_REPORT_PDF_FILENAME}")
-    manifest_relpath = validate_artifact_relpath(
-        f"{base}/{PDF_REPORT_MANIFEST_FILENAME}"
-    )
+    manifest_relpath = validate_artifact_relpath(f"{base}/{PDF_REPORT_MANIFEST_FILENAME}")
     document_bytes = document.canonical_json_bytes()
     pdf_bytes = render_pdf_report(document)
     preflight = pdf_preflight(pdf_bytes)
@@ -102,9 +183,7 @@ def write_pdf_report_artifacts(
         "upstream_matchup_packet_checksum": document.upstream_matchup_packet_checksum,
         "upstream_predictions_checksum": document.upstream_predictions_checksum,
         "upstream_rankings_checksum": document.upstream_rankings_checksum,
-        "upstream_recommendation_gate_checksum": (
-            document.upstream_recommendation_gate_checksum
-        ),
+        "upstream_recommendation_gate_checksum": (document.upstream_recommendation_gate_checksum),
     }
     manifest_bytes = canonical_json_bytes(manifest)
     destinations = (

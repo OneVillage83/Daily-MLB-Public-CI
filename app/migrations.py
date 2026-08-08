@@ -20,10 +20,14 @@ from app.pre_model_migration import (
     PRE_MODEL_SCHEMA_V12_STATEMENTS,
     PRE_MODEL_SCHEMA_V12_VALIDATION_TRIGGER_STATEMENTS,
 )
-from app.prediction_decision_migration import PREDICTION_DECISION_SCHEMA_V13_STATEMENTS
+from app.prediction_decision_migration import (
+    PREDICTION_DECISION_SCHEMA_V13_STATEMENTS,
+    PREDICTION_DECISION_SCHEMA_V13_VALIDATION_TRIGGER_STATEMENTS,
+)
+from app.final_output_migration import FINAL_OUTPUT_SCHEMA_V14_STATEMENTS
 
 
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
 MIGRATION_V1_NAME = "formal_phase1_schema"
 MIGRATION_V2_NAME = "phase1_odds_history_and_freshness"
 MIGRATION_V3_NAME = "release_candidate_evidence_ledger"
@@ -37,6 +41,7 @@ MIGRATION_V10_NAME = "baseball_intelligence_assembly_v1_temporal_persistence"
 MIGRATION_V11_NAME = "odds_weather_v1_temporal_persistence"
 MIGRATION_V12_NAME = "pre_model_pipeline_v1_temporal_persistence"
 MIGRATION_V13_NAME = "prediction_decision_v1_temporal_persistence"
+MIGRATION_V14_NAME = "final_output_pipeline_v1_temporal_persistence"
 
 DSE_MLB_ML_CANDIDATE_V1_GATE_CODES = (
     "prediction_valid",
@@ -4059,6 +4064,81 @@ FORMAL_SCHEMA_V13_STATEMENTS = (
     *PRE_MODEL_SCHEMA_V12_VALIDATION_TRIGGER_STATEMENTS,
 )
 
+_COLLECTOR_RUNS_V14_CREATE = _COLLECTOR_RUNS_V13_CREATE.replace(
+    "_collector_runs_v13", "_collector_runs_v14"
+).replace(
+    "schema_version IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)",
+    "schema_version IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)",
+)
+_COLLECTOR_RUNS_V14_COPY = _COLLECTOR_RUNS_V13_COPY.replace(
+    "_collector_runs_v13", "_collector_runs_v14"
+)
+_PIPELINE_RUNS_V14_CREATE = _PIPELINE_RUNS_V13_CREATE.replace(
+    "_pipeline_runs_v13", "_pipeline_runs_v14"
+).replace(
+    "database_schema_version IN (7, 8, 9, 10, 11, 12, 13)",
+    "database_schema_version IN (7, 8, 9, 10, 11, 12, 13, 14)",
+)
+_PIPELINE_RUNS_V14_COPY = _PIPELINE_RUNS_V13_COPY.replace(
+    "_pipeline_runs_v13", "_pipeline_runs_v14"
+)
+
+
+def _created_trigger_name(statement: str) -> str:
+    normalized = " ".join(statement.split())
+    marker = "CREATE TRIGGER "
+    if marker not in normalized:
+        raise ValueError("validation statement does not create a trigger")
+    return normalized.split(marker, 1)[1].split(" ", 1)[0]
+
+
+_PREDICTION_DECISION_V13_VALIDATION_TRIGGER_NAMES = tuple(
+    _created_trigger_name(statement)
+    for statement in PREDICTION_DECISION_SCHEMA_V13_VALIDATION_TRIGGER_STATEMENTS
+)
+
+
+FORMAL_SCHEMA_V14_STATEMENTS = (
+    *(f"DROP TRIGGER {name}" for name in _SHARED_VALIDATION_TRIGGER_NAMES),
+    *(f"DROP TRIGGER {name}" for name in _PRE_MODEL_V12_VALIDATION_TRIGGER_NAMES),
+    "DROP TRIGGER odds_weather_attempt_evidence_validate_phase",
+    "DROP TRIGGER odds_weather_snapshots_validate_phase",
+    "DROP TRIGGER odds_weather_raw_captures_validate_active_attempt",
+    "DROP TRIGGER odds_weather_provider_events_validate_active_attempt",
+    "DROP TRIGGER odds_weather_weather_revisions_validate_upstream",
+    "DROP TRIGGER odds_weather_games_validate_upstream",
+    "DROP TRIGGER odds_weather_snapshot_children_validate_unsealed",
+    "DROP TRIGGER odds_weather_warnings_validate_unsealed",
+    "DROP TRIGGER odds_weather_weather_selections_validate_unsealed",
+    "DROP TRIGGER odds_weather_snapshots_validate_seal",
+    *(
+        f"DROP TRIGGER {name}"
+        for name in _PREDICTION_DECISION_V13_VALIDATION_TRIGGER_NAMES
+    ),
+    _COLLECTOR_RUNS_V14_CREATE,
+    _COLLECTOR_RUNS_V14_COPY,
+    "DROP TABLE collector_runs",
+    "ALTER TABLE _collector_runs_v14 RENAME TO collector_runs",
+    _PIPELINE_RUNS_V14_CREATE,
+    _PIPELINE_RUNS_V14_COPY,
+    "DROP TABLE pipeline_runs",
+    "ALTER TABLE _pipeline_runs_v14 RENAME TO pipeline_runs",
+    FORMAL_SCHEMA_V7_STATEMENTS[7],
+    FORMAL_SCHEMA_V7_STATEMENTS[8],
+    *FINAL_OUTPUT_SCHEMA_V14_STATEMENTS,
+    *(
+        statement
+        for statement in FORMAL_SCHEMA_V10_STATEMENTS
+        if any(
+            f"CREATE TRIGGER {name}" in statement
+            for name in _SHARED_VALIDATION_TRIGGER_NAMES
+        )
+    ),
+    *ODDS_WEATHER_SCHEMA_V11_VALIDATION_TRIGGER_STATEMENTS,
+    *PRE_MODEL_SCHEMA_V12_VALIDATION_TRIGGER_STATEMENTS,
+    *PREDICTION_DECISION_SCHEMA_V13_VALIDATION_TRIGGER_STATEMENTS,
+)
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -4344,6 +4424,31 @@ MIGRATION_V13_CHECKSUM = hashlib.sha256(
         )
     ).encode("utf-8")
 ).hexdigest()
+FORMAL_SCHEMA_V14_FINGERPRINT = _fingerprint_for_migration_chain(
+    FORMAL_SCHEMA_V1_STATEMENTS,
+    FORMAL_SCHEMA_V2_STATEMENTS,
+    FORMAL_SCHEMA_V3_STATEMENTS,
+    FORMAL_SCHEMA_V4_STATEMENTS,
+    FORMAL_SCHEMA_V5_STATEMENTS,
+    FORMAL_SCHEMA_V6_STATEMENTS,
+    FORMAL_SCHEMA_V7_STATEMENTS,
+    FORMAL_SCHEMA_V8_STATEMENTS,
+    FORMAL_SCHEMA_V9_STATEMENTS,
+    FORMAL_SCHEMA_V10_STATEMENTS,
+    FORMAL_SCHEMA_V11_STATEMENTS,
+    FORMAL_SCHEMA_V12_STATEMENTS,
+    FORMAL_SCHEMA_V13_STATEMENTS,
+    FORMAL_SCHEMA_V14_STATEMENTS,
+)
+MIGRATION_V14_CHECKSUM = hashlib.sha256(
+    (
+        MIGRATION_V14_NAME
+        + "\nformal-v13-to-v14\n"
+        + "\n".join(
+            _canonical_sql(statement) for statement in FORMAL_SCHEMA_V14_STATEMENTS
+        )
+    ).encode("utf-8")
+).hexdigest()
 
 MIGRATION_HISTORY = (
     (1, MIGRATION_V1_NAME, MIGRATION_V1_CHECKSUM),
@@ -4359,6 +4464,7 @@ MIGRATION_HISTORY = (
     (11, MIGRATION_V11_NAME, MIGRATION_V11_CHECKSUM),
     (12, MIGRATION_V12_NAME, MIGRATION_V12_CHECKSUM),
     (13, MIGRATION_V13_NAME, MIGRATION_V13_CHECKSUM),
+    (14, MIGRATION_V14_NAME, MIGRATION_V14_CHECKSUM),
 )
 
 
@@ -4394,6 +4500,11 @@ def _v12_diagnostic_filename(started_at: str) -> str:
 def _v13_diagnostic_filename(started_at: str) -> str:
     safe_timestamp = started_at.replace(":", "").replace("+", "_")
     return f"migration-v13-{safe_timestamp}-{uuid4().hex[:8]}.json"
+
+
+def _v14_diagnostic_filename(started_at: str) -> str:
+    safe_timestamp = started_at.replace(":", "").replace("+", "_")
+    return f"migration-v14-{safe_timestamp}-{uuid4().hex[:8]}.json"
 
 
 def _v9_backup_filename(database_path: Path, started_at: str) -> str:
@@ -4434,6 +4545,11 @@ def _v13_backup_filename(database_path: Path, started_at: str) -> str:
         f"{database_path.name}.pre-v13-{safe_timestamp}-"
         f"{uuid4().hex[:8]}.sqlite3"
     )
+
+
+def _v14_backup_filename(database_path: Path, started_at: str) -> str:
+    safe_timestamp = started_at.replace(":", "").replace("+", "_")
+    return f"{database_path.name}.pre-v14-{safe_timestamp}-{uuid4().hex[:8]}.sqlite3"
 
 
 def _write_atomic_diagnostic(path: Path, payload: dict[str, Any]) -> None:
@@ -4661,6 +4777,35 @@ def _create_verified_v13_backup(
     }
 
 
+def _create_verified_v14_backup(
+    database_path: Path,
+    backup_path: Path,
+) -> dict[str, Any]:
+    _create_verified_backup(database_path, backup_path, FORMAL_SCHEMA_V13_FINGERPRINT)
+    verification = _verify_v9_backup(backup_path, FORMAL_SCHEMA_V13_FINGERPRINT)
+    connection = sqlite3.connect(backup_path, timeout=5.0)
+    try:
+        observed_history = [
+            (int(row[0]), str(row[1]), str(row[2]))
+            for row in connection.execute(
+                "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
+            ).fetchall()
+        ]
+        if observed_history != list(MIGRATION_HISTORY[:13]):
+            raise BackupVerificationError(
+                "Schema v14 backup migration history is not exact through v13"
+            )
+        if int(connection.execute("PRAGMA user_version").fetchone()[0]) != 13:
+            raise BackupVerificationError("Schema v14 backup user_version is not 13")
+    finally:
+        connection.close()
+    return {
+        **verification,
+        "migration_history": [list(row) for row in observed_history],
+        "user_version": 13,
+    }
+
+
 def _v9_preflight_diagnostic(
     *,
     database_path: Path,
@@ -4820,6 +4965,37 @@ def _v13_preflight_diagnostic(
     }
 
 
+def _v14_preflight_diagnostic(
+    *,
+    database_path: Path,
+    backup_path: Path,
+    started_at: str,
+    source_integrity: list[str],
+    source_foreign_keys: list[tuple[Any, ...]],
+    backup_verification: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "backup_foreign_key_violations": backup_verification["foreign_key_violations"],
+        "backup_integrity_check": backup_verification["integrity_check"],
+        "backup_migration_history": backup_verification["migration_history"],
+        "backup_path": str(backup_path.resolve()),
+        "backup_user_version": backup_verification["user_version"],
+        "completed_at": None,
+        "database_path": str(database_path.resolve()),
+        "migration_checksum": MIGRATION_V14_CHECKSUM,
+        "migration_name": MIGRATION_V14_NAME,
+        "outcome": "pending",
+        "source_fingerprint": FORMAL_SCHEMA_V13_FINGERPRINT,
+        "source_foreign_key_violations": source_foreign_keys,
+        "source_integrity_check": source_integrity,
+        "source_version": 13,
+        "started_at": started_at,
+        "status": "preflight_verified",
+        "target_fingerprint": FORMAL_SCHEMA_V14_FINGERPRINT,
+        "target_version": 14,
+    }
+
+
 def _verify_v9_preflight_diagnostic(
     diagnostic_path: Path,
     expected: dict[str, Any],
@@ -4900,6 +5076,22 @@ def _verify_v13_preflight_diagnostic(
         )
 
 
+def _verify_v14_preflight_diagnostic(
+    diagnostic_path: Path,
+    expected: dict[str, Any],
+) -> None:
+    try:
+        observed = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DiagnosticWriteError(
+            "Schema v14 migration diagnostic is not readable"
+        ) from exc
+    if observed != expected:
+        raise DiagnosticWriteError(
+            "Schema v14 migration diagnostic is internally inconsistent"
+        )
+
+
 def _assert_foreign_keys(connection: sqlite3.Connection) -> None:
     violations = connection.execute("PRAGMA foreign_key_check").fetchall()
     if violations:
@@ -4923,6 +5115,7 @@ def _assert_target_schema(connection: sqlite3.Connection, version: int) -> None:
         11: FORMAL_SCHEMA_V11_FINGERPRINT,
         12: FORMAL_SCHEMA_V12_FINGERPRINT,
         13: FORMAL_SCHEMA_V13_FINGERPRINT,
+        14: FORMAL_SCHEMA_V14_FINGERPRINT,
     }.get(version)
     if expected_fingerprint is None:
         raise SchemaVerificationError(f"Unsupported target schema version {version}")
@@ -6247,6 +6440,121 @@ def _upgrade_formal_v12_schema(
     )
 
 
+def _upgrade_formal_v13_schema(
+    connection: sqlite3.Connection,
+    database_path: Path,
+    prior_result: MigrationResult | None = None,
+) -> MigrationResult:
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) != 13:
+        raise SchemaVerificationError(
+            "Formal v13 upgrade requires PRAGMA user_version=13"
+        )
+    validated = _validate_versioned_schema(connection)
+    if validated.version != 13:
+        raise SchemaVerificationError(
+            "Formal v13 upgrade requires exact migration history through v13"
+        )
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+        raise SchemaVerificationError(
+            "Formal v13 source requires foreign-key enforcement before schema v14 upgrade"
+        )
+    source_integrity = [
+        str(row[0]) for row in connection.execute("PRAGMA integrity_check").fetchall()
+    ]
+    if source_integrity != ["ok"]:
+        raise SchemaVerificationError(
+            "Formal v13 source integrity_check must be ok before schema v14 upgrade"
+        )
+    source_foreign_keys = [
+        tuple(row) for row in connection.execute("PRAGMA foreign_key_check").fetchall()
+    ]
+    if source_foreign_keys:
+        raise SchemaVerificationError(
+            "Formal v13 source has foreign-key violations before schema v14 upgrade"
+        )
+
+    source_kind = prior_result.source_kind if prior_result else "formal_v13"
+    backup_path = prior_result.backup_path if prior_result else None
+    diagnostic_path = prior_result.diagnostic_path if prior_result else None
+    diagnostic: dict[str, Any] | None = None
+    if source_kind == "formal_v13":
+        started_at = _utc_now()
+        migration_dir = _migration_directory(database_path)
+        backup_path = migration_dir / _v14_backup_filename(database_path, started_at)
+        backup_verification = _create_verified_v14_backup(database_path, backup_path)
+        diagnostic_path = migration_dir / _v14_diagnostic_filename(started_at)
+        diagnostic = _v14_preflight_diagnostic(
+            database_path=database_path,
+            backup_path=backup_path,
+            started_at=started_at,
+            source_integrity=source_integrity,
+            source_foreign_keys=source_foreign_keys,
+            backup_verification=backup_verification,
+        )
+        _write_atomic_diagnostic(diagnostic_path, diagnostic)
+        _verify_v14_preflight_diagnostic(diagnostic_path, diagnostic)
+
+    connection.execute("PRAGMA foreign_keys=OFF")
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 0:
+        raise SchemaVerificationError(
+            "Unable to prepare transactional schema v14 upgrade"
+        )
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if schema_fingerprint(connection) != FORMAL_SCHEMA_V13_FINGERPRINT:
+            raise SchemaVerificationError(
+                "Formal v13 schema changed before migration lock"
+            )
+        _execute_statements(connection, FORMAL_SCHEMA_V14_STATEMENTS)
+        connection.execute(
+            "INSERT INTO schema_migrations(version,name,checksum,applied_at) VALUES (14,?,?,?)",
+            (MIGRATION_V14_NAME, MIGRATION_V14_CHECKSUM, _utc_now()),
+        )
+        connection.execute("PRAGMA user_version=14")
+        _assert_target_schema(connection, 14)
+        connection.commit()
+    except Exception as exc:
+        if connection.in_transaction:
+            connection.rollback()
+        if diagnostic is not None and diagnostic_path is not None:
+            diagnostic.update(
+                {
+                    "completed_at": _utc_now(),
+                    "error": redact_text(str(exc)),
+                    "outcome": "migration_failed",
+                    "status": "completed",
+                }
+            )
+            _write_atomic_diagnostic(diagnostic_path, diagnostic)
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    if int(connection.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+        raise SchemaVerificationError(
+            "Foreign-key enforcement could not be restored after schema v14 upgrade"
+        )
+    _assert_target_schema(connection, 14)
+    if diagnostic is not None and diagnostic_path is not None:
+        diagnostic.update(
+            {
+                "completed_at": _utc_now(),
+                "outcome": "migration_verified",
+                "status": "completed",
+            }
+        )
+        _write_atomic_diagnostic(diagnostic_path, diagnostic)
+        _verify_v14_preflight_diagnostic(diagnostic_path, diagnostic)
+    return MigrationResult(
+        version=14,
+        schema_fingerprint=FORMAL_SCHEMA_V14_FINGERPRINT,
+        migrated=True,
+        source_kind=source_kind,
+        backup_path=backup_path,
+        diagnostic_path=diagnostic_path,
+    )
+
+
 def _validate_versioned_schema(connection: sqlite3.Connection) -> MigrationResult:
     rows = connection.execute(
         "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
@@ -6286,6 +6594,7 @@ def _validate_versioned_schema(connection: sqlite3.Connection) -> MigrationResul
         11: FORMAL_SCHEMA_V11_FINGERPRINT,
         12: FORMAL_SCHEMA_V12_FINGERPRINT,
         13: FORMAL_SCHEMA_V13_FINGERPRINT,
+        14: FORMAL_SCHEMA_V14_FINGERPRINT,
     }
     return MigrationResult(
         version=newest,
@@ -6353,6 +6662,8 @@ def ensure_schema(database_path: Path) -> MigrationResult:
             result = _upgrade_formal_v11_schema(connection, path, result)
         if result.version == 12:
             result = _upgrade_formal_v12_schema(connection, path, result)
+        if result.version == 13:
+            result = _upgrade_formal_v13_schema(connection, path, result)
 
         journal_mode = str(connection.execute("PRAGMA journal_mode=WAL").fetchone()[0])
         if journal_mode.lower() != "wal":

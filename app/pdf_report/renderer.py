@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from html import escape
 from io import BytesIO
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.pdf_report.production import ProductionPdfReportV1
 
 from reportlab.lib import colors  # type: ignore[import-untyped]
 from reportlab.lib.enums import TA_CENTER, TA_LEFT  # type: ignore[import-untyped]
@@ -639,6 +643,224 @@ def render_pdf_report(document: PdfReportDocumentV1) -> bytes:
                     _fact_for_renderer("Recommendation Gate checksum", document.upstream_recommendation_gate_checksum),
                     _fact_for_renderer("Predictions checksum", document.upstream_predictions_checksum),
                     _fact_for_renderer("MatchupPacket checksum", document.upstream_matchup_packet_checksum),
+                    _fact_for_renderer("Policy checksum", document.policy.checksum),
+                ),
+                styles,
+            ),
+        ]
+    )
+    doc.build(story, canvasmaker=_InvariantCanvas)
+    return buffer.getvalue()
+
+
+def render_production_pdf_report(document: "ProductionPdfReportV1") -> bytes:
+    """Render the v13-native semantic document using the accepted visual system."""
+    styles = _styles()
+    buffer = BytesIO()
+    doc = _ReportDocTemplate(
+        buffer,
+        title=f"Daily MLB Report - {document.requested_date}",
+    )
+    recommendations = sorted(
+        (game for game in document.games if game.recommendation_rank is not None),
+        key=lambda game: game.recommendation_rank or 0,
+    )
+    story: list[object] = [
+        Spacer(1, 0.12 * inch),
+        _paragraph("The Daily Edge", styles["subtitle"]),
+        _paragraph(f"Daily MLB Report - {document.requested_date}", styles["title"]),
+        _paragraph(
+            f"Data cutoff: {document.as_of_time.isoformat()} | Generated: {document.generated_at.isoformat()}",
+            styles["subtitle"],
+        ),
+        Table(
+            [
+                [
+                    _rich(f"{len(document.games)}<br/><font size='7'>Games</font>", styles["cover_metric"]),
+                    _rich(f"{len(recommendations)}<br/><font size='7'>Recommendations</font>", styles["cover_metric"]),
+                    _rich("ML<br/><font size='7'>V1 market</font>", styles["cover_metric"]),
+                    _rich("PRE-REVIEW<br/><font size='7'>Report status</font>", styles["cover_metric"]),
+                ]
+            ],
+            colWidths=[METRIC_CARD_WIDTH] * 4,
+            style=TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), NAVY),
+                    ("BOX", (0, 0), (-1, -1), 0.6, BLUE),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.4, BORDER),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            ),
+        ),
+        _paragraph(
+            "Pre-review analytical output. RECOMMEND, PASS, and AVOID preserve the exact Recommendation Gate decision; Human Review is still required.",
+            styles["callout"],
+        ),
+        _paragraph("Today's Ranked Recommendations", styles["h1"]),
+    ]
+    if recommendations:
+        ranked_data = [_header_cells(("Rank", "Matchup", "Side", "Prob.", "Edge", "EV", "Price"), styles)]
+        for game in recommendations:
+            selected = next(outcome for outcome in game.outcomes if outcome.side == game.selected_side)
+            ranked_data.append(
+                [
+                    _paragraph(str(game.recommendation_rank), styles["small"]),
+                    _paragraph(f"{game.away_team_id.upper()} at {game.home_team_id.upper()}", styles["small"]),
+                    _paragraph(str(game.selected_team_id).upper(), styles["small"]),
+                    _paragraph(_percent(selected.prediction_probability), styles["small"]),
+                    _paragraph(_percent(selected.edge), styles["small"]),
+                    _paragraph(
+                        "-" if selected.expected_value_per_unit is None else f"{selected.expected_value_per_unit:+.3f}",
+                        styles["small"],
+                    ),
+                    _paragraph(
+                        "-" if selected.best_price is None else _american(selected.best_price), styles["small"]
+                    ),
+                ]
+            )
+        story.append(
+            Table(
+                ranked_data,
+                colWidths=[0.38 * inch, 1.4 * inch, 0.8 * inch, 0.65 * inch, 0.58 * inch, 0.58 * inch, 0.55 * inch],
+                repeatRows=1,
+                style=TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+                        ("GRID", (0, 0), (-1, -1), 0.35, BORDER),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE_BLUE]),
+                    ]
+                ),
+            )
+        )
+    else:
+        story.append(_paragraph("No canonical RECOMMEND entries were retained for this slate.", styles["body"]))
+    story.extend([PageBreak(), _paragraph("Full Slate", styles["h1"])])
+    full_data = [_header_cells(("#", "Matchup", "Decision", "Rank", "Quality"), styles)]
+    for game in document.games:
+        full_data.append(
+            [
+                _paragraph(str(game.ordinal), styles["small"]),
+                _paragraph(f"{game.away_team_id.upper()} at {game.home_team_id.upper()}", styles["small"]),
+                _paragraph(game.decision.upper(), styles["small"]),
+                _paragraph(
+                    "-" if game.recommendation_rank is None else str(game.recommendation_rank), styles["small"]
+                ),
+                _paragraph(game.quality_disposition.upper(), styles["small"]),
+            ]
+        )
+    if document.games:
+        story.append(
+            Table(
+                full_data,
+                colWidths=[0.35 * inch, 2.55 * inch, 1.0 * inch, 0.55 * inch, 1.0 * inch],
+                repeatRows=1,
+                style=TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+                        ("GRID", (0, 0), (-1, -1), 0.35, BORDER),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE_BLUE]),
+                    ]
+                ),
+            )
+        )
+    else:
+        story.append(_paragraph("The sealed upstream slate contains zero games.", styles["body"]))
+    for game in document.games:
+        story.extend(
+            [
+                PageBreak(),
+                _paragraph(f"{game.away_team_id.upper()} at {game.home_team_id.upper()}", styles["h1"]),
+                _paragraph(
+                    f"{game.decision.upper()} | Quality: {game.quality_disposition.upper()} | Reviewed analyst ({game.calibration_state})",
+                    styles["subtitle"],
+                ),
+            ]
+        )
+        outcome_data = [
+            _header_cells(("Side", "Probability", "Interval", "No-vig", "Edge", "EV", "Best price", "Books"), styles)
+        ]
+        for outcome in game.outcomes:
+            outcome_data.append(
+                [
+                    _paragraph(outcome.outcome_team_id.upper(), styles["small"]),
+                    _paragraph(_percent(outcome.prediction_probability), styles["small"]),
+                    _paragraph(
+                        f"{_percent(outcome.probability_lower)}-{_percent(outcome.probability_upper)}",
+                        styles["small"],
+                    ),
+                    _paragraph(_percent(outcome.consensus_no_vig_probability), styles["small"]),
+                    _paragraph(_percent(outcome.edge), styles["small"]),
+                    _paragraph(
+                        "-" if outcome.expected_value_per_unit is None else f"{outcome.expected_value_per_unit:+.3f}",
+                        styles["small"],
+                    ),
+                    _paragraph(
+                        "-" if outcome.best_price is None else _american(outcome.best_price), styles["small"]
+                    ),
+                    _paragraph(str(outcome.bookmaker_count), styles["small"]),
+                ]
+            )
+        story.append(
+            Table(
+                outcome_data,
+                colWidths=[
+                    0.72 * inch,
+                    0.65 * inch,
+                    0.82 * inch,
+                    0.62 * inch,
+                    0.55 * inch,
+                    0.55 * inch,
+                    0.65 * inch,
+                    0.42 * inch,
+                ],
+                repeatRows=1,
+                style=TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+                        ("GRID", (0, 0), (-1, -1), 0.35, BORDER),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE_BLUE]),
+                    ]
+                ),
+            )
+        )
+        issues = ", ".join(game.quality_issue_codes) or "No retained quality issues"
+        story.extend(
+            [
+                _paragraph("Evidence and limitations", styles["h2"]),
+                _paragraph(f"Quality issues: {issues}", styles["body"]),
+                _paragraph(
+                    f"Prediction provider: {game.provider_kind} / {game.provider_contract} / {game.provider_version}; market-independent attestation retained.",
+                    styles["body"],
+                ),
+            ]
+        )
+    story.extend(
+        [
+            PageBreak(),
+            _paragraph("Methodology and Audit", styles["h1"]),
+            _paragraph(
+                "Predictions are market-blind and distinct from Value, Recommendation Gate, Rankings, report display, and Human Review.",
+                styles["body"],
+            ),
+            _paragraph(
+                "V1 covers MLB moneyline only. Spread and total predictions are not fabricated.", styles["body"]
+            ),
+            _paragraph(
+                "RECOMMEND is eligible for human review; PASS and AVOID remain retained analytical evidence.",
+                styles["body"],
+            ),
+            _facts_table(
+                tuple(
+                    _fact_for_renderer(key.replace("_", " ").title(), value)
+                    for key, value in document.upstream_checksums.items()
+                )
+                + (
+                    _fact_for_renderer("Semantic report checksum", document.checksum),
                     _fact_for_renderer("Policy checksum", document.policy.checksum),
                 ),
                 styles,

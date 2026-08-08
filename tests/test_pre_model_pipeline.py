@@ -233,7 +233,7 @@ def test_one_game_pre_model_chain_persists_reconstructs_and_blocks_predictions(
         )
 
 
-def test_zero_game_chain_uses_no_provider_and_blocks_pdf_report(tmp_path: Path) -> None:
+def test_zero_game_chain_completes_outputs_and_waits_for_human_review(tmp_path: Path) -> None:
     odds_repository = _zero_game_odds_weather_repository(tmp_path)
     upstream = odds_repository.baseball_intelligence.get_latest_for_run(RUN_ID)
     assert upstream is not None
@@ -267,9 +267,15 @@ def test_zero_game_chain_uses_no_provider_and_blocks_pdf_report(tmp_path: Path) 
         configured_settings=configured,
         clock=lambda: phase4.sealed_at + timedelta(seconds=1),
     )
-    with pytest.raises(ManualRunExecutionBlocked) as blocked:
+    from app.run_controller.service import ManualRunAwaitingHumanInput
+    from app.pdf_report import PdfReportRepository
+    from app.infographic import InfographicRepository
+    from app.final_qc import FinalQcRepository
+    from app.human_review import HumanReviewDecision, HumanReviewRepository
+
+    with pytest.raises(ManualRunAwaitingHumanInput) as blocked:
         controller.resume(RUN_ID)
-    assert blocked.value.phase_key is PipelinePhaseKey.PDF_REPORT
+    assert blocked.value.phase_key is PipelinePhaseKey.HUMAN_REVIEW
     quality = DataQualityRepository(
         odds_repository.database, artifact_root=odds_repository.artifact_root
     ).get_latest_for_run(RUN_ID)
@@ -282,6 +288,44 @@ def test_zero_game_chain_uses_no_provider_and_blocks_pdf_report(tmp_path: Path) 
     assert quality is not None and quality.snapshot.games == ()
     assert packet is not None and packet.packet.games == ()
     assert feature_set is not None and feature_set.feature_set.games == ()
+    pdf = PdfReportRepository(odds_repository.database, artifact_root=odds_repository.artifact_root).get_latest_for_run(RUN_ID)
+    infographic = InfographicRepository(odds_repository.database, artifact_root=odds_repository.artifact_root).get_latest_for_run(RUN_ID)
+    qc = FinalQcRepository(odds_repository.database, artifact_root=odds_repository.artifact_root).get_latest_for_run(RUN_ID)
+    assert pdf is not None and pdf.document.games == ()
+    assert infographic is not None and infographic.document.full_report_game_count == 0
+    assert qc is not None and qc.snapshot.overall_result == "pass"
+    attempts = tuple(phase.attempt_count for phase in controller.show(RUN_ID).phases)
+    with pytest.raises(ManualRunAwaitingHumanInput):
+        controller.resume(RUN_ID)
+    assert tuple(phase.attempt_count for phase in controller.show(RUN_ID).phases) == attempts
+    review_repository = HumanReviewRepository(
+        odds_repository.database,
+        artifact_root=odds_repository.artifact_root,
+        clock=lambda: phase4.sealed_at + timedelta(seconds=1),
+    )
+    review = review_repository.record_decision(
+        run_id=RUN_ID,
+        reviewer_id="zero-game-reviewer@example.test",
+        decision=HumanReviewDecision.APPROVE,
+        notes="approved exact zero-game fixture",
+    )
+    completed = controller.resume(RUN_ID)
+    assert completed.phases[14].status is PipelinePhaseStatus.SUCCEEDED
+    assert review_repository.get_attempt_evidence(RUN_ID, 1).review == review
+    with odds_repository.database.connect(write=True) as connection:
+        for table, checksum_column in (
+            ("pdf_report_snapshots", "semantic_checksum"),
+            ("infographic_snapshots", "infographic_checksum"),
+            ("final_qc_snapshots", "qc_checksum"),
+        ):
+            with pytest.raises(sqlite3.IntegrityError, match="immutable after seal"):
+                connection.execute(
+                    f"UPDATE {table} SET {checksum_column}=? WHERE run_id=?",
+                    ("f" * 64, RUN_ID),
+                )
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            connection.execute("DELETE FROM human_review_records WHERE review_id=?", (review.review_id,))
+    assert odds_repository.database.integrity_check()["ok"] is True
 
 
 def test_nondefault_data_quality_policy_reconstructs_from_retained_evidence(

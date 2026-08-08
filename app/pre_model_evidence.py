@@ -24,38 +24,105 @@ class PreModelEvidenceError(RuntimeError):
 _MANIFEST_PROFILES: dict[str, tuple[str, frozenset[str], tuple[str, ...]]] = {
     "data_quality": (
         "DSE_DATA_QUALITY_ATTEMPT_MANIFEST_V1",
-        frozenset({"assembled", "input_failed", "assessment_failed", "persistence_failed"}),
+        frozenset(
+            {"assembled", "input_failed", "assessment_failed", "persistence_failed"}
+        ),
         ("daily_slate", "game_state", "baseball_intelligence_assembly", "odds_weather"),
     ),
     "matchup_packet": (
         "DSE_MATCHUP_PACKET_ATTEMPT_MANIFEST_V1",
-        frozenset({"assembled", "input_failed", "assembly_failed", "persistence_failed"}),
-        ("daily_slate", "game_state", "baseball_intelligence_assembly", "odds_weather", "data_quality"),
+        frozenset(
+            {"assembled", "input_failed", "assembly_failed", "persistence_failed"}
+        ),
+        (
+            "daily_slate",
+            "game_state",
+            "baseball_intelligence_assembly",
+            "odds_weather",
+            "data_quality",
+        ),
     ),
     "model_feature_set": (
         "DSE_MODEL_FEATURE_SET_ATTEMPT_MANIFEST_V1",
-        frozenset({"assembled", "input_failed", "transformation_failed", "persistence_failed"}),
+        frozenset(
+            {"assembled", "input_failed", "transformation_failed", "persistence_failed"}
+        ),
         ("data_quality", "matchup_packet"),
     ),
     "predictions": (
         "DSE_PREDICTIONS_ATTEMPT_MANIFEST_V1",
-        frozenset({"assembled", "input_failed", "validation_failed", "persistence_failed"}),
+        frozenset(
+            {"assembled", "input_failed", "validation_failed", "persistence_failed"}
+        ),
         ("model_feature_set", "data_quality"),
     ),
     "value_engine": (
         "DSE_VALUE_ENGINE_ATTEMPT_MANIFEST_V1",
-        frozenset({"assembled", "input_failed", "calculation_failed", "persistence_failed"}),
+        frozenset(
+            {"assembled", "input_failed", "calculation_failed", "persistence_failed"}
+        ),
         ("predictions", "model_feature_set", "data_quality"),
     ),
     "recommendation_gate": (
         "DSE_RECOMMENDATION_GATE_ATTEMPT_MANIFEST_V1",
-        frozenset({"assembled", "input_failed", "evaluation_failed", "persistence_failed"}),
+        frozenset(
+            {"assembled", "input_failed", "evaluation_failed", "persistence_failed"}
+        ),
         ("value_engine", "predictions", "data_quality"),
     ),
     "rankings": (
         "DSE_RANKINGS_ATTEMPT_MANIFEST_V1",
-        frozenset({"assembled", "input_failed", "ranking_failed", "persistence_failed"}),
+        frozenset(
+            {"assembled", "input_failed", "ranking_failed", "persistence_failed"}
+        ),
         ("recommendation_gate",),
+    ),
+    "pdf_report": (
+        "DSE_PDF_REPORT_ATTEMPT_MANIFEST_V1",
+        frozenset(
+            {
+                "assembled",
+                "input_failed",
+                "assembly_failed",
+                "rendering_failed",
+                "verification_failed",
+                "persistence_failed",
+            }
+        ),
+        (
+            "rankings",
+            "recommendation_gate",
+            "value_engine",
+            "predictions",
+            "matchup_packet",
+            "data_quality",
+        ),
+    ),
+    "infographic": (
+        "DSE_INFOGRAPHIC_ATTEMPT_MANIFEST_V1",
+        frozenset(
+            {
+                "assembled",
+                "input_failed",
+                "assembly_failed",
+                "rendering_failed",
+                "verification_failed",
+                "persistence_failed",
+            }
+        ),
+        ("pdf_report",),
+    ),
+    "final_qc": (
+        "DSE_FINAL_QC_ATTEMPT_MANIFEST_V1",
+        frozenset(
+            {"assembled", "input_failed", "validation_failed", "persistence_failed"}
+        ),
+        ("pdf_report", "infographic"),
+    ),
+    "human_review": (
+        "DSE_HUMAN_REVIEW_ATTEMPT_MANIFEST_V1",
+        frozenset({"assembled"}),
+        ("final_qc", "pdf_report", "infographic"),
     ),
 }
 
@@ -67,7 +134,9 @@ def aware_utc(value: datetime, field: str) -> datetime:
 
 
 def require_checksum(value: str, field: str) -> str:
-    if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+    if len(value) != 64 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
         raise PreModelEvidenceError(
             f"{field} must be 64 lowercase hexadecimal characters"
         )
@@ -256,23 +325,55 @@ class PreModelAttemptManifestV1:
                 "present_input_checksums",
                 "provider_policy",
             }:
-                raise PreModelEvidenceError("Predictions manifest input evidence is incomplete")
-            self._validate_policy_and_inventory(value, "provider_policy", "input_inventory_checksum")
+                raise PreModelEvidenceError(
+                    "Predictions manifest input evidence is incomplete"
+                )
+            self._validate_policy_and_inventory(
+                value, "provider_policy", "input_inventory_checksum"
+            )
             invalid_inputs = value["invalid_inputs"]
-            if not isinstance(invalid_inputs, list) or not all(isinstance(item, dict) for item in invalid_inputs):
-                raise PreModelEvidenceError("Predictions invalid input inventory must be an array of objects")
+            if not isinstance(invalid_inputs, list) or not all(
+                isinstance(item, dict) for item in invalid_inputs
+            ):
+                raise PreModelEvidenceError(
+                    "Predictions invalid input inventory must be an array of objects"
+                )
         elif self.phase_key == "value_engine":
             if set(value) != {"market_inventory_checksum", "policy"}:
-                raise PreModelEvidenceError("Value Engine manifest input evidence is incomplete")
-            self._validate_policy_and_inventory(value, "policy", "market_inventory_checksum")
+                raise PreModelEvidenceError(
+                    "Value Engine manifest input evidence is incomplete"
+                )
+            self._validate_policy_and_inventory(
+                value, "policy", "market_inventory_checksum"
+            )
         elif self.phase_key == "recommendation_gate":
             if set(value) != {"policy"}:
-                raise PreModelEvidenceError("Recommendation Gate manifest policy is incomplete")
+                raise PreModelEvidenceError(
+                    "Recommendation Gate manifest policy is incomplete"
+                )
             self._validate_policy_and_inventory(value, "policy", None)
         elif self.phase_key == "rankings":
             if set(value) != {"policy"}:
                 raise PreModelEvidenceError("Rankings manifest policy is incomplete")
             self._validate_policy_and_inventory(value, "policy", None)
+        elif self.phase_key in {"pdf_report", "infographic", "final_qc"}:
+            if set(value) != {"policy"}:
+                raise PreModelEvidenceError(
+                    "final-output manifest policy is incomplete"
+                )
+            self._validate_policy_and_inventory(value, "policy", None)
+        elif self.phase_key == "human_review":
+            if set(value) != {"decision", "review_checksum", "review_id"}:
+                raise PreModelEvidenceError(
+                    "Human Review manifest evidence is incomplete"
+                )
+            if value["decision"] not in {"approve", "reject"}:
+                raise PreModelEvidenceError("Human Review decision is invalid")
+            if not isinstance(value["review_id"], str) or not value["review_id"]:
+                raise PreModelEvidenceError("Human Review review_id is invalid")
+            if not isinstance(value["review_checksum"], str):
+                raise PreModelEvidenceError("Human Review checksum is invalid")
+            require_checksum(value["review_checksum"], "review_checksum")
 
     @staticmethod
     def _validate_policy_and_inventory(
@@ -436,12 +537,25 @@ def verify_manifest(
     try:
         parsed = json.loads(retained.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise PreModelEvidenceError("retained manifest is not canonical UTF-8 JSON") from exc
-    if not isinstance(parsed, dict) or canonical_json_bytes(parsed) != retained or parsed != manifest.as_dict():
+        raise PreModelEvidenceError(
+            "retained manifest is not canonical UTF-8 JSON"
+        ) from exc
+    if (
+        not isinstance(parsed, dict)
+        or canonical_json_bytes(parsed) != retained
+        or parsed != manifest.as_dict()
+    ):
         raise PreModelEvidenceError("retained manifest is not exact canonical evidence")
     configured = tuple(str(value) for value in secret_values if str(value))
-    if redact_value(parsed, configured, preserve_field_names=("bookmaker_key", "market_key")) != parsed:
-        raise PreModelEvidenceError("retained manifest contains credential-bearing material")
+    if (
+        redact_value(
+            parsed, configured, preserve_field_names=("bookmaker_key", "market_key")
+        )
+        != parsed
+    ):
+        raise PreModelEvidenceError(
+            "retained manifest contains credential-bearing material"
+        )
 
 
 def _validate_manifest_secrets(
@@ -450,8 +564,15 @@ def _validate_manifest_secrets(
 ) -> None:
     payload = manifest.as_dict()
     configured = tuple(str(value) for value in secret_values if str(value))
-    if redact_value(payload, configured, preserve_field_names=("bookmaker_key", "market_key")) != payload:
-        raise PreModelEvidenceError("attempt manifest contains credential-bearing material")
+    if (
+        redact_value(
+            payload, configured, preserve_field_names=("bookmaker_key", "market_key")
+        )
+        != payload
+    ):
+        raise PreModelEvidenceError(
+            "attempt manifest contains credential-bearing material"
+        )
 
 
 def _safe_file_identity(path: Path) -> os.stat_result:
@@ -462,7 +583,9 @@ def _safe_file_identity(path: Path) -> os.stat_result:
     if not stat.S_ISREG(metadata.st_mode):
         raise PreModelEvidenceError("immutable artifact is not a regular file")
     if hasattr(metadata, "st_nlink") and metadata.st_nlink != 1:
-        raise PreModelEvidenceError("immutable artifact must have exactly one hard link")
+        raise PreModelEvidenceError(
+            "immutable artifact must have exactly one hard link"
+        )
     return metadata
 
 
@@ -471,10 +594,15 @@ def _read_owned_bytes(path: Path) -> bytes:
     observed = path.read_bytes()
     after = _safe_file_identity(path)
     identity_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_nlink")
-    if any(getattr(before, name, None) != getattr(after, name, None) for name in identity_fields):
+    if any(
+        getattr(before, name, None) != getattr(after, name, None)
+        for name in identity_fields
+    ):
         raise PreModelEvidenceError("immutable artifact changed while being verified")
     if len(observed) != after.st_size:
-        raise PreModelEvidenceError("immutable artifact byte count changed while being verified")
+        raise PreModelEvidenceError(
+            "immutable artifact byte count changed while being verified"
+        )
     return observed
 
 
