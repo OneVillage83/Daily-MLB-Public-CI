@@ -319,4 +319,3 @@ def test_human_review_contract_binds_exact_qc_and_artifact_identity() -> None:
             "contains configured-value",
             secret_values=("configured-value",),
         )
-

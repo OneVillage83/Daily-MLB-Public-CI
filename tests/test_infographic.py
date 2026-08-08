@@ -71,4 +71,3 @@ def test_pick_of_day_and_rank_inventory_cannot_be_rewritten() -> None:
     assert feed.pick_of_day is not None
     with pytest.raises(InfographicContractError, match="rank order"):
         replace(feed, recommendations=(replace(feed.pick_of_day, recommendation_rank=3),))
-
