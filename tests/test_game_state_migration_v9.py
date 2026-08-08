@@ -500,7 +500,7 @@ def test_v9_constants_and_historical_v1_to_v8_identities_are_pinned() -> None:
     assert FORMAL_SCHEMA_V9_FINGERPRINT == (
         "c54cdd8b10591e7247f7c1a4d4f1b2bbe385c1ac7fbcb09be8bccd70228130bd"
     )
-    assert [row[0] for row in MIGRATION_HISTORY] == list(range(1, 14))
+    assert [row[0] for row in MIGRATION_HISTORY] == list(range(1, 15))
     assert MIGRATION_HISTORY[9] == (10, MIGRATION_V10_NAME, MIGRATION_V10_CHECKSUM)
     assert MIGRATION_HISTORY[8] == (
         9,
@@ -714,8 +714,8 @@ def test_recognized_v8_upgrade_creates_verified_backup_and_preserves_rows(
                 ).fetchone()[0]
             ).split()
         )
-        assert "schema_versionIN(1,2,3,4,5,6,7,8,9,10,11,12,13)" in collector_sql
-        assert "database_schema_versionIN(7,8,9,10,11,12,13)" in pipeline_sql
+        assert "schema_versionIN(1,2,3,4,5,6,7,8,9,10,11,12,13,14)" in collector_sql
+        assert "database_schema_versionIN(7,8,9,10,11,12,13,14)" in pipeline_sql
         assert schema_fingerprint(verification) == FORMAL_SCHEMA_V14_FINGERPRINT
         assert verification.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert verification.execute("PRAGMA foreign_key_check").fetchall() == []

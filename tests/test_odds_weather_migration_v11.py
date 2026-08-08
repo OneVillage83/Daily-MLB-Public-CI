@@ -1130,7 +1130,7 @@ def test_v11_identity_and_historical_chain_are_pinned() -> None:
     assert MIGRATION_V10_CHECKSUM == V10_CHECKSUM
     assert FORMAL_SCHEMA_V10_FINGERPRINT == V10_FINGERPRINT
     assert MIGRATION_HISTORY[10] == (11, MIGRATION_V11_NAME, MIGRATION_V11_CHECKSUM)
-    assert tuple(version for version, _, _ in MIGRATION_HISTORY) == tuple(range(1, 14))
+    assert tuple(version for version, _, _ in MIGRATION_HISTORY) == tuple(range(1, 15))
 
 
 def test_fresh_v11_has_exact_objects_and_no_pre_v11_backup(tmp_path: Path) -> None:

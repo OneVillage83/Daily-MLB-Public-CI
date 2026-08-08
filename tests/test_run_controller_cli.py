@@ -93,7 +93,7 @@ def test_cli_start_show_json_and_duplicate_without_executing_network(
     assert configured.service_auth_token not in serialized
 
 
-def test_production_controller_registers_first_eleven_phases(tmp_path: Path) -> None:
+def test_production_controller_registers_all_fifteen_phases(tmp_path: Path) -> None:
     configured = _settings(tmp_path / "handlers.db")
 
     controller = build_controller(
@@ -101,8 +101,7 @@ def test_production_controller_registers_first_eleven_phases(tmp_path: Path) -> 
         configured_settings=configured,
     )
 
-    assert tuple(controller.handlers) == tuple(PipelinePhaseKey)[:11]
-    assert PipelinePhaseKey.PDF_REPORT not in controller.handlers
+    assert tuple(controller.handlers) == tuple(PipelinePhaseKey)
 
 
 def test_cli_human_show_lists_all_phases(tmp_path: Path, capsys) -> None:

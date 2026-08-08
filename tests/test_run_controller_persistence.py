@@ -1117,7 +1117,7 @@ def test_v7_collector_run_rebuild_preserves_structure_data_and_dependencies(
         compact_after = re.sub(r"\s+", "", after_sql)
         assert compact_before.replace(
             "schema_versionIN(1,2,3,4,5,6)",
-                "schema_versionIN(1,2,3,4,5,6,7,8,9,10,11,12,13)",
+                "schema_versionIN(1,2,3,4,5,6,7,8,9,10,11,12,13,14)",
         ) == compact_after
         assert verification.execute(
             "SELECT run_id,event_id,associated_at FROM run_games"
@@ -1314,7 +1314,7 @@ def test_v7_through_v9_preserves_pipeline_runs_and_widens_schema_version(
                 ).fetchone()[0]
             ).split()
         )
-        assert "database_schema_versionIN(7,8,9,10,11,12,13)" in pipeline_sql
+        assert "database_schema_versionIN(7,8,9,10,11,12,13,14)" in pipeline_sql
         assert {
             str(row[0])
             for row in verification.execute(
