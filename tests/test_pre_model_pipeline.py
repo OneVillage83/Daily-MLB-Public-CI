@@ -244,19 +244,19 @@ def test_zero_game_chain_completes_outputs_and_waits_for_human_review(tmp_path: 
         phase_input_checksum=hashlib.sha256(b"zero-game-phase4").hexdigest(),
         raw_captures=(),
     )
-    result, completed = odds_repository.assemble_inventory(inventory)
+    result, completed_inventory = odds_repository.assemble_inventory(inventory)
     phase4 = odds_repository.persist_assembly(
         run_id=RUN_ID,
         phase_attempt=1,
         result=result,
-        inventory=completed,
+        inventory=completed_inventory,
     )
     pipeline = PipelineRunRepository(odds_repository.database)
     pipeline.transition_pipeline_phase(
         RUN_ID,
         PipelinePhaseKey.ODDS_WEATHER,
         PipelinePhaseStatus.SUCCEEDED,
-        input_checksum=completed.phase_input_checksum,
+        input_checksum=completed_inventory.phase_input_checksum,
         output_checksum=phase4.snapshot.checksum,
         artifact_relpath=phase4.artifact.relpath,
         transitioned_at=phase4.sealed_at.isoformat(),
@@ -309,8 +309,8 @@ def test_zero_game_chain_completes_outputs_and_waits_for_human_review(tmp_path: 
         decision=HumanReviewDecision.APPROVE,
         notes="approved exact zero-game fixture",
     )
-    completed = controller.resume(RUN_ID)
-    assert completed.phases[14].status is PipelinePhaseStatus.SUCCEEDED
+    completed_summary = controller.resume(RUN_ID)
+    assert completed_summary.phases[14].status is PipelinePhaseStatus.SUCCEEDED
     assert review_repository.get_attempt_evidence(RUN_ID, 1).review == review
     with odds_repository.database.connect(write=True) as connection:
         for table, checksum_column in (

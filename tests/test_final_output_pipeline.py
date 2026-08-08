@@ -48,8 +48,8 @@ NOW = datetime(2026, 8, 7, 16, tzinfo=timezone.utc)
 
 
 def _report_game(ordinal: int, decision: str, rank: int | None = None) -> PdfReportGameV1:
-    outcomes = tuple(
-        PdfReportOutcomeV1(
+    def outcome(side: str) -> PdfReportOutcomeV1:
+        return PdfReportOutcomeV1(
             side=side,
             outcome_team_id=f"team-{side}-{ordinal}",
             prediction_probability=0.55 if side == "home" else 0.45,
@@ -68,8 +68,8 @@ def _report_game(ordinal: int, decision: str, rank: int | None = None) -> PdfRep
             prediction_checksum="b" * 64,
             market_context_checksum="c" * 64,
         )
-        for side in ("home", "away")
-    )
+
+    outcomes = (outcome("home"), outcome("away"))
     return PdfReportGameV1(
         ordinal=ordinal,
         source_game_id=f"game-{ordinal}",

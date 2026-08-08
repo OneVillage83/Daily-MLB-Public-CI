@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 
 import pytest
@@ -53,16 +54,17 @@ def test_feed_story_render_is_deterministic_fixed_size_and_has_no_external_asset
 
 
 def test_infographic_policy_prohibits_recalculation_rewrite_approval_and_staking() -> None:
-    for field in (
-        "allow_value_recalculation",
-        "allow_decision_rewrite",
-        "allow_rank_rewrite",
-        "allow_missing_data_fabrication",
-        "allow_publication_approval",
-        "allow_stake_sizing",
-    ):
+    constructors: tuple[Callable[[], InfographicPolicyV1], ...] = (
+        lambda: InfographicPolicyV1(allow_value_recalculation=True),
+        lambda: InfographicPolicyV1(allow_decision_rewrite=True),
+        lambda: InfographicPolicyV1(allow_rank_rewrite=True),
+        lambda: InfographicPolicyV1(allow_missing_data_fabrication=True),
+        lambda: InfographicPolicyV1(allow_publication_approval=True),
+        lambda: InfographicPolicyV1(allow_stake_sizing=True),
+    )
+    for constructor in constructors:
         with pytest.raises(InfographicPolicyError, match="prohibited"):
-            InfographicPolicyV1(**{field: True})
+            constructor()
 
 
 def test_pick_of_day_and_rank_inventory_cannot_be_rewritten() -> None:
