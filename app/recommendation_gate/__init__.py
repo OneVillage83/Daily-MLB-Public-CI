@@ -43,6 +43,17 @@ from app.recommendation_gate.production import (
     ProductionRecommendationGateV1,
     RecommendationPolicyV1 as ProductionRecommendationPolicyV1,
 )
+from app.recommendation_gate.run_line import (
+    RUN_LINE_GATE_GAME_CONTRACT_VERSION,
+    RUN_LINE_GATE_OUTCOME_CONTRACT_VERSION,
+    RUN_LINE_POLICY_PENDING_REASON,
+    RUN_LINE_REFERENCE_GATE_POLICY_VERSION,
+    RUN_LINE_REFERENCE_REASON,
+    RunLineGateError,
+    RunLineGateGameV1,
+    RunLineGateOutcomeV1,
+    evaluate_run_line_reference_gate,
+)
 from app.recommendation_gate.repository import RecommendationGatePersistenceConflict, RecommendationGateRepository
 
 __all__ = [
@@ -80,7 +91,16 @@ __all__ = [
     "RECOMMENDATION_GATE_PHASE_INPUT_CONTRACT",
     "RECOMMENDATION_GATE_POLICY_VERSION",
     "RECOMMENDATION_GATE_PRODUCTION_CONTRACT",
+    "RUN_LINE_GATE_GAME_CONTRACT_VERSION",
+    "RUN_LINE_GATE_OUTCOME_CONTRACT_VERSION",
+    "RUN_LINE_POLICY_PENDING_REASON",
+    "RUN_LINE_REFERENCE_GATE_POLICY_VERSION",
+    "RUN_LINE_REFERENCE_REASON",
     "RecommendationGatePhaseHandler",
     "RecommendationGatePersistenceConflict",
     "RecommendationGateRepository",
+    "RunLineGateError",
+    "RunLineGateGameV1",
+    "RunLineGateOutcomeV1",
+    "evaluate_run_line_reference_gate",
 ]
