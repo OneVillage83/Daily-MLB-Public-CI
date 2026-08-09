@@ -15,6 +15,16 @@ from app.value_engine.contracts import (
     ValueSide,
 )
 from app.value_engine.engine import evaluate_game_value, evaluate_value_engine
+from app.value_engine.game_total import (
+    GAME_TOTAL_VALUE_CALCULATION_VERSION,
+    GAME_TOTAL_VALUE_GAME_CONTRACT_VERSION,
+    GAME_TOTAL_VALUE_OUTCOME_CONTRACT_VERSION,
+    MAX_UNRESOLVED_TOTAL_VALUE_TAIL,
+    GameTotalGameValueV1,
+    GameTotalOutcomeValueV1,
+    GameTotalValueError,
+    evaluate_game_total_value,
+)
 from app.value_engine.pricing import (
     ValueMathError,
     ValueMathV1,
@@ -51,6 +61,13 @@ from app.value_engine.repository import ValueEnginePersistenceConflict, ValueEng
 
 __all__ = [
     "EligibleBookPairV1",
+    "GAME_TOTAL_VALUE_CALCULATION_VERSION",
+    "GAME_TOTAL_VALUE_GAME_CONTRACT_VERSION",
+    "GAME_TOTAL_VALUE_OUTCOME_CONTRACT_VERSION",
+    "GameTotalGameValueV1",
+    "GameTotalOutcomeValueV1",
+    "GameTotalValueError",
+    "MAX_UNRESOLVED_TOTAL_VALUE_TAIL",
     "MAX_UNRESOLVED_VALUE_TAIL",
     "MarketValueV1",
     "MoneylineGameValueV1",
@@ -84,6 +101,7 @@ __all__ = [
     "american_to_implied_probability",
     "calculate_value_math",
     "conditional_win_probability",
+    "evaluate_game_total_value",
     "evaluate_game_value",
     "evaluate_run_line_value",
     "evaluate_value_engine",
