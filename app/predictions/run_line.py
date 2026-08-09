@@ -17,6 +17,7 @@ from app.predictions.market_foundation import (
     PredictionTargetV1,
     capability_for_family,
 )
+from app.team_aliases import CANONICAL_TEAM_KEYS
 
 RUN_LINE_PREDICTION_CONTRACT_VERSION = "DSE_MLB_RUN_LINE_PREDICTION_V1"
 RUN_LINE_PROJECTION_CONTRACT_VERSION = "DSE_MLB_RUN_LINE_PROJECTION_V1"
@@ -110,6 +111,8 @@ class RunLinePredictionV1:
     """V2A run-line prediction evidence; sportsbook lines remain outside Predictions."""
 
     source_game_id: str
+    away_team_id: str
+    home_team_id: str
     target: PredictionTargetV1
     rollout_state: ModelRolloutState
     recommendation_eligible: bool
@@ -125,6 +128,12 @@ class RunLinePredictionV1:
     def __post_init__(self) -> None:
         source_game_id = _required_text(self.source_game_id, "source_game_id")
         object.__setattr__(self, "source_game_id", source_game_id)
+        if (
+            self.away_team_id not in CANONICAL_TEAM_KEYS
+            or self.home_team_id not in CANONICAL_TEAM_KEYS
+            or self.away_team_id == self.home_team_id
+        ):
+            raise MultiMarketContractError("run-line prediction team identity is invalid")
         if self.target.source_game_id != source_game_id:
             raise MultiMarketContractError("run-line target game identity mismatch")
         if (
@@ -176,10 +185,12 @@ class RunLinePredictionV1:
 
     def as_dict(self) -> dict[str, object]:
         return {
+            "away_team_id": self.away_team_id,
             "calculation_version": self.calculation_version,
             "contract_version": self.contract_version,
             "distribution_checksum": self.distribution_checksum,
             "expected_home_margin": self.expected_home_margin,
+            "home_team_id": self.home_team_id,
             "model_id": self.model_id,
             "model_version": self.model_version,
             "recommendation_eligible": self.recommendation_eligible,
@@ -230,6 +241,8 @@ def build_run_line_prediction(game_prediction: GamePredictionV1) -> RunLinePredi
     )
     return RunLinePredictionV1(
         source_game_id=game_prediction.source_game_id,
+        away_team_id=game_prediction.away_team_id,
+        home_team_id=game_prediction.home_team_id,
         target=target,
         rollout_state=capability.rollout_state,
         recommendation_eligible=capability.recommendation_eligible,
