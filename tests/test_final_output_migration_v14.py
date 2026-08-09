@@ -3,6 +3,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
+import app.migrations as migrations
 from app.database import Database
 from app.final_output_migration import (
     FINAL_OUTPUT_SCHEMA_V14_IMMUTABILITY_TRIGGER_STATEMENTS,
@@ -39,6 +42,10 @@ from app.migrations import (
 
 FROZEN_V13_CHECKSUM = "9606657f9497cd54444ecb35680f05d7003a0db535d2e9a1fcc594c9bbf63089"
 FROZEN_V13_FINGERPRINT = "d33d27ba07d21aa35584e0afe3c39334deba30170d761897acb13e9e04a65fee"
+FROZEN_V13_STATEMENT_COUNT = 155
+V14_CHECKSUM = "b55f91f1826442c43b4c6e210188c7ec5f48885d2f5c191a23849bf4aa17b1e0"
+V14_FINGERPRINT = "9586d679479cf38e2e4f238cc3a804ef1700dca629ec744ce43abebaa7df0266"
+V14_STATEMENT_COUNT = 161
 
 
 def _install_v13(path: Path) -> None:
@@ -79,9 +86,11 @@ def test_v14_identity_and_frozen_v13_identity() -> None:
     assert MIGRATION_V14_NAME == "final_output_pipeline_v1_temporal_persistence"
     assert MIGRATION_V13_CHECKSUM == FROZEN_V13_CHECKSUM
     assert FORMAL_SCHEMA_V13_FINGERPRINT == FROZEN_V13_FINGERPRINT
-    assert len(FORMAL_SCHEMA_V13_STATEMENTS) == 155
+    assert len(FORMAL_SCHEMA_V13_STATEMENTS) == FROZEN_V13_STATEMENT_COUNT
+    assert MIGRATION_V14_CHECKSUM == V14_CHECKSUM
+    assert FORMAL_SCHEMA_V14_FINGERPRINT == V14_FINGERPRINT
+    assert len(FORMAL_SCHEMA_V14_STATEMENTS) == V14_STATEMENT_COUNT
     assert MIGRATION_HISTORY[13] == (14, MIGRATION_V14_NAME, MIGRATION_V14_CHECKSUM)
-    assert len(FORMAL_SCHEMA_V14_STATEMENTS) > 0
 
 
 def test_fresh_and_v13_upgrade_are_equivalent(tmp_path: Path) -> None:
@@ -114,3 +123,35 @@ def test_v14_object_inventory_and_artifact_paths(tmp_path: Path) -> None:
     assert "pdf_report/snapshots/" in sql
     assert "infographic/snapshots/" in sql
     assert "final_qc/snapshots/" in sql
+
+
+def test_injected_v14_statement_failure_rolls_back_exact_v13(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "failed-v14.db"
+    _install_v13(path)
+    monkeypatch.setattr(
+        migrations,
+        "FORMAL_SCHEMA_V14_STATEMENTS",
+        (*FORMAL_SCHEMA_V14_STATEMENTS, "THIS IS NOT VALID SQLITE"),
+    )
+
+    with pytest.raises(sqlite3.OperationalError):
+        ensure_schema(path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert connection.execute("SELECT max(version) FROM schema_migrations").fetchone()[0] == 13
+        assert schema_fingerprint(connection) == FROZEN_V13_FINGERPRINT
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        v14_names = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE name GLOB 'pdf_report_*' "
+                "OR name GLOB 'infographic_*' OR name GLOB 'final_qc_*' "
+                "OR name GLOB 'human_review_*'"
+            )
+        }
+        assert v14_names == set()

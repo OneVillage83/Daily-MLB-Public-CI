@@ -2,13 +2,74 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable
 
-from app.artifacts import validate_artifact_relpath
+from app.artifacts import resolve_contained_path
 from app.daily_slate.contracts import canonical_sha256
 from app.final_qc.contracts import FINAL_QC_CHECK_CODES, FinalQcCheckV1, FinalQcPolicyV1, FinalQcV1
+from app.infographic.artifact import verify_infographic_artifacts
 from app.infographic.repository import PersistedInfographicV1
+from app.pdf_report.artifact import pdf_preflight, verify_production_pdf_report_artifacts
 from app.pdf_report.repository import PersistedPdfReportV1
+from app.pre_model_evidence import PreModelArtifactV1
 from app.redaction import redact_value
+
+
+def _physical_check(operation: Callable[[], Any]) -> tuple[bool, object]:
+    try:
+        observation = operation()
+    except Exception as exc:
+        return False, {"error_type": type(exc).__name__, "status": "failed"}
+    return True, observation
+
+
+def _actual_size(artifact_root: Path, artifact: PreModelArtifactV1) -> dict[str, object]:
+    path = resolve_contained_path(artifact_root, artifact.relpath)
+    actual = path.stat().st_size
+    if actual != artifact.byte_count:
+        raise ValueError("artifact byte-count evidence mismatch")
+    return {"actual": actual, "expected": artifact.byte_count}
+
+
+def _contained_relpath(artifact_root: Path, artifact: PreModelArtifactV1) -> str:
+    resolve_contained_path(artifact_root, artifact.relpath)
+    return artifact.relpath
+
+
+def _actual_pdf_preflight(
+    artifact_root: Path,
+    pdf: PersistedPdfReportV1,
+) -> dict[str, object]:
+    path = resolve_contained_path(artifact_root, pdf.artifacts.pdf.relpath)
+    result = pdf_preflight(path.read_bytes())
+    if (
+        result.sha256 != pdf.artifacts.pdf.checksum
+        or result.byte_count != pdf.artifacts.pdf.byte_count
+        or result.page_count != pdf.artifacts.page_count
+    ):
+        raise ValueError("PDF preflight evidence mismatch")
+    return result.as_dict()
+
+
+def _verify_pdf_artifacts(
+    artifact_root: Path,
+    pdf: PersistedPdfReportV1,
+) -> dict[str, object]:
+    verify_production_pdf_report_artifacts(pdf.document, pdf.artifacts, artifact_root)
+    return {"checksum": pdf.artifacts.pdf.checksum, "status": "verified"}
+
+
+def _verify_infographic_artifact_set(
+    artifact_root: Path,
+    infographic: PersistedInfographicV1,
+) -> dict[str, object]:
+    verify_infographic_artifacts(infographic.document, infographic.artifacts, artifact_root)
+    return {
+        "feed_checksum": infographic.artifacts.feed.checksum,
+        "status": "verified",
+        "story_checksum": infographic.artifacts.story.checksum,
+    }
 
 
 def assess_final_qc(
@@ -16,6 +77,7 @@ def assess_final_qc(
     pdf: PersistedPdfReportV1,
     infographic: PersistedInfographicV1,
     evaluated_at: datetime,
+    artifact_root: Path,
     policy: FinalQcPolicyV1 = FinalQcPolicyV1(),
     secret_values: Iterable[str] = (),
 ) -> tuple[tuple[FinalQcCheckV1, ...], FinalQcV1 | None]:
@@ -31,16 +93,34 @@ def assess_final_qc(
     card_ids = [c.source_game_id for c in cards]
     variant_card_ids = [[card.source_game_id for card in inventory] for inventory in variant_cards]
     recommend_ids = [g.source_game_id for g in sorted(recommendations, key=lambda g: g.recommendation_rank or 0)]
+    all_artifacts = (
+        pdf.artifacts.document,
+        pdf.artifacts.pdf,
+        pdf.artifacts.manifest,
+        infographic.artifacts.document,
+        infographic.artifacts.feed,
+        infographic.artifacts.story,
+        infographic.artifacts.manifest,
+    )
+    pdf_artifact_verified = _physical_check(lambda: _verify_pdf_artifacts(artifact_root, pdf))
+    pdf_size_verified = _physical_check(lambda: _actual_size(artifact_root, pdf.artifacts.pdf))
+    pdf_preflight_verified = _physical_check(lambda: _actual_pdf_preflight(artifact_root, pdf))
+    infographic_artifacts_verified = _physical_check(
+        lambda: _verify_infographic_artifact_set(artifact_root, infographic)
+    )
+    contained_paths = _physical_check(
+        lambda: [_contained_relpath(artifact_root, artifact) for artifact in all_artifacts]
+    )
+    artifact_sizes = _physical_check(
+        lambda: [_actual_size(artifact_root, artifact) for artifact in all_artifacts]
+    )
     observations = {
         "pdf_snapshot_exists": (True, pdf.snapshot_id),
-        "pdf_artifact_checksum": (len(pdf.artifacts.pdf.checksum) == 64, pdf.artifacts.pdf.checksum),
-        "pdf_byte_count": (pdf.artifacts.pdf.byte_count > 0, pdf.artifacts.pdf.byte_count),
-        "pdf_preflight": (pdf.artifacts.page_count > 0, pdf.artifacts.page_count),
+        "pdf_artifact_checksum": pdf_artifact_verified,
+        "pdf_byte_count": pdf_size_verified,
+        "pdf_preflight": pdf_preflight_verified,
         "infographic_snapshot_exists": (True, infographic.snapshot_id),
-        "infographic_artifact_checksums": (
-            all(len(a.checksum) == 64 for a in (infographic.artifacts.feed, infographic.artifacts.story)),
-            [infographic.artifacts.feed.checksum, infographic.artifacts.story.checksum],
-        ),
+        "infographic_artifact_checksums": infographic_artifacts_verified,
         "infographic_dimensions": (
             tuple((v.width, v.height) for v in info.variants) == ((1080, 1350), (1080, 1920)),
             [(v.width, v.height) for v in info.variants],
@@ -122,36 +202,8 @@ def assess_final_qc(
                 evaluated_at.isoformat(),
             ],
         ),
-        "paths_contained": (
-            all(
-                validate_artifact_relpath(a.relpath) == a.relpath
-                for a in (
-                    pdf.artifacts.document,
-                    pdf.artifacts.pdf,
-                    pdf.artifacts.manifest,
-                    infographic.artifacts.document,
-                    infographic.artifacts.feed,
-                    infographic.artifacts.story,
-                    infographic.artifacts.manifest,
-                )
-            ),
-            True,
-        ),
-        "artifact_sizes": (
-            all(
-                a.byte_count > 0
-                for a in (
-                    pdf.artifacts.document,
-                    pdf.artifacts.pdf,
-                    pdf.artifacts.manifest,
-                    infographic.artifacts.document,
-                    infographic.artifacts.feed,
-                    infographic.artifacts.story,
-                    infographic.artifacts.manifest,
-                )
-            ),
-            True,
-        ),
+        "paths_contained": contained_paths,
+        "artifact_sizes": artifact_sizes,
         "secret_free": (
             redact_value(
                 {"pdf": doc.as_dict(), "infographic": info.as_dict()},

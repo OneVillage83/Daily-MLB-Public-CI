@@ -481,7 +481,12 @@ class InfographicRepository:
             raise InfographicNotFoundError("sealed Infographic snapshot not found")
         return r
 
-    def _verify(self, r: sqlite3.Row) -> PersistedInfographicV1:
+    def _verify(
+        self,
+        r: sqlite3.Row,
+        *,
+        verify_artifacts: bool = True,
+    ) -> PersistedInfographicV1:
         p = json.loads(str(r["canonical_json"]))
         variants = p["variants"]
         if not isinstance(variants, list) or len(variants) != 2:
@@ -507,7 +512,10 @@ class InfographicRepository:
             r["canonical_json"]
         ):
             raise InfographicIntegrityError("Infographic canonical reconstruction mismatch")
-        pdf = self.pdf.get_by_snapshot_id(str(r["upstream_pdf_report_snapshot_id"]))
+        if verify_artifacts:
+            pdf = self.pdf.get_by_snapshot_id(str(r["upstream_pdf_report_snapshot_id"]))
+        else:
+            pdf = self.pdf.get_by_snapshot_id_for_final_qc(str(r["upstream_pdf_report_snapshot_id"]))
         replay = self.assemble(pdf, generated_at=doc.generated_at)
         if replay.canonical_json_bytes() != doc.canonical_json_bytes():
             raise InfographicIntegrityError("historical Infographic replay mismatch")
@@ -521,7 +529,8 @@ class InfographicRepository:
                 int(r["render_manifest_byte_count"]),
             ),
         )
-        verify_infographic_artifacts(doc, arts, self.artifact_root)
+        if verify_artifacts:
+            verify_infographic_artifacts(doc, arts, self.artifact_root)
         self.get_attempt_evidence(str(r["run_id"]), int(r["phase_attempt"]))
         return PersistedInfographicV1(
             str(r["snapshot_id"]),
@@ -537,6 +546,14 @@ class InfographicRepository:
     def get_by_snapshot_id(self, snapshot_id: str) -> PersistedInfographicV1:
         return self._verify(self._row("snapshot_id=?", (snapshot_id,)))
 
+    def get_by_snapshot_id_for_final_qc(self, snapshot_id: str) -> PersistedInfographicV1:
+        """Load exact semantic evidence while leaving physical checks to Final QC."""
+
+        return self._verify(
+            self._row("snapshot_id=?", (snapshot_id,)),
+            verify_artifacts=False,
+        )
+
     def get_for_run_attempt(self, run_id: str, attempt: int) -> PersistedInfographicV1:
         return self._verify(self._row("run_id=? AND phase_attempt=?", (validate_run_id(run_id), attempt)))
 
@@ -547,3 +564,14 @@ class InfographicRepository:
                 (validate_run_id(run_id),),
             ).fetchone()
         return None if r is None else self._verify(r)
+
+    def get_latest_for_run_for_final_qc(self, run_id: str) -> PersistedInfographicV1 | None:
+        """Resolve the latest exact semantic snapshot for physical Final QC."""
+
+        with self.database.connect() as c:
+            r = c.execute(
+                "SELECT * FROM infographic_snapshots WHERE run_id=? AND sealed_at IS NOT NULL "
+                "ORDER BY phase_attempt DESC LIMIT 1",
+                (validate_run_id(run_id),),
+            ).fetchone()
+        return None if r is None else self._verify(r, verify_artifacts=False)

@@ -130,10 +130,10 @@ class FinalQcRepository:
         return aware_utc(self.clock(), "repository clock")
 
     def resolve_upstream(self, run_id: str) -> FinalQcUpstreamV1:
-        info = self.infographic.get_latest_for_run(validate_run_id(run_id))
+        info = self.infographic.get_latest_for_run_for_final_qc(validate_run_id(run_id))
         if info is None:
             raise FinalQcIntegrityError("Final QC requires sealed Infographic")
-        pdf = self.pdf.get_by_snapshot_id(info.document.upstream_pdf_report_snapshot_id)
+        pdf = self.pdf.get_by_snapshot_id_for_final_qc(info.document.upstream_pdf_report_snapshot_id)
         return FinalQcUpstreamV1(pdf, info)
 
     @staticmethod
@@ -151,6 +151,7 @@ class FinalQcRepository:
             pdf=u.pdf,
             infographic=u.infographic,
             evaluated_at=evaluated_at,
+            artifact_root=self.artifact_root,
             policy=self.policy,
             secret_values=self.secret_values,
         )

@@ -653,7 +653,12 @@ class PdfReportRepository:
             raise PdfReportNotFoundError("sealed PDF Report snapshot not found")
         return row
 
-    def _verify(self, row: sqlite3.Row) -> PersistedPdfReportV1:
+    def _verify(
+        self,
+        row: sqlite3.Row,
+        *,
+        verify_artifacts: bool = True,
+    ) -> PersistedPdfReportV1:
         payload = json.loads(str(row["canonical_json"]))
         with self.database.connect() as connection:
             children = connection.execute(
@@ -719,7 +724,8 @@ class PdfReportRepository:
             ),
             int(row["pdf_page_count"]),
         )
-        verify_production_pdf_report_artifacts(document, artifacts, self.artifact_root)
+        if verify_artifacts:
+            verify_production_pdf_report_artifacts(document, artifacts, self.artifact_root)
         self.get_attempt_evidence(str(row["run_id"]), int(row["phase_attempt"]))
         return PersistedPdfReportV1(
             str(row["snapshot_id"]),
@@ -734,6 +740,14 @@ class PdfReportRepository:
 
     def get_by_snapshot_id(self, snapshot_id: str) -> PersistedPdfReportV1:
         return self._verify(self._snapshot_row("snapshot_id=?", (snapshot_id,)))
+
+    def get_by_snapshot_id_for_final_qc(self, snapshot_id: str) -> PersistedPdfReportV1:
+        """Load exact semantic evidence while leaving physical checks to Final QC."""
+
+        return self._verify(
+            self._snapshot_row("snapshot_id=?", (snapshot_id,)),
+            verify_artifacts=False,
+        )
 
     def get_for_run_attempt(self, run_id: str, attempt: int) -> PersistedPdfReportV1:
         return self._verify(self._snapshot_row("run_id=? AND phase_attempt=?", (validate_run_id(run_id), attempt)))
