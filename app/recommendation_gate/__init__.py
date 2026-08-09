@@ -22,6 +22,17 @@ from app.recommendation_gate.engine import (
     evaluate_recommendation_gate,
     evidence_confidence_score,
 )
+from app.recommendation_gate.game_total import (
+    GAME_TOTAL_GATE_GAME_CONTRACT_VERSION,
+    GAME_TOTAL_GATE_OUTCOME_CONTRACT_VERSION,
+    GAME_TOTAL_POLICY_PENDING_REASON,
+    GAME_TOTAL_REFERENCE_GATE_POLICY_VERSION,
+    GAME_TOTAL_REFERENCE_REASON,
+    GameTotalGateError,
+    GameTotalGateGameV1,
+    GameTotalGateOutcomeV1,
+    evaluate_game_total_reference_gate,
+)
 from app.recommendation_gate.policy import (
     DEFAULT_RECOMMENDATION_POLICY_V1,
     RecommendationPolicyError,
@@ -59,6 +70,14 @@ from app.recommendation_gate.repository import RecommendationGatePersistenceConf
 __all__ = [
     "DEFAULT_RECOMMENDATION_POLICY_V1",
     "EvidenceConfidenceBand",
+    "GAME_TOTAL_GATE_GAME_CONTRACT_VERSION",
+    "GAME_TOTAL_GATE_OUTCOME_CONTRACT_VERSION",
+    "GAME_TOTAL_POLICY_PENDING_REASON",
+    "GAME_TOTAL_REFERENCE_GATE_POLICY_VERSION",
+    "GAME_TOTAL_REFERENCE_REASON",
+    "GameTotalGateError",
+    "GameTotalGateGameV1",
+    "GameTotalGateOutcomeV1",
     "OperationalRiskLevel",
     "PolicyGateResultV1",
     "RecommendationDecision",
@@ -72,6 +91,7 @@ __all__ = [
     "RecommendationReason",
     "RecommendationV1",
     "confidence_band",
+    "evaluate_game_total_reference_gate",
     "evaluate_recommendation",
     "evaluate_recommendation_game",
     "evaluate_recommendation_gate",
