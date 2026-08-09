@@ -42,6 +42,8 @@ def _fake_game_prediction(*, home: float = 4.6, away: float = 4.1) -> GamePredic
         GamePredictionV1,
         SimpleNamespace(
             source_game_id="123456",
+            away_team_id="SF",
+            home_team_id="LAD",
             checksum="a" * 64,
             model_manifest_checksum="b" * 64,
             model_id="dse_mlb_reference_heuristic_poisson",
@@ -87,6 +89,8 @@ def test_run_line_prediction_is_market_independent_and_projects_lines_later() ->
     assert prediction.calculation_version == RUN_LINE_CALCULATION_VERSION
     assert prediction.rollout_state is ModelRolloutState.REFERENCE
     assert prediction.recommendation_eligible is False
+    assert prediction.away_team_id == "SF"
+    assert prediction.home_team_id == "LAD"
     assert prediction.expected_home_margin == pytest.approx(0.5)
     assert prediction.target == PredictionTargetV1(
         source_game_id="123456",
@@ -125,7 +129,7 @@ def test_integer_run_line_retains_push_probability() -> None:
     assert projection.push_probability > 0.0
 
 
-def test_run_line_contract_rejects_wrong_distribution_kind() -> None:
+def test_run_line_contract_rejects_wrong_distribution_kind_and_team_identity() -> None:
     wrong = DiscreteDistributionV1(
         kind=PredictionDistributionKind.TEAM_RUNS,
         outcomes=(DiscreteOutcomeProbabilityV1(0, 1.0),),
@@ -139,6 +143,8 @@ def test_run_line_contract_rejects_wrong_distribution_kind() -> None:
     with pytest.raises(MultiMarketContractError, match="run-margin"):
         RunLinePredictionV1(
             source_game_id="123456",
+            away_team_id="SF",
+            home_team_id="LAD",
             target=target,
             rollout_state=ModelRolloutState.REFERENCE,
             recommendation_eligible=False,
@@ -148,4 +154,19 @@ def test_run_line_contract_rejects_wrong_distribution_kind() -> None:
             model_version="1",
             expected_home_margin=0.0,
             run_margin_distribution=wrong,
+        )
+    with pytest.raises(MultiMarketContractError, match="team identity"):
+        RunLinePredictionV1(
+            source_game_id="123456",
+            away_team_id="LAD",
+            home_team_id="LAD",
+            target=target,
+            rollout_state=ModelRolloutState.REFERENCE,
+            recommendation_eligible=False,
+            upstream_game_prediction_checksum="a" * 64,
+            upstream_model_manifest_checksum="b" * 64,
+            model_id="reference",
+            model_version="1",
+            expected_home_margin=0.0,
+            run_margin_distribution=full_game_run_margin_distribution(_run_distribution()),
         )
