@@ -5,6 +5,13 @@ from textwrap import wrap
 
 from app.infographic.contracts import InfographicDocumentV1, InfographicSelectionV1, InfographicVariantType
 
+PICK_CARD_HEIGHT = 290
+PICK_CARD_ADVANCE = 320
+SECONDARY_CARD_HEIGHT = 265
+SECONDARY_CARD_ADVANCE = 285
+METRIC_VALUE_Y_OFFSET = 202
+CARD_FOOTER_BOTTOM_OFFSET = 28
+
 
 def _text(x: int, y: int, value: str, *, size: int, fill: str, weight: int = 400, anchor: str = "start") -> str:
     return f'<text x="{x}" y="{y}" font-family="Arial, Helvetica, sans-serif" font-size="{size}" font-weight="{weight}" fill="{fill}" text-anchor="{anchor}">{escape(value)}</text>'
@@ -83,13 +90,13 @@ def _card(
         parts.extend(
             (
                 _text(mx, y + 174, label_text, size=13, fill=policy.secondary_text_hex, weight=700),
-                _text(mx, y + 202, value, size=21, fill=policy.primary_text_hex, weight=700),
+                _text(mx, y + METRIC_VALUE_Y_OFFSET, value, size=21, fill=policy.primary_text_hex, weight=700),
             )
         )
     parts.append(
         _text(
             x + 30,
-            y + height - 28,
+            y + height - CARD_FOOTER_BOTTOM_OFFSET,
             f"Rank #{card.recommendation_rank} | {card.bookmaker_count} eligible books | {card.quality_disposition.upper()}",
             size=16,
             fill=policy.secondary_text_hex,
@@ -149,12 +156,12 @@ def render_infographic_svg(document: InfographicDocumentV1, variant: Infographic
                 x=margin,
                 y=cursor,
                 width=content,
-                height=290,
+                height=PICK_CARD_HEIGHT,
                 label="Pick of the Day",
                 prominent=True,
             )
         )
-        cursor += 320
+        cursor += PICK_CARD_ADVANCE
     for card in selected.recommendations:
         parts.append(
             _card(
@@ -163,12 +170,12 @@ def render_infographic_svg(document: InfographicDocumentV1, variant: Infographic
                 x=margin,
                 y=cursor,
                 width=content,
-                height=235,
+                height=SECONDARY_CARD_HEIGHT,
                 label=f"Recommendation #{card.recommendation_rank}",
                 prominent=False,
             )
         )
-        cursor += 255
+        cursor += SECONDARY_CARD_ADVANCE
     weather_y = min(cursor, height - 270)
     parts.extend(
         (
