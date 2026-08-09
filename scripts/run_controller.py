@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -117,7 +117,10 @@ from app.run_controller.service import (  # noqa: E402
     ManualRunSummaryV1,
     PhaseHandler,
 )
+from app.stats.acquisition import AcquisitionError  # noqa: E402
+from app.stats.auto_daily import AutoDailyStatsGapError  # noqa: E402
 from app.stats.features import FEATURE_VERSION_V3  # noqa: E402
+from app.stats.pipeline_preflight import run_pipeline_stats_preflight  # noqa: E402
 
 
 EXIT_SUCCESS = 0
@@ -483,12 +486,31 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
 
     start = commands.add_parser(
         "start",
-        help="initialize a pending manual pipeline run without executing phases",
+        help=(
+            "repair/acquire current stats, then initialize a pending manual pipeline run"
+        ),
     )
     _add_common_database_argument(start, configured_settings)
     start.add_argument("--date", required=True, help="requested slate date YYYY-MM-DD")
     start.add_argument("--force-refresh", action="store_true")
     start.add_argument("--json", action="store_true", dest="json_output")
+    start.add_argument(
+        "--stats-raw-root",
+        type=Path,
+        default=configured_settings.artifact_dir / "stats_raw",
+        help="raw statistics evidence root used by the automatic preflight",
+    )
+    start.add_argument(
+        "--stats-report",
+        type=Path,
+        default=configured_settings.artifact_dir / "stats_acquisition_report.json",
+        help="statistics acquisition report path used by the automatic preflight",
+    )
+    start.add_argument(
+        "--skip-stats-preflight",
+        action="store_true",
+        help="skip automatic stats repair/acquisition (diagnostic or controlled test use only)",
+    )
 
     show = commands.add_parser("show", help="show persisted pipeline run state")
     _add_common_database_argument(show, configured_settings)
@@ -546,6 +568,24 @@ def _print_summary(summary: ManualRunSummaryV1, *, json_output: bool) -> None:
     )
 
 
+def _run_stats_preflight_if_enabled(
+    args: argparse.Namespace,
+    *,
+    configured_settings: Settings,
+) -> None:
+    if args.command != "start":
+        return
+    if args.skip_stats_preflight or configured_settings.app_env.casefold() == "test":
+        return
+    target_date = date.fromisoformat(args.date)
+    run_pipeline_stats_preflight(
+        database_path=args.database,
+        raw_root=args.stats_raw_root,
+        report_path=args.stats_report,
+        target_date=target_date,
+    )
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -553,6 +593,10 @@ def main(
 ) -> int:
     args = build_parser(configured_settings).parse_args(argv)
     try:
+        _run_stats_preflight_if_enabled(
+            args,
+            configured_settings=configured_settings,
+        )
         controller = build_controller(
             args.database,
             configured_settings=configured_settings,
@@ -582,6 +626,12 @@ def main(
             file=sys.stderr,
         )
         return EXIT_BLOCKED
+    except (AcquisitionError, AutoDailyStatsGapError) as exc:
+        print(
+            f"STATS PREFLIGHT FAILED: {redact_text(exc, configured_settings.credential_values())}",
+            file=sys.stderr,
+        )
+        return EXIT_EXECUTION_FAILED
     except ManualRunExecutionError as exc:
         print(f"EXECUTION FAILED: {exc}", file=sys.stderr)
         return EXIT_EXECUTION_FAILED
