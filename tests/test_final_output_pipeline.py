@@ -4,6 +4,7 @@ import sqlite3
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -46,6 +47,7 @@ from app.run_controller.service import (
     ManualRunController,
     ManualRunExecutionError,
     PhaseExecutionResult,
+    PhaseHandler,
 )
 
 
@@ -437,12 +439,17 @@ def test_final_qc_owns_physical_artifact_failures_and_persists_checks(
     database = Database(tmp_path / "qc-failure.db")
     run_repository = PipelineRunRepository(database)
     final_repository = FinalQcRepository(database, artifact_root=tmp_path, clock=lambda: NOW + timedelta(minutes=3))
-    handlers = {phase.key: _ReadyHandler() for phase in CANONICAL_PIPELINE_PHASES}
-    handlers[PipelinePhaseKey.FINAL_QC] = FinalQcPhaseHandler(
-        database,
-        artifact_root=tmp_path,
-        clock=lambda: NOW + timedelta(minutes=3),
-        repository=final_repository,
+    handlers: dict[PipelinePhaseKey, PhaseHandler] = {
+        phase.key: _ReadyHandler() for phase in CANONICAL_PIPELINE_PHASES
+    }
+    handlers[PipelinePhaseKey.FINAL_QC] = cast(
+        PhaseHandler,
+        FinalQcPhaseHandler(
+            database,
+            artifact_root=tmp_path,
+            clock=lambda: NOW + timedelta(minutes=3),
+            repository=final_repository,
+        ),
     )
     controller = ManualRunController(
         run_repository,
