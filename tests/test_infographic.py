@@ -8,7 +8,14 @@ import pytest
 from app.infographic.assembly import assemble_infographic_document
 from app.infographic.contracts import InfographicContractError, InfographicVariantType
 from app.infographic.policy import InfographicPolicyError, InfographicPolicyV1
-from app.infographic.renderer import render_infographic_svg
+from app.infographic.renderer import (
+    CARD_FOOTER_BOTTOM_OFFSET,
+    METRIC_VALUE_Y_OFFSET,
+    SECONDARY_CARD_ADVANCE,
+    SECONDARY_CARD_HEIGHT,
+    render_infographic_svg,
+)
+from scripts.generate_final_output_fixture import _report
 from tests.test_final_output_pipeline import NOW, _semantic_report
 
 
@@ -51,6 +58,30 @@ def test_feed_story_render_is_deterministic_fixed_size_and_has_no_external_asset
         assert f'width="{expected[variant][0]}" height="{expected[variant][1]}"'.encode() in first
         assert b"<image" not in first and b" href=" not in first and b"xlink:href" not in first
         assert document.checksum.encode() in first
+
+
+def test_multi_recommendation_secondary_cards_reserve_footer_clearance() -> None:
+    assert SECONDARY_CARD_HEIGHT - CARD_FOOTER_BOTTOM_OFFSET - METRIC_VALUE_Y_OFFSET >= 30
+    assert SECONDARY_CARD_ADVANCE - SECONDARY_CARD_HEIGHT >= 20
+
+    document = assemble_infographic_document(
+        _report(16),
+        upstream_pdf_report_snapshot_id="pdf-report:fixture",
+        generated_at=NOW,
+    )
+    expected = {
+        InfographicVariantType.FEED_4X5: (3, 2),
+        InfographicVariantType.STORY_9X16: (4, 3),
+    }
+    for variant, (card_count, secondary_count) in expected.items():
+        selected = next(item for item in document.variants if item.variant is variant)
+        assert selected.pick_of_day is not None
+        cards = (selected.pick_of_day,) + selected.recommendations
+        assert len(cards) == card_count
+        svg = render_infographic_svg(document, variant)
+        assert svg.count(f'height="{SECONDARY_CARD_HEIGHT}" rx="24"'.encode()) == secondary_count
+        for card in selected.recommendations:
+            assert f"Rank #{card.recommendation_rank} |".encode() in svg
 
 
 def test_infographic_policy_prohibits_recalculation_rewrite_approval_and_staking() -> None:
