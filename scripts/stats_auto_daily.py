@@ -109,6 +109,8 @@ def _run(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
     raw_store = RawArtifactStore(args.raw_root)
 
     def run_command(command: AcquisitionCommand, requested_date: date):
+        # Use a fresh transport/service per retained acquisition run so request,
+        # retry, capture, and reconciliation counts remain scoped to that run.
         transport = build_stats_transport(
             mode=mode,
             raw_store=raw_store,
