@@ -22,6 +22,17 @@ from app.recommendation_gate.engine import (
     evaluate_recommendation_gate,
     evidence_confidence_score,
 )
+from app.recommendation_gate.first_five import (
+    FIRST_FIVE_GATE_GAME_CONTRACT_VERSION,
+    FIRST_FIVE_GATE_OUTCOME_CONTRACT_VERSION,
+    FIRST_FIVE_POLICY_PENDING_REASON,
+    FIRST_FIVE_REFERENCE_GATE_POLICY_VERSION,
+    FIRST_FIVE_REFERENCE_GATE_REASON,
+    FirstFiveGateError,
+    FirstFiveGateGameV1,
+    FirstFiveGateOutcomeV1,
+    evaluate_first_five_reference_gate,
+)
 from app.recommendation_gate.game_total import (
     GAME_TOTAL_GATE_GAME_CONTRACT_VERSION,
     GAME_TOTAL_GATE_OUTCOME_CONTRACT_VERSION,
@@ -70,6 +81,14 @@ from app.recommendation_gate.repository import RecommendationGatePersistenceConf
 __all__ = [
     "DEFAULT_RECOMMENDATION_POLICY_V1",
     "EvidenceConfidenceBand",
+    "FIRST_FIVE_GATE_GAME_CONTRACT_VERSION",
+    "FIRST_FIVE_GATE_OUTCOME_CONTRACT_VERSION",
+    "FIRST_FIVE_POLICY_PENDING_REASON",
+    "FIRST_FIVE_REFERENCE_GATE_POLICY_VERSION",
+    "FIRST_FIVE_REFERENCE_GATE_REASON",
+    "FirstFiveGateError",
+    "FirstFiveGateGameV1",
+    "FirstFiveGateOutcomeV1",
     "GAME_TOTAL_GATE_GAME_CONTRACT_VERSION",
     "GAME_TOTAL_GATE_OUTCOME_CONTRACT_VERSION",
     "GAME_TOTAL_POLICY_PENDING_REASON",
@@ -91,6 +110,7 @@ __all__ = [
     "RecommendationReason",
     "RecommendationV1",
     "confidence_band",
+    "evaluate_first_five_reference_gate",
     "evaluate_game_total_reference_gate",
     "evaluate_recommendation",
     "evaluate_recommendation_game",
