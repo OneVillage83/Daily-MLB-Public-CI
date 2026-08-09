@@ -112,6 +112,16 @@ def _optional_text(value: object) -> str | None:
     return text or None
 
 
+def _historical_source_path(path: Path | str) -> Path:
+    candidate = Path(path).expanduser()
+    if candidate.is_symlink():
+        raise HistoricalPITSourceError("historical source database must not be a symlink")
+    source = candidate.resolve()
+    if not source.exists() or not source.is_file():
+        raise HistoricalPITSourceError(f"historical source database not found: {source}")
+    return source
+
+
 @dataclass(frozen=True, slots=True)
 class HistoricalProviderSeasonCoverageV1:
     provider: str
@@ -332,11 +342,7 @@ class HistoricalPITSourceInventoryV1:
 
 @contextmanager
 def open_historical_source_read_only(path: Path | str) -> Iterator[sqlite3.Connection]:
-    source = Path(path).expanduser().resolve()
-    if not source.exists() or not source.is_file():
-        raise HistoricalPITSourceError(f"historical source database not found: {source}")
-    if source.is_symlink():
-        raise HistoricalPITSourceError("historical source database must not be a symlink")
+    source = _historical_source_path(path)
     uri_path = quote(source.as_posix(), safe="/:")
     try:
         connection = sqlite3.connect(
@@ -595,9 +601,7 @@ def inventory_historical_pit_source(
     end = _parse_date(end_date, "end_date")
     if end < start:
         raise HistoricalPITSourceError("end_date must not precede start_date")
-    source = Path(database_path).expanduser().resolve()
-    if not source.exists() or not source.is_file():
-        raise HistoricalPITSourceError(f"historical source database not found: {source}")
+    source = _historical_source_path(database_path)
     size = source.stat().st_size
     with open_historical_source_read_only(source) as connection:
         schema_checksum, optional_present = _validate_source_schema(connection)
