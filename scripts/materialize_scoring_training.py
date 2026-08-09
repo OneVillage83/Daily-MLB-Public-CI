@@ -16,6 +16,7 @@ from app.identifiers import parse_requested_date  # noqa: E402
 from app.model_feature_set.repository import ModelFeatureSetRepository  # noqa: E402
 from app.model_feature_set.schema import MODEL_FEATURE_NAMES_V1  # noqa: E402
 from app.predictions.historical_materialization import (  # noqa: E402
+    HistoricalScoringMaterializationArtifactV1,
     HistoricalScoringMaterializationError,
     build_historical_scoring_materialization,
     default_historical_scoring_materialization_path,
@@ -114,6 +115,57 @@ def _selected_features(args: argparse.Namespace) -> tuple[str, ...]:
     return tuple(sorted(feature_names))
 
 
+def _compact_summary(
+    artifact: HistoricalScoringMaterializationArtifactV1,
+) -> dict[str, object]:
+    payload = artifact.summary_as_dict()
+    raw_coverage = payload.get("coverage")
+    if not isinstance(raw_coverage, dict):
+        raise HistoricalScoringMaterializationError(
+            "historical materialization coverage summary is malformed"
+        )
+    coverage = dict(raw_coverage)
+    feature_coverage = coverage.pop("feature_coverage", None)
+    if not isinstance(feature_coverage, list):
+        raise HistoricalScoringMaterializationError(
+            "historical materialization feature coverage is malformed"
+        )
+    observed_counts: list[int] = []
+    missing_counts: list[int] = []
+    distinct_counts: list[int] = []
+    for item in feature_coverage:
+        if not isinstance(item, dict):
+            raise HistoricalScoringMaterializationError(
+                "historical feature coverage row is malformed"
+            )
+        observed_counts.append(int(item["observed_game_count"]))
+        missing_counts.append(int(item["missing_game_count"]))
+        distinct_counts.append(int(item["distinct_observed_value_count"]))
+    coverage.update(
+        {
+            "fully_observed_feature_count": sum(
+                value == 0 for value in missing_counts
+            ),
+            "never_observed_feature_count": sum(
+                value == 0 for value in observed_counts
+            ),
+            "variable_observed_feature_count": sum(
+                value >= 2 for value in distinct_counts
+            ),
+            "constant_observed_feature_count": sum(
+                observed > 0 and distinct <= 1
+                for observed, distinct in zip(
+                    observed_counts,
+                    distinct_counts,
+                    strict=True,
+                )
+            ),
+        }
+    )
+    payload["coverage"] = coverage
+    return payload
+
+
 def _run(
     args: argparse.Namespace,
     *,
@@ -150,7 +202,7 @@ def _run(
         artifact,
         output,
     )
-    payload = artifact.summary_as_dict()
+    payload = _compact_summary(artifact)
     payload.update(
         {
             "output_path": str(written),
