@@ -15,6 +15,17 @@ from app.value_engine.contracts import (
     ValueSide,
 )
 from app.value_engine.engine import evaluate_game_value, evaluate_value_engine
+from app.value_engine.first_five import (
+    FIRST_FIVE_BINDING_PENDING_REASON,
+    FIRST_FIVE_REFERENCE_REASON,
+    FIRST_FIVE_VALUE_CALCULATION_VERSION,
+    FIRST_FIVE_VALUE_GAME_CONTRACT_VERSION,
+    FIRST_FIVE_VALUE_OUTCOME_CONTRACT_VERSION,
+    FirstFiveGameValueV1,
+    FirstFiveOutcomeValueV1,
+    FirstFiveValueError,
+    evaluate_first_five_value,
+)
 from app.value_engine.game_total import (
     GAME_TOTAL_VALUE_CALCULATION_VERSION,
     GAME_TOTAL_VALUE_GAME_CONTRACT_VERSION,
@@ -61,6 +72,14 @@ from app.value_engine.repository import ValueEnginePersistenceConflict, ValueEng
 
 __all__ = [
     "EligibleBookPairV1",
+    "FIRST_FIVE_BINDING_PENDING_REASON",
+    "FIRST_FIVE_REFERENCE_REASON",
+    "FIRST_FIVE_VALUE_CALCULATION_VERSION",
+    "FIRST_FIVE_VALUE_GAME_CONTRACT_VERSION",
+    "FIRST_FIVE_VALUE_OUTCOME_CONTRACT_VERSION",
+    "FirstFiveGameValueV1",
+    "FirstFiveOutcomeValueV1",
+    "FirstFiveValueError",
     "GAME_TOTAL_VALUE_CALCULATION_VERSION",
     "GAME_TOTAL_VALUE_GAME_CONTRACT_VERSION",
     "GAME_TOTAL_VALUE_OUTCOME_CONTRACT_VERSION",
@@ -101,6 +120,7 @@ __all__ = [
     "american_to_implied_probability",
     "calculate_value_math",
     "conditional_win_probability",
+    "evaluate_first_five_value",
     "evaluate_game_total_value",
     "evaluate_game_value",
     "evaluate_run_line_value",
