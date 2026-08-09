@@ -76,6 +76,18 @@ from app.predictions.training import (
     ScoringTrainingResultV1,
     fit_empirical_scoring_model,
 )
+from app.predictions.training_data import (
+    FINAL_GAME_SCORE_CONTRACT_VERSION,
+    TRAINING_MATERIALIZATION_CONTRACT_VERSION,
+    TRAINING_MATERIALIZATION_EXCLUSION_CONTRACT_VERSION,
+    TRAINING_ROW_LINEAGE_CONTRACT_VERSION,
+    FinalGameScoreV1,
+    ScoringTrainingMaterializationError,
+    ScoringTrainingMaterializationV1,
+    TrainingMaterializationExclusionV1,
+    TrainingRowLineageV1,
+    materialize_scoring_training_data,
+)
 from app.predictions.handler import PredictionsPhaseHandler
 from app.predictions.production import (
     PREDICTIONS_CONTRACT_VERSION,
@@ -98,6 +110,7 @@ from app.predictions.repository import (
 __all__ = [
     "DiscreteDistributionV1",
     "DiscreteOutcomeProbabilityV1",
+    "FINAL_GAME_SCORE_CONTRACT_VERSION",
     "FULL_GAME_SCORING_TRAINER_VERSION",
     "GAME_TOTAL_CALCULATION_VERSION",
     "GAME_TOTAL_PREDICTION_CONTRACT_VERSION",
@@ -156,9 +169,17 @@ __all__ = [
     "ScoringModelEvaluationV1",
     "ScoringTrainingDatasetV1",
     "ScoringTrainingError",
+    "ScoringTrainingMaterializationError",
+    "ScoringTrainingMaterializationV1",
     "ScoringTrainingResultV1",
+    "TRAINING_MATERIALIZATION_CONTRACT_VERSION",
+    "TRAINING_MATERIALIZATION_EXCLUSION_CONTRACT_VERSION",
+    "TRAINING_ROW_LINEAGE_CONTRACT_VERSION",
     "ThresholdProjectionV1",
     "TotalLineProjectionV1",
+    "TrainingMaterializationExclusionV1",
+    "TrainingRowLineageV1",
+    "FinalGameScoreV1",
     "build_game_total_prediction",
     "build_run_line_prediction",
     "capabilities_for_version",
@@ -167,6 +188,7 @@ __all__ = [
     "full_game_run_margin_distribution",
     "full_game_total_runs_distribution",
     "home_spread_projection",
+    "materialize_scoring_training_data",
     "predict_game",
     "predict_model_feature_set",
     "predictions_artifact_relpath",
