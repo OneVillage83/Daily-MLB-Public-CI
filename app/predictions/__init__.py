@@ -15,6 +15,15 @@ from app.predictions.contracts import (
     PredictionsV1,
     RunDistributionV1,
 )
+from app.predictions.game_total import (
+    GAME_TOTAL_CALCULATION_VERSION,
+    GAME_TOTAL_PREDICTION_CONTRACT_VERSION,
+    GAME_TOTAL_PROJECTION_CONTRACT_VERSION,
+    GameTotalPredictionV1,
+    GameTotalProjectionV1,
+    build_game_total_prediction,
+    full_game_total_runs_distribution,
+)
 from app.predictions.market_foundation import (
     MULTI_MARKET_ROADMAP_CHECKSUM_V1,
     MULTI_MARKET_ROADMAP_V1,
@@ -74,7 +83,12 @@ from app.predictions.repository import (
 __all__ = [
     "DiscreteDistributionV1",
     "DiscreteOutcomeProbabilityV1",
+    "GAME_TOTAL_CALCULATION_VERSION",
+    "GAME_TOTAL_PREDICTION_CONTRACT_VERSION",
+    "GAME_TOTAL_PROJECTION_CONTRACT_VERSION",
     "GamePredictionV1",
+    "GameTotalPredictionV1",
+    "GameTotalProjectionV1",
     "HomeSpreadProjectionV1",
     "InvalidPredictionInputV1",
     "MULTI_MARKET_ROADMAP_CHECKSUM_V1",
@@ -118,10 +132,12 @@ __all__ = [
     "RunLineProjectionV1",
     "ThresholdProjectionV1",
     "TotalLineProjectionV1",
+    "build_game_total_prediction",
     "build_run_line_prediction",
     "capabilities_for_version",
     "capability_for_family",
     "full_game_run_margin_distribution",
+    "full_game_total_runs_distribution",
     "home_spread_projection",
     "predict_game",
     "predict_model_feature_set",
