@@ -69,5 +69,5 @@ def test_existing_raw_evidence_root_rejects_split_raw_tree(tmp_path: Path) -> No
         ]
     )
 
-    with pytest.raises(AutoDailyStatsGapError, match="STATS_RAW_ROOT"):
+    with pytest.raises(AutoDailyStatsGapError, match="--stats-raw-root"):
         _verify_existing_raw_evidence_root(database, raw_store)  # type: ignore[arg-type]
