@@ -70,8 +70,8 @@ def _verify_existing_raw_evidence_root(
         suffix = "" if len(missing) <= 3 else f" (+{len(missing) - 3} more)"
         raise AutoDailyStatsGapError(
             "selected stats raw root does not contain the retained raw evidence "
-            f"referenced by the database: {sample}{suffix}; configure STATS_RAW_ROOT "
-            "or pass --stats-raw-root with the existing append-only raw store"
+            f"referenced by the database: {sample}{suffix}; pass --stats-raw-root "
+            "with the existing append-only raw store"
         )
 
 
