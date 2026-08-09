@@ -15,6 +15,17 @@ from app.rankings.contracts import (
     RankingsV1,
 )
 from app.rankings.engine import rank_recommendations
+from app.rankings.first_five import (
+    FIRST_FIVE_RANKING_ENTRY_CONTRACT_VERSION,
+    FIRST_FIVE_RANKING_GAME_CONTRACT_VERSION,
+    FIRST_FIVE_RANKINGS_CONTRACT_VERSION,
+    FIRST_FIVE_REFERENCE_RANKING_POLICY_VERSION,
+    FirstFiveRankingEntryV1,
+    FirstFiveRankingGameV1,
+    FirstFiveRankingsError,
+    FirstFiveReferenceRankingsV1,
+    build_first_five_reference_rankings,
+)
 from app.rankings.game_total import (
     GAME_TOTAL_RANKING_ENTRY_CONTRACT_VERSION,
     GAME_TOTAL_RANKING_GAME_CONTRACT_VERSION,
@@ -55,6 +66,14 @@ from app.rankings.repository import RankingsPersistenceConflict, RankingsReposit
 
 __all__ = [
     "DEFAULT_RANKINGS_POLICY_V1",
+    "FIRST_FIVE_RANKING_ENTRY_CONTRACT_VERSION",
+    "FIRST_FIVE_RANKING_GAME_CONTRACT_VERSION",
+    "FIRST_FIVE_RANKINGS_CONTRACT_VERSION",
+    "FIRST_FIVE_REFERENCE_RANKING_POLICY_VERSION",
+    "FirstFiveRankingEntryV1",
+    "FirstFiveRankingGameV1",
+    "FirstFiveRankingsError",
+    "FirstFiveReferenceRankingsV1",
     "GAME_TOTAL_RANKING_ENTRY_CONTRACT_VERSION",
     "GAME_TOTAL_RANKING_GAME_CONTRACT_VERSION",
     "GAME_TOTAL_RANKINGS_CONTRACT_VERSION",
@@ -75,6 +94,7 @@ __all__ = [
     "RankingsPolicyError",
     "RankingsPolicyV1",
     "RankingsV1",
+    "build_first_five_reference_rankings",
     "build_game_total_reference_rankings",
     "rank_recommendations",
     "rankings_artifact_relpath",
