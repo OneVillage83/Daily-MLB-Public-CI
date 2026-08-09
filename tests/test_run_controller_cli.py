@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _settings(database_path: Path) -> Settings:
     return Settings(
+        app_env="test",
         database_path=database_path,
         artifact_dir=database_path.parent / "artifacts",
         report_timezone="America/Los_Angeles",
@@ -160,6 +161,7 @@ def test_cli_script_entrypoint_start_and_show_use_temporary_database(
     environment = dict(os.environ)
     environment.update(
         {
+            "APP_ENV": "test",
             "ARTIFACT_DIR": str(artifact_dir),
             "OPENWEATHER_ENABLED": "false",
             "REPORT_TIMEZONE": "America/Los_Angeles",
