@@ -28,7 +28,7 @@ from app.migrations import (
     FORMAL_SCHEMA_V9_STATEMENTS,
     FORMAL_SCHEMA_V10_FINGERPRINT,
     FORMAL_SCHEMA_V10_STATEMENTS,
-    FORMAL_SCHEMA_V13_FINGERPRINT,
+    FORMAL_SCHEMA_V14_FINGERPRINT,
     MIGRATION_HISTORY,
     MIGRATION_V10_CHECKSUM,
     MIGRATION_V10_NAME,
@@ -70,7 +70,7 @@ def _install_formal_v9(path: Path) -> None:
 
 
 def test_v10_constants_pin_historical_identities() -> None:
-    assert CURRENT_SCHEMA_VERSION == 13
+    assert CURRENT_SCHEMA_VERSION == 14
     assert MIGRATION_V10_NAME == "baseball_intelligence_assembly_v1_temporal_persistence"
     assert MIGRATION_V10_CHECKSUM == "877bdccccb64814a0844adb57279a87d477c79a0e8659ebc3a3dfc08d3bb071b"
     assert FORMAL_SCHEMA_V10_FINGERPRINT == "13a8ed8e477c23954c94a7b6a697c6dae74efd5d3806f0187b1fa2abeb5933c6"
@@ -120,8 +120,8 @@ def test_v9_upgrade_creates_verified_v10_backup_and_tables(tmp_path: Path) -> No
 
     result = ensure_schema(path)
 
-    assert result.version == 13
-    assert result.schema_fingerprint == FORMAL_SCHEMA_V13_FINGERPRINT
+    assert result.version == 14
+    assert result.schema_fingerprint == FORMAL_SCHEMA_V14_FINGERPRINT
     assert result.backup_path is not None and ".pre-v10-" in result.backup_path.name
     assert result.diagnostic_path is not None and result.diagnostic_path.name.startswith("migration-v10-")
     backup = sqlite3.connect(result.backup_path)
@@ -133,7 +133,7 @@ def test_v9_upgrade_creates_verified_v10_backup_and_tables(tmp_path: Path) -> No
         backup.close()
     verification = sqlite3.connect(path)
     try:
-        assert verification.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert verification.execute("PRAGMA user_version").fetchone()[0] == 14
         assert verification.execute("PRAGMA foreign_key_check").fetchall() == []
         assert {row[0] for row in verification.execute("SELECT name FROM sqlite_master WHERE type='table'")} >= {
             "baseball_intelligence_attempt_evidence",

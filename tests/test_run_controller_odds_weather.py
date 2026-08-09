@@ -59,15 +59,17 @@ def _capture(provider, endpoint, payload, retrieved_at, event_id=None):
     )
 
 
-def _phase4_pending_controller(tmp_path, monkeypatch, *, fail_first=False, include_decision_phases=False):
+def _phase4_pending_controller(
+    tmp_path, monkeypatch, *, fail_first=False, include_decision_phases=False, include_final_output=False
+):
     fixture_preview = _six_category_fixture()
     monkeypatch.setattr(
         game_state_repository_tests,
         "NOW",
         fixture_preview.slate.as_of_time,
     )
-    bia_repository, bia_result, bia_inventory, persisted, fixture, run_id = (
-        _six_category_repository(tmp_path, monkeypatch)
+    bia_repository, bia_result, bia_inventory, persisted, fixture, run_id = _six_category_repository(
+        tmp_path, monkeypatch
     )
     assert persisted is not None
     pipeline = PipelineRunRepository(
@@ -186,18 +188,23 @@ def _phase4_pending_controller(tmp_path, monkeypatch, *, fail_first=False, inclu
         clock=lambda: observed_at,
         odds_weather_handler=handler,
     )
-    if not include_decision_phases:
+    if not include_final_output:
+        registered_count = 11 if include_decision_phases else 7
         controller = ManualRunController(
             controller.repository,
             timezone_name=configured.report_timezone,
             configuration_metadata=_safe_configuration_metadata(configured),
-            handlers={key: value for key, value in controller.handlers.items() if key in tuple(PipelinePhaseKey)[:7]},
+            handlers={
+                key: value
+                for key, value in controller.handlers.items()
+                if key in tuple(PipelinePhaseKey)[:registered_count]
+            },
             clock=lambda: observed_at,
         )
     return controller, configured, handler, run_id, calls
 
 
-def test_production_controller_registers_exactly_phases_one_through_eleven(tmp_path) -> None:
+def test_production_controller_registers_all_fifteen_phases(tmp_path) -> None:
     configured = _settings(tmp_path / "controller.db", tmp_path / "artifacts")
     controller = build_controller(
         configured.database_path,
@@ -205,8 +212,7 @@ def test_production_controller_registers_exactly_phases_one_through_eleven(tmp_p
         clock=lambda: datetime(2026, 8, 1, tzinfo=timezone.utc),
     )
 
-    assert tuple(controller.handlers) == tuple(PipelinePhaseKey)[:11]
-    assert PipelinePhaseKey.PDF_REPORT not in controller.handlers
+    assert tuple(controller.handlers) == tuple(PipelinePhaseKey)
     metadata = _safe_configuration_metadata(configured)["odds_weather"]
     assert metadata == {
         "attempt_manifest_version": "DSE_ODDS_WEATHER_ATTEMPT_MANIFEST_V1",
@@ -319,7 +325,8 @@ def test_phase4_failure_retry_preserves_attempt_one_and_then_blocks_predictions(
     assert latest is not None and latest.phase_attempt == 2
     assert calls == {"odds": 2, "nws": 1, "openweather": 1}
     assert all(
-        phase.status in {
+        phase.status
+        in {
             PipelinePhaseStatus.SUCCEEDED,
             PipelinePhaseStatus.SUCCEEDED_WITH_WARNINGS,
             PipelinePhaseStatus.DEGRADED,

@@ -110,6 +110,15 @@ class ManualRunExecutionBlocked(ManualRunControllerError):
         )
 
 
+class ManualRunAwaitingHumanInput(ManualRunControllerError):
+    def __init__(self, run_id: str, phase_key: PipelinePhaseKey) -> None:
+        self.run_id = run_id
+        self.phase_key = phase_key
+        super().__init__(
+            f"execution paused at {phase_key.value}: awaiting explicit human input"
+        )
+
+
 class ManualRunRecoveryRequired(ManualRunControllerError):
     def __init__(self, run_id: str, phase_key: PipelinePhaseKey) -> None:
         self.run_id = run_id
@@ -367,6 +376,9 @@ class ManualRunController:
                 handler = self.handlers.get(next_phase.phase_key)
                 if handler is None:
                     raise ManualRunExecutionBlocked(run_id, next_phase.phase_key)
+                awaiting_input = getattr(handler, "awaiting_input", None)
+                if callable(awaiting_input) and bool(awaiting_input(run_id)):
+                    raise ManualRunAwaitingHumanInput(run_id, next_phase.phase_key)
                 if summary.run.status is PipelineRunStatus.PENDING:
                     self.repository.transition_pipeline_run(
                         run_id,

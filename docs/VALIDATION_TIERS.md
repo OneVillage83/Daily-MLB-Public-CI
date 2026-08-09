@@ -13,10 +13,13 @@ python scripts/validate_checkpoint.py task `
   --python-target app/odds_weather/handler.py `
   --python-target tests/test_odds_weather_handler.py
 
-# One grouped sprint boundary. Optional evidence root is scanned for configured
-# secret values after the tests have produced sanitized evidence.
-python scripts/validate_checkpoint.py sprint `
-  --generated-evidence-root .validation/prediction-to-ranking-sprint
+# Final-output focused task example.
+python scripts/validate_checkpoint.py task `
+  --test tests/test_final_output_pipeline.py `
+  --python-target app/pdf_report `
+  --python-target app/infographic `
+  --python-target app/final_qc `
+  --python-target app/human_review
 
 # Explain without executing anything.
 python scripts/validate_checkpoint.py sprint --explain
@@ -58,12 +61,13 @@ The sprint profile runs once after a grouped sprint. For the prediction-to-ranki
 - the private repository secret scan;
 - an optional generated-evidence configured-secret scan.
 
-This sprint changes the schema but not shared stats dependencies, lock files, or
-Docker inputs. Therefore it runs focused migration verification and explicitly
-skips the complete local stats suite, audits, hash-locked install rehearsals,
-Docker, and the exhaustive release-only failure-injection matrix.
-The exact-head public workflow supplies final cross-environment and release-image
-evidence.
+For the final-output sprint, the accepted Phase 1-11 base already has exhaustive
+cross-environment evidence. Local work therefore uses explicit focused task gates
+for PDF, Infographic, Final QC, Human Review, controller integration, and v14
+migration/SQLite checks. Public exact-head workflows provide the exhaustive
+development, stats, security, locked-install, Linux, and Docker evidence. This is
+an intentional accelerated checkpoint, not a silent promotion of `task` into a
+broader profile.
 
 ## `release`
 

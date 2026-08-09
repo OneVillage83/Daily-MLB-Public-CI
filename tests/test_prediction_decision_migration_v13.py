@@ -24,6 +24,7 @@ from app.migrations import (
     FORMAL_SCHEMA_V12_STATEMENTS,
     FORMAL_SCHEMA_V13_FINGERPRINT,
     FORMAL_SCHEMA_V13_STATEMENTS,
+    FORMAL_SCHEMA_V14_FINGERPRINT,
     MIGRATION_HISTORY,
     MIGRATION_V12_CHECKSUM,
     MIGRATION_V13_CHECKSUM,
@@ -78,7 +79,7 @@ def _install_v12(path: Path) -> None:
 
 
 def test_v13_identity_and_frozen_v12_identity() -> None:
-    assert CURRENT_SCHEMA_VERSION == 13
+    assert CURRENT_SCHEMA_VERSION == 14
     assert MIGRATION_V13_NAME == "prediction_decision_v1_temporal_persistence"
     assert MIGRATION_V12_CHECKSUM == V12_CHECKSUM
     assert FORMAL_SCHEMA_V12_FINGERPRINT == V12_FINGERPRINT
@@ -89,21 +90,21 @@ def test_v13_identity_and_frozen_v12_identity() -> None:
     assert len(FORMAL_SCHEMA_V13_STATEMENTS) == 155
 
 
-def test_fresh_and_v12_upgrade_are_exactly_equivalent(tmp_path: Path) -> None:
+def test_fresh_and_v12_upgrade_reach_the_current_schema(tmp_path: Path) -> None:
     fresh = Database(tmp_path / "fresh-v13.db")
     with fresh.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
-        assert schema_fingerprint(connection) == FORMAL_SCHEMA_V13_FINGERPRINT
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert schema_fingerprint(connection) == FORMAL_SCHEMA_V14_FINGERPRINT
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
     upgrade_path = tmp_path / "upgrade-v12.db"
     _install_v12(upgrade_path)
     result = ensure_schema(upgrade_path)
-    assert result.version == 13
-    assert result.schema_fingerprint == FORMAL_SCHEMA_V13_FINGERPRINT
+    assert result.version == 14
+    assert result.schema_fingerprint == FORMAL_SCHEMA_V14_FINGERPRINT
     with sqlite3.connect(upgrade_path) as connection:
-        assert schema_fingerprint(connection) == FORMAL_SCHEMA_V13_FINGERPRINT
+        assert schema_fingerprint(connection) == FORMAL_SCHEMA_V14_FINGERPRINT
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 

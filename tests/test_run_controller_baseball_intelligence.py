@@ -146,7 +146,7 @@ def _persist_phase_two(
     return controller, configured, run_id, slate, state
 
 
-def test_production_controller_registers_exactly_phases_one_through_eleven(
+def test_production_controller_registers_exactly_phases_one_through_fifteen(
     tmp_path,
 ) -> None:
     configured = _settings(tmp_path / "handlers.db", tmp_path / "artifacts")
@@ -155,8 +155,7 @@ def test_production_controller_registers_exactly_phases_one_through_eleven(
         configured_settings=configured,
         clock=lambda: SELECTION_OBSERVED,
     )
-    assert tuple(controller.handlers) == tuple(PipelinePhaseKey)[:11]
-    assert PipelinePhaseKey.PDF_REPORT not in controller.handlers
+    assert tuple(controller.handlers) == tuple(PipelinePhaseKey)
     metadata = _safe_configuration_metadata(configured)["baseball_intelligence"]
     assert metadata == {
         "attempt_manifest_version": (

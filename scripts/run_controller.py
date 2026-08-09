@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -75,6 +75,30 @@ from app.rankings import (  # noqa: E402
     RANKING_POLICY_VERSION,
     RankingsPhaseHandler,
 )
+from app.pdf_report import (  # noqa: E402
+    PDF_REPORT_PHASE_INPUT_CONTRACT,
+    PDF_REPORT_PRODUCTION_CONTRACT,
+    PDF_REPORT_RENDER_VERSION,
+    PdfReportPhaseHandler,
+)
+from app.infographic import (  # noqa: E402
+    INFOGRAPHIC_DOCUMENT_CONTRACT_VERSION,
+    INFOGRAPHIC_PHASE_INPUT_CONTRACT,
+    INFOGRAPHIC_RENDER_VERSION,
+    InfographicPhaseHandler,
+    InfographicPolicyV1,
+)
+from app.final_qc import (  # noqa: E402
+    FINAL_QC_CONTRACT_VERSION,
+    FINAL_QC_PHASE_INPUT_CONTRACT,
+    FINAL_QC_POLICY_VERSION,
+    FinalQcPhaseHandler,
+)
+from app.human_review import (  # noqa: E402
+    HUMAN_REVIEW_CONTRACT_VERSION,
+    HUMAN_REVIEW_PHASE_INPUT_CONTRACT,
+    HumanReviewPhaseHandler,
+)
 from app.database import Database  # noqa: E402
 from app.redaction import redact_text  # noqa: E402
 from app.run_controller.contracts import PipelinePhaseKey  # noqa: E402
@@ -84,6 +108,7 @@ from app.run_controller.repository import (  # noqa: E402
     PipelineRunRepository,
 )
 from app.run_controller.service import (  # noqa: E402
+    ManualRunAwaitingHumanInput,
     ManualRunController,
     ManualRunExecutionBlocked,
     ManualRunExecutionConflict,
@@ -210,6 +235,34 @@ def _safe_configuration_metadata(configured_settings: Settings) -> dict[str, Any
             "policy_version": RANKING_POLICY_VERSION,
             "source_mode": "retained_sqlite",
         },
+        "pdf_report": {
+            "contract_version": PDF_REPORT_PRODUCTION_CONTRACT,
+            "input_contract_version": PDF_REPORT_PHASE_INPUT_CONTRACT,
+            "network_enabled": False,
+            "render_version": PDF_REPORT_RENDER_VERSION,
+            "source_mode": "retained_sqlite",
+        },
+        "infographic": {
+            "contract_version": INFOGRAPHIC_DOCUMENT_CONTRACT_VERSION,
+            "input_contract_version": INFOGRAPHIC_PHASE_INPUT_CONTRACT,
+            "network_enabled": False,
+            "policy_version": InfographicPolicyV1().policy_version,
+            "render_version": INFOGRAPHIC_RENDER_VERSION,
+            "source_mode": "sealed_pdf_report",
+        },
+        "final_qc": {
+            "contract_version": FINAL_QC_CONTRACT_VERSION,
+            "input_contract_version": FINAL_QC_PHASE_INPUT_CONTRACT,
+            "network_enabled": False,
+            "policy_version": FINAL_QC_POLICY_VERSION,
+            "source_mode": "retained_sqlite",
+        },
+        "human_review": {
+            "contract_version": HUMAN_REVIEW_CONTRACT_VERSION,
+            "input_contract_version": HUMAN_REVIEW_PHASE_INPUT_CONTRACT,
+            "network_enabled": False,
+            "source_mode": "explicit_operator_evidence",
+        },
         "odds": {
             "enabled": bool(configured_settings.odds_api_key),
             "format": configured_settings.odds_format,
@@ -244,6 +297,10 @@ def build_controller(
     value_engine_handler: PhaseHandler | None = None,
     recommendation_gate_handler: PhaseHandler | None = None,
     rankings_handler: PhaseHandler | None = None,
+    pdf_report_handler: PhaseHandler | None = None,
+    infographic_handler: PhaseHandler | None = None,
+    final_qc_handler: PhaseHandler | None = None,
+    human_review_handler: PhaseHandler | None = None,
 ) -> ManualRunController:
     database = Database(
         database_path,
@@ -345,6 +402,34 @@ def build_controller(
             secret_values=secret_values,
             **retained_phase_options,
         )
+    if pdf_report_handler is None:
+        pdf_report_handler = PdfReportPhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        )
+    if infographic_handler is None:
+        infographic_handler = cast(PhaseHandler, InfographicPhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        ))
+    if final_qc_handler is None:
+        final_qc_handler = cast(PhaseHandler, FinalQcPhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        ))
+    if human_review_handler is None:
+        human_review_handler = HumanReviewPhaseHandler(
+            database,
+            artifact_root=configured_settings.artifact_dir,
+            secret_values=secret_values,
+            **retained_phase_options,
+        )
     controller_options: dict[str, Any] = {}
     if clock is not None:
         controller_options["clock"] = clock
@@ -364,6 +449,10 @@ def build_controller(
             PipelinePhaseKey.VALUE_ENGINE: value_engine_handler,
             PipelinePhaseKey.RECOMMENDATION_GATE: recommendation_gate_handler,
             PipelinePhaseKey.RANKINGS: rankings_handler,
+            PipelinePhaseKey.PDF_REPORT: pdf_report_handler,
+            PipelinePhaseKey.INFOGRAPHIC: infographic_handler,
+            PipelinePhaseKey.FINAL_QC: final_qc_handler,
+            PipelinePhaseKey.HUMAN_REVIEW: human_review_handler,
         },
         **controller_options,
     )
@@ -377,7 +466,7 @@ def _add_common_database_argument(
         "--database",
         type=Path,
         default=configured_settings.database_path,
-        help="schema-v13 SQLite database path",
+        help="schema-v14 SQLite database path",
     )
 
 
@@ -386,7 +475,8 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
         prog="run_controller",
         description=(
             "Initialize, inspect, and manually resume Daily MLB pipeline runs; "
-            "phases 1-11 can execute with immutable retained evidence"
+            "phases 1-15 execute with immutable retained evidence; Human Review "
+            "waits for explicit operator input"
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -407,7 +497,7 @@ def build_parser(configured_settings: Settings = settings) -> argparse.ArgumentP
 
     resume = commands.add_parser(
         "resume",
-        help=("resume persisted work through RANKINGS; the controller blocks safely at PDF_REPORT"),
+        help=("resume through Final QC and wait safely at HUMAN_REVIEW until an operator records a decision"),
     )
     _add_common_database_argument(resume, configured_settings)
     resume.add_argument("--run-id", required=True)
@@ -486,7 +576,7 @@ def main(
             file=sys.stderr,
         )
         return EXIT_CONFLICT
-    except (ManualRunExecutionBlocked, ManualRunRecoveryRequired) as exc:
+    except (ManualRunAwaitingHumanInput, ManualRunExecutionBlocked, ManualRunRecoveryRequired) as exc:
         print(
             f"EXECUTION BLOCKED: {redact_text(exc, configured_settings.credential_values())}",
             file=sys.stderr,

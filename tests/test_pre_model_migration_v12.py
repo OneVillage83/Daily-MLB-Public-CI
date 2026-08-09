@@ -24,7 +24,7 @@ from app.migrations import (
     FORMAL_SCHEMA_V11_STATEMENTS,
     FORMAL_SCHEMA_V12_FINGERPRINT,
     FORMAL_SCHEMA_V12_STATEMENTS,
-    FORMAL_SCHEMA_V13_FINGERPRINT,
+    FORMAL_SCHEMA_V14_FINGERPRINT,
     MIGRATION_HISTORY,
     MIGRATION_V11_CHECKSUM,
     MIGRATION_V12_CHECKSUM,
@@ -97,7 +97,7 @@ def _install_formal_v11(path: Path) -> None:
 
 
 def test_v12_identity_and_prior_v11_identity_are_exact() -> None:
-    assert CURRENT_SCHEMA_VERSION == 13
+    assert CURRENT_SCHEMA_VERSION == 14
     assert MIGRATION_V12_NAME == "pre_model_pipeline_v1_temporal_persistence"
     assert MIGRATION_V12_CHECKSUM == V12_CHECKSUM
     assert FORMAL_SCHEMA_V12_FINGERPRINT == V12_FINGERPRINT
@@ -111,8 +111,8 @@ def test_v12_identity_and_prior_v11_identity_are_exact() -> None:
 def test_fresh_install_preserves_v12_objects_and_integrity(tmp_path: Path) -> None:
     database = Database(tmp_path / "fresh-v12.db")
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
-        assert schema_fingerprint(connection) == FORMAL_SCHEMA_V13_FINGERPRINT
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert schema_fingerprint(connection) == FORMAL_SCHEMA_V14_FINGERPRINT
         names = {
             str(row[0])
             for row in connection.execute(
@@ -128,11 +128,11 @@ def test_frozen_v11_upgrade_reaches_current_schema(tmp_path: Path) -> None:
     upgraded_path = tmp_path / "upgrade-v11.db"
     _install_formal_v11(upgraded_path)
     result = ensure_schema(upgraded_path)
-    assert result.version == 13
-    assert result.schema_fingerprint == FORMAL_SCHEMA_V13_FINGERPRINT
+    assert result.version == 14
+    assert result.schema_fingerprint == FORMAL_SCHEMA_V14_FINGERPRINT
     with sqlite3.connect(upgraded_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
-        assert schema_fingerprint(connection) == FORMAL_SCHEMA_V13_FINGERPRINT
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert schema_fingerprint(connection) == FORMAL_SCHEMA_V14_FINGERPRINT
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 

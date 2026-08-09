@@ -145,10 +145,11 @@ These should not be implemented during Phase 1.
 
 ## Manual Run Controller Production Boundary
 
-The canonical manual pipeline currently has production handlers for exactly
-Phases 1-11: `DAILY_SLATE`, `GAME_STATE`, `BASEBALL_INTELLIGENCE_ASSEMBLY`,
+The canonical manual pipeline has production handlers for exactly all 15 initial
+phases: `DAILY_SLATE`, `GAME_STATE`, `BASEBALL_INTELLIGENCE_ASSEMBLY`,
 `ODDS_WEATHER`, `DATA_QUALITY`, `MATCHUP_PACKET`, `MODEL_FEATURE_SET`,
-`PREDICTIONS`, `VALUE_ENGINE`, `RECOMMENDATION_GATE`, and `RANKINGS`. Each handler verifies
+`PREDICTIONS`, `VALUE_ENGINE`, `RECOMMENDATION_GATE`, `RANKINGS`, `PDF_REPORT`,
+`INFOGRAPHIC`, `FINAL_QC`, and `HUMAN_REVIEW`. Each handler verifies
 sealed upstream repository evidence and returns an immutable phase result; the
 controller service alone owns phase and run status transitions. After a
 successful Phase 7 commit, execution enters the schema-v13 prediction/decision
@@ -158,7 +159,12 @@ value, decision, and rank remain separate immutable snapshots. PASS and AVOID
 retain all upstream evidence. After a successful Phase 11 commit, execution
 encounters unregistered `PDF_REPORT` and
 raises the safe blocked condition while the run remains resumable. Repeated
-resume does not rerun completed upstream phases.
+resume does not rerun completed upstream phases. Phase 12 reuses the accepted
+ReportLab presentation system with exact v13 semantics; Phase 13 selectively
+ports the deterministic SVG presentation system. Phase 14 reconciles exact
+artifacts and analytics without modifying them. Before an explicit operator
+decision exists, Phase 15 pauses without starting or failing an attempt. An
+immutable APPROVE or REJECT completes Human Review, but no publication follows.
 
 Phase 4 uses retained-evidence acquisition: The Odds API is required for a
 nonempty slate, NWS is primary weather evidence, and optional OpenWeather is a
