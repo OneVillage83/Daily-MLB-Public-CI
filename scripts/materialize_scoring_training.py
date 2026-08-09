@@ -144,7 +144,12 @@ def _compact_summary(
     coverage.update(
         {
             "fully_observed_feature_count": sum(
-                value == 0 for value in missing_counts
+                observed > 0 and missing == 0
+                for observed, missing in zip(
+                    observed_counts,
+                    missing_counts,
+                    strict=True,
+                )
             ),
             "never_observed_feature_count": sum(
                 value == 0 for value in observed_counts
