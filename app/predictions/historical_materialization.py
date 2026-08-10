@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import cast
 
 from app.daily_slate.contracts import canonical_sha256
 from app.database import Database
@@ -569,7 +570,7 @@ def load_historical_scoring_dataset(
                         feature.get("feature_name"),
                         "feature_name",
                     ),
-                    value=feature.get("value"),
+                    value=cast(float | None, feature.get("value")),
                 )
             )
         rows.append(

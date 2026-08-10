@@ -10,6 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.predictions.historical_pit_capabilities import (  # noqa: E402
+    HistoricalPITCapabilityError,
+    inventory_historical_pit_reconstruction_capabilities,
+)
+from app.predictions.historical_pit_field_coverage import (  # noqa: E402
+    HistoricalPITFieldCoverageError,
+    inventory_historical_pit_field_coverage,
+)
 from app.predictions.historical_pit_sources import (  # noqa: E402
     HistoricalPITSourceError,
     inventory_historical_pit_source,
@@ -41,6 +49,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--database", type=Path, required=True)
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--capabilities",
+        action="store_true",
+        help=(
+            "inspect historical team/player/lineup/play coverage needed for "
+            "point-in-time feature reconstruction"
+        ),
+    )
+    mode.add_argument(
+        "--field-coverage",
+        action="store_true",
+        help=(
+            "inventory deterministic nested Retrosheet team/player field coverage "
+            "without emitting retained source values"
+        ),
+    )
     return parser
 
 
@@ -61,14 +86,33 @@ def _emit(stream: TextIO, payload: dict[str, object]) -> None:
 
 
 def _run(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
-    inventory = inventory_historical_pit_source(
-        args.database,
-        start_date=args.start_date,
-        end_date=args.end_date,
-    )
-    payload = inventory.summary_as_dict()
+    if args.field_coverage:
+        field_inventory = inventory_historical_pit_field_coverage(
+            args.database,
+            start_date=args.start_date,
+            end_date=args.end_date,
+        )
+        payload = field_inventory.summary_as_dict()
+        mode = "field_coverage"
+    elif args.capabilities:
+        capability_inventory = inventory_historical_pit_reconstruction_capabilities(
+            args.database,
+            start_date=args.start_date,
+            end_date=args.end_date,
+        )
+        payload = capability_inventory.summary_as_dict()
+        mode = "reconstruction_capabilities"
+    else:
+        source_inventory = inventory_historical_pit_source(
+            args.database,
+            start_date=args.start_date,
+            end_date=args.end_date,
+        )
+        payload = source_inventory.summary_as_dict()
+        mode = "source_inventory"
     payload.update(
         {
+            "mode": mode,
             "source_database": str(Path(args.database).expanduser().resolve()),
             "status": "inventoried",
         }
@@ -87,7 +131,11 @@ def main(
         exit_code, payload = _run(args)
         _emit(stdout, payload)
         return exit_code
-    except HistoricalPITSourceError as exc:
+    except (
+        HistoricalPITSourceError,
+        HistoricalPITCapabilityError,
+        HistoricalPITFieldCoverageError,
+    ) as exc:
         _emit(
             stderr,
             {
