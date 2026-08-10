@@ -62,6 +62,17 @@ from app.rankings.run_line import (
     RunLineReferenceRankingsV1,
     build_run_line_reference_rankings,
 )
+from app.rankings.team_totals import (
+    TEAM_TOTAL_RANKING_ENTRY_CONTRACT_VERSION,
+    TEAM_TOTAL_RANKING_GAME_CONTRACT_VERSION,
+    TEAM_TOTAL_RANKINGS_CONTRACT_VERSION,
+    TEAM_TOTAL_REFERENCE_RANKING_POLICY_VERSION,
+    TeamTotalRankingEntryV1,
+    TeamTotalRankingGameV1,
+    TeamTotalsRankingsError,
+    TeamTotalsReferenceRankingsV1,
+    build_team_totals_reference_rankings,
+)
 from app.rankings.repository import RankingsPersistenceConflict, RankingsRepository
 
 __all__ = [
@@ -94,8 +105,17 @@ __all__ = [
     "RankingsPolicyError",
     "RankingsPolicyV1",
     "RankingsV1",
+    "TEAM_TOTAL_RANKING_ENTRY_CONTRACT_VERSION",
+    "TEAM_TOTAL_RANKING_GAME_CONTRACT_VERSION",
+    "TEAM_TOTAL_RANKINGS_CONTRACT_VERSION",
+    "TEAM_TOTAL_REFERENCE_RANKING_POLICY_VERSION",
+    "TeamTotalRankingEntryV1",
+    "TeamTotalRankingGameV1",
+    "TeamTotalsRankingsError",
+    "TeamTotalsReferenceRankingsV1",
     "build_first_five_reference_rankings",
     "build_game_total_reference_rankings",
+    "build_team_totals_reference_rankings",
     "rank_recommendations",
     "rankings_artifact_relpath",
     "write_rankings_artifact",
