@@ -76,6 +76,17 @@ from app.recommendation_gate.run_line import (
     RunLineGateOutcomeV1,
     evaluate_run_line_reference_gate,
 )
+from app.recommendation_gate.team_totals import (
+    TEAM_TOTAL_GATE_GAME_CONTRACT_VERSION,
+    TEAM_TOTAL_GATE_OUTCOME_CONTRACT_VERSION,
+    TEAM_TOTAL_POLICY_PENDING_REASON,
+    TEAM_TOTAL_REFERENCE_GATE_POLICY_VERSION,
+    TEAM_TOTAL_REFERENCE_GATE_REASON,
+    TeamTotalGateOutcomeV1,
+    TeamTotalsGateError,
+    TeamTotalsGateGameV1,
+    evaluate_team_totals_reference_gate,
+)
 from app.recommendation_gate.repository import RecommendationGatePersistenceConflict, RecommendationGateRepository
 
 __all__ = [
@@ -109,12 +120,21 @@ __all__ = [
     "RecommendationPolicyV1",
     "RecommendationReason",
     "RecommendationV1",
+    "TEAM_TOTAL_GATE_GAME_CONTRACT_VERSION",
+    "TEAM_TOTAL_GATE_OUTCOME_CONTRACT_VERSION",
+    "TEAM_TOTAL_POLICY_PENDING_REASON",
+    "TEAM_TOTAL_REFERENCE_GATE_POLICY_VERSION",
+    "TEAM_TOTAL_REFERENCE_GATE_REASON",
+    "TeamTotalGateOutcomeV1",
+    "TeamTotalsGateError",
+    "TeamTotalsGateGameV1",
     "confidence_band",
     "evaluate_first_five_reference_gate",
     "evaluate_game_total_reference_gate",
     "evaluate_recommendation",
     "evaluate_recommendation_game",
     "evaluate_recommendation_gate",
+    "evaluate_team_totals_reference_gate",
     "evidence_confidence_score",
     "recommendation_gate_artifact_relpath",
     "write_recommendation_gate_artifact",
