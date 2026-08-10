@@ -207,11 +207,12 @@ def test_inventory_profiles_provider_final_pitch_feature_and_watermark_coverage(
     assert inventory.provider_season_coverage[0].scheduled_start_count == 0
     assert inventory.provider_season_coverage[1].scheduled_start_count == 1
     assert inventory.statcast_pitch_coverage[0].pitch_identity_count == 2
-    assert (
+    complete_through = (
         inventory.completeness_watermarks[0]
-        .contiguous_regular_season_complete_through_date.isoformat()
-        == "2025-09-28"
+        .contiguous_regular_season_complete_through_date
     )
+    assert complete_through is not None
+    assert complete_through.isoformat() == "2025-09-28"
     assert len(inventory.checksum) == 64
 
 

@@ -258,10 +258,10 @@ def materialize_scoring_training_data(
     if not selected_features or any(feature not in FEATURE_NAME_SET_V1 for feature in selected_features):
         raise ScoringTrainingMaterializationError("feature_names must contain supported ModelFeatureSet V1 names")
     score_map: dict[str, FinalGameScoreV1] = {}
-    for score in final_scores:
-        if score.source_game_id in score_map:
+    for final_score in final_scores:
+        if final_score.source_game_id in score_map:
             raise ScoringTrainingMaterializationError("duplicate final-score source_game_id")
-        score_map[score.source_game_id] = score
+        score_map[final_score.source_game_id] = final_score
     rows_with_lineage: list[tuple[HistoricalScoringRowV1, TrainingRowLineageV1]] = []
     exclusions: list[TrainingMaterializationExclusionV1] = []
     seen_feature_games: set[str] = set()

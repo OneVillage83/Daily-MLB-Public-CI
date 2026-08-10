@@ -15,6 +15,7 @@ from app.model_feature_set.repository import ModelFeatureSetRepository
 from app.predictions.historical_sources import (
     HistoricalModelFeatureSetInventoryV1,
     HistoricalTrainingSourceError,
+    PersistedModelFeatureSetV1,
     load_final_game_score_inventory,
     load_historical_model_feature_sets,
 )
@@ -231,7 +232,7 @@ def _inventory(snapshot: SimpleNamespace) -> HistoricalModelFeatureSetInventoryV
     return HistoricalModelFeatureSetInventoryV1(
         start_date=date(2024, 6, 1),
         end_date=date(2024, 6, 1),
-        snapshots=(snapshot,),
+        snapshots=(cast(PersistedModelFeatureSetV1, snapshot),),
     )
 
 

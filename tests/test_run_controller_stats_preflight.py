@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
+from typing import cast
 
 from app.config import Settings
 from app.stats.auto_daily import AutoDailyStatsGapError
@@ -49,7 +51,7 @@ def test_start_runs_stats_preflight_before_pipeline_creation(
     assert exit_code == run_controller.EXIT_SUCCESS
     assert len(observed) == 1
     assert observed[0]["database_path"] == configured.database_path
-    assert observed[0]["target_date"].isoformat() == "2026-08-09"
+    assert cast(date, observed[0]["target_date"]).isoformat() == "2026-08-09"
     assert observed[0]["raw_root"] == configured.artifact_dir / "stats_raw"
     assert observed[0]["report_path"] == (
         configured.artifact_dir / "stats_acquisition_report.json"
