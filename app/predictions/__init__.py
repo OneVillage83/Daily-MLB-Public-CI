@@ -88,6 +88,15 @@ from app.predictions.run_line import (
     build_run_line_prediction,
     full_game_run_margin_distribution,
 )
+from app.predictions.team_total import (
+    TEAM_TOTAL_CALCULATION_VERSION,
+    TEAM_TOTAL_PREDICTION_CONTRACT_VERSION,
+    TEAM_TOTAL_PROJECTION_CONTRACT_VERSION,
+    TeamTotalPredictionV1,
+    TeamTotalProjectionV1,
+    build_team_total_predictions,
+    team_run_distribution,
+)
 from app.predictions.runtime import (
     REFERENCE_HEURISTIC_POISSON_V1,
     predict_game,
@@ -183,6 +192,11 @@ __all__ = [
     "RunDistributionV1",
     "RunLinePredictionV1",
     "RunLineProjectionV1",
+    "TEAM_TOTAL_CALCULATION_VERSION",
+    "TEAM_TOTAL_PREDICTION_CONTRACT_VERSION",
+    "TEAM_TOTAL_PROJECTION_CONTRACT_VERSION",
+    "TeamTotalPredictionV1",
+    "TeamTotalProjectionV1",
     "ThresholdProjectionV1",
     "TotalLineProjectionV1",
     "build_first_five_moneyline_prediction",
@@ -191,6 +205,7 @@ __all__ = [
     "build_game_total_prediction",
     "build_nrfi_yrfi_prediction",
     "build_run_line_prediction",
+    "build_team_total_predictions",
     "capabilities_for_version",
     "capability_for_family",
     "first_five_run_margin_distribution",
@@ -202,6 +217,7 @@ __all__ = [
     "predict_game",
     "predict_model_feature_set",
     "predictions_artifact_relpath",
+    "team_run_distribution",
     "total_line_projection",
     "write_predictions_artifact",
 ]
