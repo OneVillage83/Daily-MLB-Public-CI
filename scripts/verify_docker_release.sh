@@ -200,7 +200,7 @@ assert not Path("/app/requirements-stats.txt").exists()'
 capture_schema() {
   local target="$1"
   docker exec "$CONTAINER" python -c \
-    'import json; from app.config import settings; from app.database import Database; db=Database(settings.database_path); print(json.dumps({"schema": db.schema_info(), "integrity": db.integrity_check()}, sort_keys=True))' \
+    'import json; from app.config import settings; from app.database import Database; from app.migrations import CURRENT_SCHEMA_VERSION; db=Database(settings.database_path); print(json.dumps({"schema": db.schema_info(), "integrity": db.integrity_check(), "expected_version": CURRENT_SCHEMA_VERSION}, sort_keys=True))' \
     >"$target"
   python3 - "$target" <<'PY'
 import json
@@ -209,8 +209,8 @@ import sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 schema = payload["schema"]
 integrity = payload["integrity"]
-assert schema["version"] == 14
-assert schema["user_version"] == 14
+assert schema["version"] == payload["expected_version"]
+assert schema["user_version"] == payload["expected_version"]
 assert schema["fingerprint"] == schema["expected_fingerprint"]
 assert integrity["ok"] is True
 assert integrity["integrity_check"] == ["ok"]

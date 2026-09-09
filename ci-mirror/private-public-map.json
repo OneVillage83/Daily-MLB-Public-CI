@@ -1,0 +1,75 @@
+{
+  "contract_version": "DSE_MLB_PUBLIC_CI_MIRROR_MAP_V1",
+  "created_at": "2026-09-09T01:05:03-07:00",
+  "private": {
+    "repository": "OneVillage83/Daily-MLB",
+    "branch": "codex/production-execution-anchor-20260907",
+    "commit_sha": "074fbe1fc4d2d4f3adf293c0335f924954021739"
+  },
+  "public": {
+    "repository": "OneVillage83/Daily-MLB-Public-CI",
+    "branch": "mirror/private-074fbe1-20260909",
+    "base_commit_sha": "c87603ff3f682d8414b646ff990e25bba1fb2251",
+    "content_commit_sha": "493648e5cfafa3f51a5599f1538ab72b66407545"
+  },
+  "mirrored_paths": [
+    "Dockerfile",
+    "app/artifacts.py",
+    "docker-compose.yml",
+    "docker-entrypoint.sh",
+    "pyproject.toml",
+    "requirements-dev.in",
+    "requirements-dev.txt",
+    "requirements-stats.in",
+    "requirements-stats.txt",
+    "requirements.in",
+    "requirements.txt",
+    "scripts/check_pybaseball_compatibility.py",
+    "scripts/scan_repository_secrets.py",
+    "scripts/scan_stats_evidence.py",
+    "scripts/verify_docker_release.sh",
+    "tests/test_artifacts.py",
+    "tests/test_docker_release_contract.py",
+    "tests/test_stats_evidence_secret_scan.py"
+  ],
+  "content_manifest": {
+    "canonical_format": "UTF-8 lines sorted as path, private Git blob SHA-1, public Git blob SHA-1 separated by TAB and terminated by LF",
+    "entry_count": 18,
+    "sha256": "831574ad8875ac1f18ac2d219691b07865f62592afef8f46808383a0f1ad9ed4",
+    "all_blob_ids_equal": true
+  },
+  "public_only_control_files": [
+    ".github/workflows/tdl01-sanitized-exact-content.yml",
+    "AGENTS.md",
+    "README.md",
+    "ci-mirror/private-public-map.json"
+  ],
+  "excluded_paths": [
+    "artifacts/**",
+    "config/gate2_retained_evidence.v1.json",
+    "tests/fixtures/gate2-confirmatory-retained-v1.zip",
+    "scripts/restore_gate2_evidence.py",
+    "tests/conftest.py",
+    "tests/test_restore_gate2_evidence.py",
+    "tests/test_sealed_evidence_checkout.py",
+    "private-only A1/A2/MQ/Gate2 implementation, configuration, tests, and architecture/scientific documents",
+    "private databases, logs, environment files, credentials, provider payloads, generated evidence, and workstation paths",
+    "all private-source files not named in mirrored_paths"
+  ],
+  "sanitization_notes": [
+    "The retained Gate2 evidence ZIP and its manifest are private and were not copied.",
+    "Private A1/A2 implementation is prohibited from the public mirror by current private authority and was not copied.",
+    "The public application and test baseline remains the previously published pre-A1 commit; it is not tree-equivalent to the private source.",
+    "The public Docker job exercises the established public baseline with an exact private Dockerfile, runtime lock, entrypoint, compose file, and verifier, but cannot certify the intentionally excluded private application tree.",
+    "The exact-content workflow limits its private-equivalence claim to mirrored_paths. The existing public quality workflow may test additional historical public files without claiming private equivalence."
+  ],
+  "workflow": {
+    "names": [
+      "quality",
+      "tdl01-sanitized-exact-content"
+    ],
+    "run_ids": [],
+    "conclusion": null,
+    "all_declared_steps_executed": false
+  }
+}

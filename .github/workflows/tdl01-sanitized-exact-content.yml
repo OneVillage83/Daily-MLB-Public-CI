@@ -1,0 +1,77 @@
+name: tdl01-sanitized-exact-content
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-public-safe-surface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Scan sanitized public tree
+        run: python scripts/scan_repository_secrets.py --skip-env
+      - name: Install exact private development lock
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+      - name: Exact mirrored contract and containment tests
+        run: >-
+          python -m pytest -q
+          tests/test_artifacts.py
+          tests/test_stats_evidence_secret_scan.py
+          tests/test_docker_release_contract.py
+      - name: Ruff exact mirrored surface
+        run: >-
+          python -m ruff check
+          app/artifacts.py
+          scripts/check_pybaseball_compatibility.py
+          scripts/scan_repository_secrets.py
+          scripts/scan_stats_evidence.py
+          tests/test_artifacts.py
+          tests/test_stats_evidence_secret_scan.py
+          tests/test_docker_release_contract.py
+      - name: Mypy exact mirrored surface
+        run: >-
+          python -m mypy --no-incremental
+          app/artifacts.py
+          scripts/check_pybaseball_compatibility.py
+          scripts/scan_repository_secrets.py
+          scripts/scan_stats_evidence.py
+          tests/test_artifacts.py
+          tests/test_stats_evidence_secret_scan.py
+          tests/test_docker_release_contract.py
+      - name: Development dependency consistency
+        run: python -m pip check
+      - name: Runtime vulnerability audit
+        run: python -m pip_audit --require-hashes -r requirements.txt --progress-spinner off
+      - name: Development locked-install dry run
+        run: python -m pip install --dry-run --ignore-installed --require-hashes -r requirements-dev.txt
+
+  exact-stats-toolchain:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-stats.txt
+      - name: Install exact private Stats lock
+        run: python -m pip install --require-hashes -r requirements-stats.txt
+      - name: Exact offline pybaseball compatibility
+        run: python scripts/check_pybaseball_compatibility.py
+      - name: Stats dependency consistency
+        run: python -m pip check
+      - name: Stats vulnerability audit
+        run: python -m pip_audit --require-hashes -r requirements-stats.txt --progress-spinner off
+      - name: Stats locked-install dry run
+        run: python -m pip install --dry-run --ignore-installed --require-hashes -r requirements-stats.txt

@@ -3,7 +3,9 @@
 
 mypy==2.2.0
 pip-audit==2.10.1
-pip-tools==7.5.3
+# Pin the compiler pair compatible with the pip security fix.
+pip==26.2
+pip-tools==7.6.1
 # build 1.5.1 is yanked; keep development lock resolution on a supported build.
 build!=1.5.1
 pytest==9.1.1
