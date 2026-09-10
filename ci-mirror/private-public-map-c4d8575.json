@@ -1,0 +1,77 @@
+{
+  "contract_version": "DSE_MLB_PUBLIC_CI_MIRROR_MAP_V1",
+  "created_at": "2026-09-09T23:48:26-07:00",
+  "private": {
+    "repository": "OneVillage83/Daily-MLB",
+    "branch": "codex/ddc6-mlb-consumer-20260909",
+    "authoritative_commit_sha": "c4d8575401114a4f5f5ec7923a48e56b96fa4097",
+    "implementation_commit_sha": "61944cc2d4c1974c6b3a92a6d790cf9b5b128e80",
+    "tested_tree_commit_sha": "4a7c182716a0d2140021a1310e1adb0224a823d4"
+  },
+  "public": {
+    "repository": "OneVillage83/Daily-MLB-Public-CI",
+    "branch": "mirror/private-c4d8575-20260909",
+    "inherited_surface_commit_sha": "875ae18830c24bc1e699f26024fcdac3daf1ff25",
+    "tested_mirror_commit_sha": "recorded in the post-run public handoff and private evidence ledger"
+  },
+  "mirrored_paths": [
+    "app/artifacts.py",
+    "docker-compose.yml",
+    "docker-entrypoint.sh",
+    "pyproject.toml",
+    "requirements-dev.in",
+    "requirements-dev.txt",
+    "requirements-stats.in",
+    "requirements-stats.txt",
+    "requirements.in",
+    "requirements.txt",
+    "scripts/check_pybaseball_compatibility.py",
+    "scripts/scan_repository_secrets.py",
+    "scripts/scan_stats_evidence.py",
+    "scripts/verify_docker_release.sh",
+    "tests/test_artifacts.py",
+    "tests/test_docker_release_contract.py",
+    "tests/test_stats_evidence_secret_scan.py"
+  ],
+  "content_manifest": {
+    "canonical_format": "UTF-8 lines sorted as path, private Git blob SHA-1, public Git blob SHA-1 separated by TAB and terminated by LF",
+    "entry_count": 17,
+    "sha256": "941f78a42081b00933cd2d07499e659ca1cf2f18ef949d230223361f24b44f9f",
+    "all_blob_ids_equal": true
+  },
+  "public_only_control_files": [
+    ".github/workflows/tdl01-sanitized-exact-content.yml",
+    "AGENTS.md",
+    "README.md",
+    "ci-mirror/private-public-map.json",
+    "ci-mirror/private-public-map-c4d8575.json",
+    "docs/TDL01_PUBLIC_CI_HANDOFF_20260909.md",
+    "docs/TDL03E_PUBLIC_CI_HANDOFF_20260909.md"
+  ],
+  "excluded_paths": [
+    "Dockerfile (current private blob differs and is not authorized for this mirror)",
+    "docker-compose.manual.yml",
+    "artifacts/**",
+    "config/**",
+    "tests/fixtures/** private/provider/retained evidence",
+    "private A1/A2/V17/DDC consumer implementation, tests, migrations, scripts, and architecture/scientific documents",
+    "private databases, logs, environment files, credentials, provider payloads, generated evidence, producer packages, and workstation paths",
+    "all private-source files not named in mirrored_paths"
+  ],
+  "sanitization_notes": [
+    "All 17 sanctioned paths were already present at the inherited public commit with Git blob IDs equal to the private authoritative head; no private source file required copying.",
+    "The current private Dockerfile, V17 application tree, DDC consumer code, forecast-window/evaluation persistence, fixtures, and evidence remain excluded.",
+    "The public application baseline remains the previously disclosed pre-A1 tree and is not tree-equivalent to the private source.",
+    "The public Docker job can validate only the sanitized public baseline. It cannot certify the excluded private Dockerfile, V17 runtime, DDC consumer, or production application tree.",
+    "Workflow results apply to the tested public commit. The exact private-to-public commit mapping and run evidence are appended after CI without changing executable-source identity."
+  ],
+  "workflow": {
+    "names": [
+      "quality",
+      "tdl01-sanitized-exact-content"
+    ],
+    "run_ids": [],
+    "conclusion": null,
+    "all_declared_steps_executed": false
+  }
+}
