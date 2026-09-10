@@ -32,7 +32,33 @@ check only for the sanitized public baseline. It does not exercise or certify th
 excluded private Dockerfile, schema V17, DDC consumer, forecast-window/evaluation
 persistence, manual runtime, or publication pipeline.
 
-The exact tested public SHA, run and job IDs, conclusions, counts, and executed-step
-evidence will be appended after GitHub Actions completes. Scientific permissions
-remain `0 AVAILABLE / 5 BLOCKED / 22 MISSING`; PIT, model promotion, registry,
+The exact tested public SHA is
+`e8110eb076eea3feb091831661e5888544899053`. Both pull-request workflows completed
+successfully and every declared step executed:
+
+| Workflow/run | Job ID | Result |
+| --- | --- | --- |
+| `quality` / `34447058915` | `102774044277` Python | 1,844 passed, 2 skipped, 1 warning; secret scan, Ruff, mypy 375 files, consistency, runtime audit, and locked dry run passed |
+| `quality` / `34447058915` | `102774044334` Stats | 280 focused passed; 1,846 full passed, 1 warning; offline compatibility with zero network requests, consistency, audit, and locked dry run passed |
+| `quality` / `34447058915` | `102774044053` Linux security | 6 passed |
+| `quality` / `34447058915` | `102774044269` Docker runtime | Build/runtime/schema/integrity verification passed for the sanitized public baseline |
+| `tdl01-sanitized-exact-content` / `34447058918` | `102774044038` mapped surface | 77 passed; secret scan, Ruff, mypy 7 files, consistency, runtime audit, and locked dry run passed |
+| `tdl01-sanitized-exact-content` / `34447058918` | `102774044363` exact Stats toolchain | Locked install, offline compatibility with zero network requests, consistency, audit, and locked dry run passed |
+
+Docker artifact `10140060748`,
+`docker-release-verification-e8110eb076eea3feb091831661e5888544899053`,
+contains `verification.json` with SHA-256
+`ebcdaff4b762cd9b6fb76d8b99657690865fa181bab572c2e3a6380a6d9e27a0`.
+It records matching checkout/commit/image revision, healthy UID 999 execution,
+read-only application code, persistent database and artifacts, schema V14 checksum
+and fingerprint agreement, SQLite integrity `ok`, zero foreign-key violations,
+zero collection runs, no Stats packages in the collection image, and a passing
+synthetic credential-log scan.
+
+These runs are mapped Level-B supplemental evidence for the 17 exact blobs and
+the already-public pre-A1 baseline. They do not certify private TDL-03E source,
+private schema V17, the changed private Dockerfile, or the private DDC consumer and
+evaluation/persistence path. Private exact-head hosted execution remains required
+for release certification. Scientific permissions remain
+`0 AVAILABLE / 5 BLOCKED / 22 MISSING`; PIT, model promotion, registry,
 Recommendation Gate, and production architecture are unchanged.

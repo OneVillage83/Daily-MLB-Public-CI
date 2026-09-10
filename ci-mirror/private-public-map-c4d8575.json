@@ -12,7 +12,7 @@
     "repository": "OneVillage83/Daily-MLB-Public-CI",
     "branch": "mirror/private-c4d8575-20260909",
     "inherited_surface_commit_sha": "875ae18830c24bc1e699f26024fcdac3daf1ff25",
-    "tested_mirror_commit_sha": "recorded in the post-run public handoff and private evidence ledger"
+    "tested_mirror_commit_sha": "e8110eb076eea3feb091831661e5888544899053"
   },
   "mirrored_paths": [
     "app/artifacts.py",
@@ -70,8 +70,25 @@
       "quality",
       "tdl01-sanitized-exact-content"
     ],
-    "run_ids": [],
-    "conclusion": null,
-    "all_declared_steps_executed": false
+    "run_ids": [
+      34447058915,
+      34447058918
+    ],
+    "job_ids": [
+      102774044053,
+      102774044269,
+      102774044277,
+      102774044334,
+      102774044038,
+      102774044363
+    ],
+    "conclusion": "success",
+    "all_declared_steps_executed": true,
+    "docker_artifact": {
+      "artifact_id": 10140060748,
+      "name": "docker-release-verification-e8110eb076eea3feb091831661e5888544899053",
+      "verification_json_sha256": "ebcdaff4b762cd9b6fb76d8b99657690865fa181bab572c2e3a6380a6d9e27a0",
+      "scope": "sanitized pre-A1 public baseline only"
+    }
   }
 }
