@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import re
+import json
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 
 DOCKERFILE = Path("Dockerfile")
@@ -134,8 +139,9 @@ def test_docker_verifier_covers_release_boundaries_without_collection() -> None:
         'paths == set(expected_methods)',
         "schema-before.json",
         "schema-after.json",
-        'schema["version"] == 14',
-        'schema["user_version"] == 14',
+        '"expected_version": CURRENT_SCHEMA_VERSION',
+        'schema["version"] == payload["expected_version"]',
+        'schema["user_version"] == payload["expected_version"]',
         "integrity_check",
         "foreign_key_violations",
         "docker restart",
@@ -153,6 +159,24 @@ def test_docker_verifier_covers_release_boundaries_without_collection() -> None:
 
     assert source.count('"/jobs/daily-collection"') == 1
     assert "--request POST" not in source
+
+
+@pytest.mark.parametrize("version,user_version,valid", [(16, 16, True), (14, 16, False), (16, 14, False)])
+def test_docker_schema_verifier_checks_actual_versions(
+    tmp_path: Path, version: int, user_version: int, valid: bool
+) -> None:
+    source = VERIFIER.read_text(encoding="utf-8")
+    capture = source.split("capture_schema() {", 1)[1]
+    checker = capture.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+    path = tmp_path / "schema.json"
+    path.write_text(json.dumps({
+        "expected_version": 16,
+        "schema": {"version": version, "user_version": user_version,
+                   "fingerprint": "fixture", "expected_fingerprint": "fixture"},
+        "integrity": {"ok": True, "integrity_check": ["ok"], "foreign_key_violations": []},
+    }), encoding="utf-8")
+    result = subprocess.run([sys.executable, "-c", checker, str(path)], capture_output=True, check=False)
+    assert (result.returncode == 0) is valid
 
 
 def test_stats_dependency_profile_is_excluded_from_normal_image_context() -> None:
