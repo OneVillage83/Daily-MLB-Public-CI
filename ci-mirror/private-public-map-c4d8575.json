@@ -37,6 +37,7 @@
     "canonical_format": "UTF-8 lines sorted as path, private Git blob SHA-1, public Git blob SHA-1 separated by TAB and terminated by LF",
     "entry_count": 17,
     "sha256": "941f78a42081b00933cd2d07499e659ca1cf2f18ef949d230223361f24b44f9f",
+    "synthetic_git_tree_sha1": "3518d5a426ce3f34b8d92a44dd3f38ead10da32a",
     "all_blob_ids_equal": true
   },
   "public_only_control_files": [

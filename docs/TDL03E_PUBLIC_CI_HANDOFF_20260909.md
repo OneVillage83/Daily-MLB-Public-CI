@@ -16,6 +16,8 @@ Every path has the same Git blob ID in the private authoritative head and inheri
 public commit `875ae18830c24bc1e699f26024fcdac3daf1ff25`. The canonical 17-entry
 manifest SHA-256 is
 `941f78a42081b00933cd2d07499e659ca1cf2f18ef949d230223361f24b44f9f`.
+Both sides produce synthetic 17-path Git tree
+`3518d5a426ce3f34b8d92a44dd3f38ead10da32a`.
 No private source file needed copying because the sanctioned blobs were already
 identical.
 
